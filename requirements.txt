@@ -9,8 +9,5 @@ pylibfst>=0.2.1
 # and portable to the air-gapped network. Single static-analysis backend.
 pyslang>=11.0.0
 
-# Surfer WCP client transport (websocket)
-websockets>=12.0
-
 # System binary (not a pip dep): vcd2fst (GTKWave) for VCD->FST conversion.
 # Bundled in the offline runtime package for air-gapped deployment.

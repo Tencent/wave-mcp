@@ -2,7 +2,7 @@
 
 Exposes ~40 tools that mirror the Cadence Indago / Verisium Debug MCP tool names
 so existing prompts / skills keep working, but backed entirely by open-source
-sources (FST + xrun.log + Surfer WCP + RTL static analysis). No license required;
+sources (FST + xrun.log + RTL static analysis). No license required;
 any number of sessions can run concurrently.
 
 Deployment modes:
@@ -22,7 +22,6 @@ from mcp.server.fastmcp import FastMCP
 
 from . import convert, pipeline, timeutil
 from .session import SessionManager
-from .sources.wcp_client import WcpError
 
 
 _TEXT_MAX_LINES = 400  # cap the human text; structuredContent always has it all
@@ -141,7 +140,7 @@ def launch(session_path: str, session_id: Optional[str] = None) -> dict[str, Any
     """Open a debug session from a session directory or session.json manifest.
 
     Open-source replacement for Indago ``launch`` — opens the FST waveform, the
-    xrun.log, the RTL netlist maps (if built) and prepares the Surfer WCP client.
+    xrun.log and the RTL netlist maps (if built).
     Does NOT consume any license and supports unlimited concurrent sessions.
     """
     sid = SESSIONS.open(session_path, session_id)
@@ -157,7 +156,7 @@ def connect(session_path: str, session_id: Optional[str] = None) -> dict[str, An
 
 @mcp.tool()
 def disconnect(session_id: Optional[str] = None) -> dict[str, Any]:
-    """Close a session and release its resources (FST handle, WCP socket)."""
+    """Close a session and release its resources (FST handle)."""
     ok = SESSIONS.close(session_id)
     return {"status": "disconnected" if ok else "no-such-session"}
 
@@ -623,132 +622,6 @@ def get_modules_in_file(full_file_path: str, session_id: Optional[str] = None) -
     """Get all modules declared in a given file."""
     mods = _sess(session_id).rtl.modules_in_file(full_file_path)
     return {"count": len(mods), "modules": mods}
-
-
-# =============================================================================
-# 9. Waveform viewer operation (Surfer WCP)
-# =============================================================================
-def _wcp(session_id):
-    s = _sess(session_id)
-    if not s.wcp.connected:
-        s.wcp.connect()
-    return s.wcp
-
-
-@mcp.tool()
-def send_to_wave(full_paths: List[str], in_group: Optional[str] = None,
-                 session_id: Optional[str] = None) -> dict[str, Any]:
-    """Send signals/scopes to the Surfer waveform viewer."""
-    try:
-        resp = _wcp(session_id).add_variables(full_paths)
-        return {"status": "ok", "response": resp}
-    except WcpError as exc:
-        return {"status": "no-viewer", "error": str(exc)}
-
-
-@mcp.tool()
-def get_all_waveform_signals(session_id: Optional[str] = None) -> dict[str, Any]:
-    """Get all items currently displayed in the Surfer waveform."""
-    try:
-        return {"status": "ok", "items": _wcp(session_id).get_displayed_items()}
-    except WcpError as exc:
-        return {"status": "no-viewer", "error": str(exc)}
-
-
-@mcp.tool()
-def get_selected_wf_signals(session_id: Optional[str] = None) -> dict[str, Any]:
-    """Get items currently selected in the Surfer waveform."""
-    try:
-        return {"status": "ok", "items": _wcp(session_id).get_selected_items()}
-    except WcpError as exc:
-        return {"status": "no-viewer", "error": str(exc)}
-
-
-@mcp.tool()
-def delete_all_wf_signals(session_id: Optional[str] = None) -> dict[str, Any]:
-    """Clear all signals from the Surfer waveform."""
-    try:
-        return {"status": "ok", "response": _wcp(session_id).clear()}
-    except WcpError as exc:
-        return {"status": "no-viewer", "error": str(exc)}
-
-
-@mcp.tool()
-def create_group(group: str, in_group: Optional[str] = None,
-                 session_id: Optional[str] = None) -> dict[str, Any]:
-    """Create a signal group in the Surfer waveform."""
-    try:
-        return {"status": "ok",
-                "response": _wcp(session_id).command("add_group", name=group, parent=in_group)}
-    except WcpError as exc:
-        return {"status": "no-viewer", "error": str(exc)}
-
-
-@mcp.tool()
-def save_waveform(file_path: str, should_append: bool = False,
-                  session_id: Optional[str] = None) -> dict[str, Any]:
-    """Save the current waveform state to a file (.wsf-style state file)."""
-    try:
-        return {"status": "ok",
-                "response": _wcp(session_id).command("save_state", path=file_path,
-                                                     append=should_append)}
-    except WcpError as exc:
-        return {"status": "no-viewer", "error": str(exc)}
-
-
-# =============================================================================
-# 10. Waveform navigation (Surfer WCP)
-# =============================================================================
-def _to_seconds(s, time: str) -> float:
-    if time in ("min", ""):
-        return timeutil.fst_units_to_seconds(s.fst.start_time, s.fst.timescale_exp)
-    if time == "max":
-        return timeutil.fst_units_to_seconds(s.fst.end_time, s.fst.timescale_exp)
-    return timeutil.parse_time_to_seconds(time)
-
-
-@mcp.tool()
-def scroll_waveform(time: str, session_id: Optional[str] = None) -> dict[str, Any]:
-    """Scroll the waveform view to center on a time point."""
-    s = _sess(session_id)
-    try:
-        return {"status": "ok", "response": _wcp(session_id).goto_time(_to_seconds(s, time))}
-    except WcpError as exc:
-        return {"status": "no-viewer", "error": str(exc)}
-
-
-@mcp.tool()
-def zoom_waveform(start_time: str, end_time: str,
-                  session_id: Optional[str] = None) -> dict[str, Any]:
-    """Zoom the waveform to a time range ("min"/"max" for full extent)."""
-    s = _sess(session_id)
-    try:
-        resp = _wcp(session_id).set_viewport(_to_seconds(s, start_time),
-                                             _to_seconds(s, end_time))
-        return {"status": "ok", "response": resp}
-    except WcpError as exc:
-        return {"status": "no-viewer", "error": str(exc)}
-
-
-@mcp.tool()
-def add_marker(name: str, time: str, color: str = "",
-               session_id: Optional[str] = None) -> dict[str, Any]:
-    """Add a named marker at a time point in the waveform."""
-    s = _sess(session_id)
-    try:
-        resp = _wcp(session_id).add_marker(_to_seconds(s, time), name, color)
-        return {"status": "ok", "response": resp}
-    except WcpError as exc:
-        return {"status": "no-viewer", "error": str(exc)}
-
-
-@mcp.tool()
-def get_waveform_markers(session_id: Optional[str] = None) -> dict[str, Any]:
-    """Get all markers and the current debug location from the waveform."""
-    try:
-        return {"status": "ok", "markers": _wcp(session_id).get_markers()}
-    except WcpError as exc:
-        return {"status": "no-viewer", "error": str(exc)}
 
 
 # =============================================================================

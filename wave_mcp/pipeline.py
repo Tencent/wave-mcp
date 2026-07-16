@@ -168,8 +168,7 @@ def build_manifest(out_dir: str, fst_path: str, *, top: str = "",
                    log_path: Optional[str] = None,
                    filelist: Optional[List[str]] = None,
                    filelist_path: Optional[str] = None,
-                   uhdm_db: Optional[str] = None, maps_path: Optional[str] = None,
-                   wcp_host: str = "127.0.0.1", wcp_port: int = 54321) -> str:
+                   uhdm_db: Optional[str] = None, maps_path: Optional[str] = None) -> str:
     """Write session.json binding all data sources + fingerprints. Returns path."""
     os.makedirs(out_dir, exist_ok=True)
     files = list(filelist or [])
@@ -184,7 +183,6 @@ def build_manifest(out_dir: str, fst_path: str, *, top: str = "",
         "uhdm_db": os.path.abspath(uhdm_db) if uhdm_db else None,
         "maps_path": os.path.abspath(maps_path) if maps_path else None,
         "filelist": [os.path.abspath(f) for f in files],
-        "wcp": {"host": wcp_host, "port": wcp_port},
         "fst_hash": _sha1(fst_path),
         "filelist_hash": filelist_hash,
     }

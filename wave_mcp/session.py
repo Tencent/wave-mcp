@@ -10,7 +10,6 @@ A *session* is one isolated debug context (one module / one user), described by 
       "uhdm_db": "netlist/design.uhdm",        # optional (stage 4)
       "maps_path": "netlist/maps.json",         # optional (stage 4)
       "filelist": ["rtl/a.sv", "rtl/b.sv"],     # or "filelist_path"
-      "wcp": {"host": "127.0.0.1", "port": 54321},
       "fst_hash": "...", "filelist_hash": "..."  # consistency fingerprints
     }
 
@@ -30,7 +29,6 @@ from .sources.coverage_source import CoverageSource
 from .sources.fst_source import FstSource
 from .sources.log_source import LogSource
 from .sources.rtl_source import RtlSource
-from .sources.wcp_client import WcpClient
 
 
 def _sha1_file(path: str, limit: int = 0) -> Optional[str]:
@@ -144,9 +142,6 @@ class Session:
         # assertions: reuse the sim log for failures + the coverage csv for status
         asrt_csv = _resolve(base_dir, manifest.get("assertion_csv")) or cov_csv
         self.assertions = AssertionSource(self.log_path, asrt_csv)
-        wcp_cfg = manifest.get("wcp") or {}
-        self.wcp = WcpClient(wcp_cfg.get("host", "127.0.0.1"),
-                             int(wcp_cfg.get("port", 54321)))
 
         self._check_consistency()
 
@@ -253,10 +248,7 @@ class Session:
         }
 
     def close(self):
-        try:
-            self.fst.close()
-        finally:
-            self.wcp.disconnect()
+        self.fst.close()
 
 
 def open_session(session_path: str) -> Session:

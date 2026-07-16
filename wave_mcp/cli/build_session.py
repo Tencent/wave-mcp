@@ -62,8 +62,6 @@ def main(argv=None):
     p.add_argument("--top", default="", help="top instance name")
     p.add_argument("--filelist", help="xrun filelist (.f) — same one used for sim")
     p.add_argument("--out", required=True, help="output session directory")
-    p.add_argument("--wcp-host", default="127.0.0.1")
-    p.add_argument("--wcp-port", type=int, default=54321)
     p.add_argument("--no-netlist", action="store_true",
                    help="skip building the pyslang netlist (disables categories 5/6)")
     args = p.parse_args(argv)
@@ -113,7 +111,6 @@ def main(argv=None):
         "log_path": os.path.abspath(args.log) if args.log else None,
         "maps_path": maps_path,
         "filelist": filelist_files,
-        "wcp": {"host": args.wcp_host, "port": args.wcp_port},
         "fst_hash": _sha1(fst),
         "filelist_hash": filelist_hash,
     }

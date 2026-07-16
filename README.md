@@ -1,6 +1,6 @@
 # wave-mcp — 基于 xrun 的开源 Indago MCP 替代方案
 
-去 License、无并发上限的 AI 辅助波形调试 MCP Server。用 **FST 波形 + xrun.log + pyslang RTL 网表 + urg 覆盖率/断言 + Surfer WCP** 等开源数据源，对齐 Cadence Indago / Verisium Debug MCP，共 **48 个工具**。
+去 License、无并发上限的 AI 辅助波形调试 MCP Server。用 **FST 波形 + xrun.log + pyslang RTL 网表 + urg 覆盖率/断言** 等开源数据源，对齐 Cadence Indago / Verisium Debug MCP，共 **38 个工具**。
 
 > 仿真器：xrun（Cadence Xcelium）。xrun 仿真与 dump 波形本身不占 Indago License —— 真正吃 License 的是 Indago 的波形引擎与调试数据库。本项目替换掉该波形引擎层，MCP 层完全开源自建，**支持任意并发**。
 
@@ -11,7 +11,7 @@
 ```
 xrun 仿真 → dump 开源波形(FST) → wave-mcp Server(多数据源聚合) → LLM 客户端(MCP)
                                       ↑
-        FST + pyslang 网表 + xrun.log + urg 覆盖率/断言 + Surfer WCP
+        FST + pyslang 网表 + xrun.log + urg 覆盖率/断言
 ```
 
 数据源（`wave_mcp/sources/` + `wave_mcp/netlist/`）：
@@ -22,7 +22,6 @@ xrun 仿真 → dump 开源波形(FST) → wave-mcp Server(多数据源聚合) �
 | `log_source.py`  | 纯 Python 解析 xrun.log / UVM | 仿真日志（7） | ✅ 已实现 |
 | `coverage_source.py` | 解析 urg 文本报告 + all_bins.csv | 覆盖率汇总/明细/漏洞 | ✅ 已实现 |
 | `assertion_source.py` | xrun.log 失败 + CSV 通过率 | SVA 断言状态/失败 | ✅ 已实现 |
-| `wcp_client.py`  | Surfer WCP 客户端 | 波形操作/导航（9/10） | ✅ 已实现（需运行中的 Surfer） |
 | `name_infer.py`  | 实例名→模块定义名命名推断 | 补全 module_type（netlist 未覆盖时兜底） | ✅ 已实现 |
 | `netlist/` + `rtl_source.py`  | **pyslang**（完整 elaboration）+ FST | 连接、驱动、扇入扇出、trace、文件/声明（5/6/8、2.5） | ✅ 已实现（单一后端，无需 Surelog/UHDM/Verible） |
 
@@ -34,7 +33,7 @@ xrun 仿真 → dump 开源波形(FST) → wave-mcp Server(多数据源聚合) �
 
 ```bash
 pip install -r requirements.txt          # mcp + pylibfst + pyslang + websockets
-# 系统二进制（按需）：vcd2fst（GTKWave，VCD→FST 转换）、surfer（波形查看，可选）
+# 系统二进制（按需）：vcd2fst（GTKWave，VCD→FST 转换；已有 FST 则不需要）
 # 加密网离线安装见 docs/DEPLOY_AIRGAP.md；开发机发版打包见 docs/RELEASE_BUNDLE.md
 ```
 
@@ -140,7 +139,7 @@ wave-session --vcd sim/dump.vcd --log sim/xrun.log --top top_tb --filelist rtl.f
 
 ---
 
-## 工具覆盖度（48 工具，对齐 Indago）
+## 工具覆盖度（38 工具，对齐 Indago）
 
 | 类别 | 工具 | 状态 |
 | --- | --- | --- |
@@ -155,8 +154,6 @@ wave-session --vcd sim/dump.vcd --log sim/xrun.log --top top_tb --filelist rtl.f
 | 8 文件查询 | get_all_files / get_files_by_short_name / get_modules_in_file | ✅（filelist + pyslang 网表） |
 | — 覆盖率 | get_coverage_summary / get_coverage_detail / get_coverage_holes | ✅ 解析 urg 文本报告 + all_bins.csv |
 | — 断言 | get_assertion_summary / get_assertion_status / get_assertion_failures | ✅ xrun.log 失败 + CSV 通过率 |
-| 9 波形操作 | send_to_wave / get_all_waveform_signals / get_selected_wf_signals / delete_all_wf_signals / create_group / save_waveform | ✅ 接 Surfer WCP |
-| 10 波形导航 | scroll_waveform / zoom_waveform / add_marker / get_waveform_markers | ✅ 接 Surfer WCP |
 
 全部工具均已实现（单一 pyslang + FST 后端）。第 5/6 类的活跃驱动判定 / trace_x 在条件为 X 或表达式超出 4 值求值子集时为 value-informed 近似，会标注 `selection_method`；但始终提供精确的静态驱动链 + 每节点 FST 值 + 代码位置。
 
@@ -172,8 +169,8 @@ wave-session --vcd sim/dump.vcd --log sim/xrun.log --top top_tb --filelist rtl.f
 
 ## 开发路线图
 
-- [x] **阶段1 验证**：xrun dump VCD/FST + Surfer 打开。
-- [x] **阶段2 基础 MCP**：FST 读取 + xrun.log 解析 + Surfer WCP；实现第 3*/4/7/9/10 类。**可上线，立即缓解 License 压力。**
+- [x] **阶段1 验证**：xrun dump VCD/FST + 波形可读。
+- [x] **阶段2 基础 MCP**：FST 读取 + xrun.log 解析；实现第 3/4/7 类。**可上线，立即缓解 License 压力。**
 - [x] **阶段3 静态分析**：用 **pyslang** 完整 elaboration，离线构建并持久化 DriverMap/FanInMap/LoadMap/LocMap + instance_tree；补齐第 2.5/3行号/5/8 类。
 - [x] **阶段4 trace 引擎**：trace_value（多数场景准确）+ trace_x（近似）——"结构维(pyslang 网表) × 时间维(FST 波形值)"二维反向遍历。
 - [x] **阶段5 工程化**：`wave-session`/`prepare_session` 封装 + `session.json` + 指纹一致性校验 + 失败分级降级；加密网离线运行时打包（共享盘自带 Python + glibc 兼容 vcd2fst）已完成，见 `docs/RELEASE_BUNDLE.md` / `docs/DEPLOY_AIRGAP.md`。
@@ -191,7 +188,7 @@ wave-session --vcd sim/dump.vcd --log sim/xrun.log --top top_tb --filelist rtl.f
 
 ```
 wave_mcp/
-  server.py              # MCP server，注册全部 48 工具（FastMCP）+ 人读文本渲染补丁
+  server.py              # MCP server，注册全部 38 工具（FastMCP）+ 人读文本渲染补丁
   session.py             # Session / SessionManager / session.json / 指纹校验 / 三层 definition_name
   pipeline.py            # prepare_session：xrun→VCD→FST→网表→session 编排；.f filelist 解析
   convert.py             # vcd2fst 封装：并行能力探测 + 串行 fallback + FIFO 流式
@@ -201,7 +198,6 @@ wave_mcp/
     log_source.py        # xrun.log + UVM 解析
     coverage_source.py   # urg 文本报告 + all_bins.csv 覆盖率解析
     assertion_source.py  # SVA 断言状态/失败
-    wcp_client.py        # Surfer WCP 客户端
     rtl_source.py        # pyslang 网表加载 + 查询：连接/驱动/trace/文件/netlist_health
   netlist/
     slang_netlist.py     # pyslang elaboration → maps.json（drivers/fanin/loads/instance_tree）+ 自愈 + UVM 探测
