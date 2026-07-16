@@ -1,0 +1,7 @@
+xmvlog: Compiling source file counter.sv
+xmsim: *W,RNDXCEXCL (counter.sv,10): randomization note.
+UVM_INFO tb_top.sv(42) @ 10: reporter [PHASE] Starting run phase
+UVM_WARNING tb_top.sv(88) @ 25: reporter [CFG] config db lookup miss
+xmsim: *E,NOFDPC (counter.sv,14): overflow asserted unexpectedly.
+UVM_ERROR tb_top.sv(120) @ 50: reporter [SCB] data mismatch expected 00 got ff
+UVM_FATAL tb_top.sv(121) @ 50: reporter [SCB] too many errors

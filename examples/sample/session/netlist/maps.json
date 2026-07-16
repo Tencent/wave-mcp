@@ -1,0 +1,248 @@
+{
+  "tool": "pyslang",
+  "version": "11.0.0",
+  "top": "top_tb",
+  "diagnostics": 0,
+  "parse_errors": [],
+  "modules": {
+    "top_tb": {
+      "name": "top_tb",
+      "file": "examples/sample/top_tb.sv",
+      "line": 2,
+      "ports": {},
+      "signals": {
+        "clk": {
+          "kind": "variable",
+          "width": 1,
+          "line": 3,
+          "file": "examples/sample/top_tb.sv"
+        },
+        "rst_n": {
+          "kind": "variable",
+          "width": 1,
+          "line": 4,
+          "file": "examples/sample/top_tb.sv"
+        },
+        "count": {
+          "kind": "net",
+          "width": 8,
+          "line": 5,
+          "file": "examples/sample/top_tb.sv"
+        },
+        "overflow": {
+          "kind": "net",
+          "width": 1,
+          "line": 6,
+          "file": "examples/sample/top_tb.sv"
+        }
+      },
+      "drivers": {},
+      "fanin": {},
+      "loads": {},
+      "loc": {
+        "clk": {
+          "file": "examples/sample/top_tb.sv",
+          "line": 3
+        },
+        "rst_n": {
+          "file": "examples/sample/top_tb.sv",
+          "line": 4
+        },
+        "count": {
+          "file": "examples/sample/top_tb.sv",
+          "line": 5
+        },
+        "overflow": {
+          "file": "examples/sample/top_tb.sv",
+          "line": 6
+        }
+      },
+      "instances": [
+        {
+          "def": "counter",
+          "name": "u_counter",
+          "conns": {
+            "clk": "clk",
+            "rst_n": "rst_n",
+            "count": "count",
+            "overflow": "overflow"
+          },
+          "line": 8
+        }
+      ]
+    },
+    "counter": {
+      "name": "counter",
+      "file": "examples/sample/counter.sv",
+      "line": 2,
+      "ports": {
+        "clk": {
+          "direction": "input",
+          "width": 1,
+          "type": "port",
+          "line": 3,
+          "file": "examples/sample/counter.sv"
+        },
+        "rst_n": {
+          "direction": "input",
+          "width": 1,
+          "type": "port",
+          "line": 4,
+          "file": "examples/sample/counter.sv"
+        },
+        "count": {
+          "direction": "output",
+          "width": 8,
+          "type": "port",
+          "line": 5,
+          "file": "examples/sample/counter.sv"
+        },
+        "overflow": {
+          "direction": "output",
+          "width": 1,
+          "type": "port",
+          "line": 6,
+          "file": "examples/sample/counter.sv"
+        }
+      },
+      "signals": {
+        "clk": {
+          "kind": "net",
+          "width": 1,
+          "line": 3,
+          "file": "examples/sample/counter.sv"
+        },
+        "rst_n": {
+          "kind": "net",
+          "width": 1,
+          "line": 4,
+          "file": "examples/sample/counter.sv"
+        },
+        "count": {
+          "kind": "variable",
+          "width": 8,
+          "line": 5,
+          "file": "examples/sample/counter.sv"
+        },
+        "overflow": {
+          "kind": "net",
+          "width": 1,
+          "line": 6,
+          "file": "examples/sample/counter.sv"
+        }
+      },
+      "drivers": {
+        "overflow": [
+          {
+            "kind": "assign",
+            "rhs": [
+              "count"
+            ],
+            "control": [],
+            "guard": [],
+            "file": "examples/sample/counter.sv",
+            "line": 8,
+            "snippet": "assign overflow = (count == 8'hFF);"
+          }
+        ],
+        "count": [
+          {
+            "kind": "nonblocking",
+            "rhs": [],
+            "control": [
+              "clk",
+              "rst_n"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 1
+              }
+            ],
+            "file": "examples/sample/counter.sv",
+            "line": 11,
+            "snippet": "count <= 8'h00;"
+          },
+          {
+            "kind": "nonblocking",
+            "rhs": [
+              "count"
+            ],
+            "control": [
+              "clk",
+              "rst_n"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 0
+              }
+            ],
+            "file": "examples/sample/counter.sv",
+            "line": 13,
+            "snippet": "count <= count + 1'b1;"
+          }
+        ]
+      },
+      "fanin": {
+        "overflow": [
+          "count"
+        ],
+        "count": [
+          "clk",
+          "count",
+          "rst_n"
+        ]
+      },
+      "loads": {
+        "count": [
+          "overflow",
+          "count"
+        ],
+        "clk": [
+          "count"
+        ],
+        "rst_n": [
+          "count"
+        ]
+      },
+      "loc": {
+        "clk": {
+          "file": "examples/sample/counter.sv",
+          "line": 3
+        },
+        "rst_n": {
+          "file": "examples/sample/counter.sv",
+          "line": 4
+        },
+        "count": {
+          "file": "examples/sample/counter.sv",
+          "line": 5
+        },
+        "overflow": {
+          "file": "examples/sample/counter.sv",
+          "line": 6
+        }
+      },
+      "instances": []
+    }
+  },
+  "instance_tree": {
+    "top_tb": "top_tb",
+    "top_tb.u_counter": "counter"
+  }
+}

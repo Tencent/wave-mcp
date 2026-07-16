@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "wave-mcp": {
+      "command": "/shared/wave-mcp/bin/wave-mcp",
+      "args": []
+    }
+  }
+}

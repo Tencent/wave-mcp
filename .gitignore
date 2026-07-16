@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.eggs/
+*.so
+
+# venv / runtime
+.venv/
+venv/
+runtime/
+
+# IDE / tooling
+.codebuddy/
+.idea/
+.vscode/
+
+# stray local artifacts (keep examples/sample/*.fst|*.vcd as quickstart data)
+/test.fst.hier
+
+# offline bundle build outputs (built via deploy/, not tracked)
+wave-mcp-bundle*/
+*.tar.gz

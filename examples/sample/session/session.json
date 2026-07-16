@@ -1,0 +1,16 @@
+{
+  "top": "top_tb",
+  "fst_path": "/data/home/wukongxin/workspace/wave_mcp/examples/sample/dump.fst",
+  "log_path": "/data/home/wukongxin/workspace/wave_mcp/examples/sample/xrun.log",
+  "maps_path": "/data/home/wukongxin/workspace/wave_mcp/examples/sample/session/netlist/maps.json",
+  "filelist": [
+    "/data/home/wukongxin/workspace/wave_mcp/examples/sample/counter.sv",
+    "/data/home/wukongxin/workspace/wave_mcp/examples/sample/top_tb.sv"
+  ],
+  "wcp": {
+    "host": "127.0.0.1",
+    "port": 54321
+  },
+  "fst_hash": "75b3638ac3df0147efe0cef96bafbc8537d154c0",
+  "filelist_hash": "cd03774abf0ddd9911b93e6328287aeb5e98821b"
+}
