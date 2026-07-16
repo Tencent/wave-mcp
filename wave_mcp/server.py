@@ -168,36 +168,36 @@ def get_session_info(session_id: Optional[str] = None) -> dict[str, Any]:
 
 
 # =============================================================================
-# 0. Waveform preparation (xrun -> VCD -> FST -> session)
+# 0. Waveform preparation (waveform file -> FST -> session)
 # =============================================================================
 @mcp.tool()
-def prepare_session(out_dir: str, vcd_path: str,
-                    sim_command: Optional[str] = None, cwd: Optional[str] = None,
+def prepare_session(out_dir: str, wave_path: str,
                     fst_path: Optional[str] = None, log_path: Optional[str] = None,
                     top: str = "", filelist: Optional[List[str]] = None,
                     filelist_path: Optional[str] = None,
                     incdirs: Optional[List[str]] = None,
                     defines: Optional[List[str]] = None,
-                    mode: str = "speed", stream: bool = False,
-                    timeout: Optional[float] = None,
+                    mode: str = "speed",
                     session_id: Optional[str] = None) -> dict[str, Any]:
     """One-shot waveform analysis entry point — the standard team workflow.
 
-    Runs the full chain and leaves an OPEN session ready to query:
-        xrun (dump VCD) -> convert VCD to FST -> parse xrun.log ->
+    Takes a waveform file your simulator already produced and leaves an OPEN
+    session ready to query:
+        waveform (.fst read directly / .vcd auto-converted) -> parse xrun.log ->
         build session.json -> open session.
+
+    This never runs a simulator. Run your sim (xrun / Verilator / etc.) with your
+    own flow first, then point this at the resulting ``.fst`` or ``.vcd``.
 
     Call this first whenever you want to start analyzing a waveform; afterwards
     use the query tools (get_signals_values, get_child_instances_of_instance, ...).
 
     Args:
-        out_dir: directory to hold the session (session.json, fst, log).
-        vcd_path: path xrun dumps the VCD to (a FIFO path when stream=True).
-        sim_command: shell command that runs xrun and dumps ``vcd_path``. If
-            omitted, an already-dumped VCD at ``vcd_path`` is assumed.
-        cwd: working directory for ``sim_command``.
-        fst_path: output FST (default: out_dir/<vcd>.fst).
-        log_path: xrun.log path (default: out_dir/xrun.log when sim_command runs).
+        out_dir: directory to hold the session (session.json, fst).
+        wave_path: waveform file to analyze — ``.fst`` (read directly) or ``.vcd``
+            (auto-converted to FST). This is a file the sim already dumped.
+        fst_path: output FST when converting a VCD (default: out_dir/<vcd>.fst).
+        log_path: optional simulator log (xrun.log) to attach for message tools.
         top: top instance name.
         filelist / filelist_path: RTL source list (enables file/declaration tools).
             A .f filelist is parsed for +incdir+/+define+/-y automatically.
@@ -206,36 +206,20 @@ def prepare_session(out_dir: str, vcd_path: str,
             (connectivity/drivers/trace) silently degrades to unavailable.
         defines: extra `+define+NAME[=VAL]` macros for elaboration.
         mode: VCD->FST packing — "speed" (fastlz, default) / "balanced" / "size".
-        stream: dump into a FIFO and convert during simulation (fastest end-to-end).
-        timeout: seconds to allow the simulation to run.
 
     Returns the session summary plus per-step timing.
     """
     try:
         result = pipeline.prepare_session(
-            out_dir, vcd_path, sim_command=sim_command, cwd=cwd, fst_path=fst_path,
+            out_dir, wave_path, fst_path=fst_path,
             log_path=log_path, top=top, filelist=filelist, filelist_path=filelist_path,
-            incdirs=incdirs, defines=defines,
-            mode=mode, stream=stream, timeout=timeout)
+            incdirs=incdirs, defines=defines, mode=mode)
     except (FileNotFoundError, ValueError, convert.ConversionError) as exc:
         return {"status": "error", "error": str(exc)}
     sid = SESSIONS.open(result["session_path"], session_id)
     sess = SESSIONS.get(sid)
     return {"status": "ready", "session_id": sid, "steps": result["steps"],
             **sess.summary()}
-
-
-@mcp.tool()
-def run_simulation(command: str, cwd: Optional[str] = None,
-                   log_path: Optional[str] = None,
-                   timeout: Optional[float] = None) -> dict[str, Any]:
-    """Run an xrun simulation command (shell), teeing output to log_path.
-
-    Standalone step in case you want to run the sim separately from
-    ``prepare_session`` (e.g. re-dump, or build the session manually afterwards).
-    """
-    res = pipeline.run_simulation(command, cwd, log_path, timeout)
-    return res.to_dict()
 
 
 @mcp.tool()

@@ -1,26 +1,23 @@
-"""End-to-end debug pipeline: xrun -> VCD -> FST -> session.
+"""End-to-end debug pipeline: waveform file -> FST -> session.
 
 This wires the team's standard workflow into one entry point so an LLM client can
 go from "I want to analyze the waveform" to a ready session in a single call:
 
-    run xrun (dump VCD)  ->  convert VCD to FST  ->  parse xrun.log  ->
-    build session.json   ->  open session       ->  ready to query
+    waveform file (.fst / .vcd)  ->  [convert VCD to FST]  ->  parse xrun.log  ->
+    build session.json           ->  open session          ->  ready to query
 
-Two strategies:
-  * post-process (default): run sim to completion, then convert the VCD.
-  * streaming (``stream=True``): dump straight into a FIFO and convert during
-    simulation, so the FST is ready almost as soon as the sim ends.
+The entry point takes a *waveform file your simulator already produced*:
+  * ``.fst`` — read directly (no conversion).
+  * ``.vcd`` — auto-converted to FST (GTKWave vcd2fst).
 
-The actual xrun invocation differs per project, so it is passed in as
-``sim_command`` (a shell command run in ``cwd``); when omitted, an already-dumped
-VCD is assumed to exist.
+It never invokes a simulator. Run your sim (xrun / Verilator / whatever) with
+your own flow, then point this at the resulting waveform.
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import os
-import subprocess
 import time
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
@@ -138,32 +135,6 @@ class StepResult:
                 "elapsed_sec": round(self.elapsed_sec, 3), **self.detail}
 
 
-def run_simulation(command: str, cwd: Optional[str] = None,
-                   log_path: Optional[str] = None,
-                   timeout: Optional[float] = None,
-                   env: Optional[dict] = None) -> StepResult:
-    """Run the xrun simulation command, teeing combined output to ``log_path``.
-
-    ``command`` is run through the shell (so module loads / make targets work).
-    The captured output is written to ``log_path`` (becomes the session's
-    xrun.log) and the tail is returned.
-    """
-    t0 = time.time()
-    full_env = {**os.environ, **(env or {})}
-    proc = subprocess.run(command, shell=True, cwd=cwd, env=full_env,
-                          capture_output=True, text=True, timeout=timeout)
-    output = (proc.stdout or "") + (proc.stderr or "")
-    if log_path:
-        os.makedirs(os.path.dirname(os.path.abspath(log_path)) or ".", exist_ok=True)
-        with open(log_path, "w", errors="replace") as fh:
-            fh.write(output)
-    tail = "\n".join(output.splitlines()[-30:])
-    return StepResult(
-        "run_simulation", proc.returncode == 0, time.time() - t0,
-        {"returncode": proc.returncode, "log_path": log_path, "output_tail": tail,
-         "command": command, "cwd": cwd or os.getcwd()})
-
-
 def build_manifest(out_dir: str, fst_path: str, *, top: str = "",
                    log_path: Optional[str] = None,
                    filelist: Optional[List[str]] = None,
@@ -216,52 +187,41 @@ def build_netlist_maps(out_dir: str, files: List[str],
     return maps_path
 
 
-def prepare_session(out_dir: str, vcd_path: str, *,
-                    sim_command: Optional[str] = None, cwd: Optional[str] = None,
+def prepare_session(out_dir: str, wave_path: str, *,
                     fst_path: Optional[str] = None, log_path: Optional[str] = None,
                     top: str = "", filelist: Optional[List[str]] = None,
                     filelist_path: Optional[str] = None,
                     incdirs: Optional[List[str]] = None,
                     defines: Optional[List[str]] = None,
-                    mode: str = "speed", stream: bool = False,
-                    build_netlist_flag: bool = True,
-                    timeout: Optional[float] = None) -> dict:
-    """Orchestrate xrun -> VCD -> FST -> session and return the manifest path
-    plus per-step timing. Does NOT open the session (the server does that so the
+                    mode: str = "speed",
+                    build_netlist_flag: bool = True) -> dict:
+    """Orchestrate waveform file -> FST -> session and return the manifest path
+    plus per-step timing.
+
+    ``wave_path`` is a waveform file your simulator already produced:
+      * ``.fst`` — read directly (no conversion).
+      * ``.vcd`` (anything else) — auto-converted to FST via GTKWave vcd2fst.
+
+    Never runs a simulator. Does NOT open the session (the server does that so the
     session is registered in its SessionManager)."""
     steps: List[StepResult] = []
     os.makedirs(out_dir, exist_ok=True)
-    if fst_path is None:
-        base = os.path.splitext(os.path.basename(vcd_path))[0]
-        fst_path = os.path.join(out_dir, base + ".fst")
-    if log_path is None and sim_command:
-        log_path = os.path.join(out_dir, "xrun.log")
 
-    if stream:
-        # converter consumes the FIFO in the background while xrun writes it
-        t0 = time.time()
-        conv = convert.start_streaming(vcd_path, fst_path, mode=mode)
-        steps.append(StepResult("start_streaming", True, time.time() - t0,
-                                {"pid": conv.pid, "fifo": vcd_path, "fst_path": fst_path}))
-        if not sim_command:
-            raise ValueError("stream=True requires sim_command (xrun must write the FIFO)")
-        steps.append(run_simulation(sim_command, cwd, log_path, timeout))
-        t0 = time.time()
-        try:
-            os.waitpid(conv.pid, 0)
-            ok = os.path.exists(fst_path)
-        except ChildProcessError:
-            ok = os.path.exists(fst_path)
-        steps.append(StepResult("finish_streaming_convert", ok, time.time() - t0,
-                                {"fst_path": fst_path,
-                                 "fst_bytes": os.path.getsize(fst_path) if ok else None}))
+    if wave_path.lower().endswith(".fst"):
+        # already an FST: read it in place, no conversion step.
+        if not os.path.exists(wave_path):
+            raise FileNotFoundError(f"FST not found: {wave_path}")
+        fst_path = os.path.abspath(wave_path)
     else:
-        if sim_command:
-            steps.append(run_simulation(sim_command, cwd, log_path, timeout))
-        if not os.path.exists(vcd_path):
-            raise FileNotFoundError(f"VCD not produced: {vcd_path}")
+        # treat as VCD -> convert to FST inside the session dir.
+        if not os.path.exists(wave_path):
+            raise FileNotFoundError(f"VCD not found: {wave_path}")
+        if fst_path is None:
+            base = os.path.splitext(os.path.basename(wave_path))[0]
+            fst_path = os.path.join(out_dir, base + ".fst")
         t0 = time.time()
-        res = convert.convert(vcd_path, fst_path, mode=mode)
+        res = convert.convert(wave_path, fst_path, mode=mode)
+        fst_path = res.fst_path
         steps.append(StepResult("convert_vcd_to_fst", True, time.time() - t0,
                                 res.to_dict()))
 
