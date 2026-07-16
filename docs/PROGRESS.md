@@ -7,7 +7,7 @@
 
 ## 1. 一句话现状
 
-10 大类、41 个工具全部实现（对齐 Indago）；单一技术栈 **FST(pylibfst) + xrun.log + Surfer WCP + pyslang 网表**，无需 Surelog/UHDM/Verible。核心调试能力（会话/层次/信号/值/日志/波形/连接/驱动/trace）端到端跑通。**已在真实大型 RTL + 真实 Verilator FST 上验证**：用开源 Verilator 对 OpenTitan `tlul_adapter_host` / `tlul_socket_1n` / lowRISC `ibex_core`(17 模块/1993 信号) 生成 FST，端到端断言全 PASS——结构提取、字段级 driver、active_drivers 定位 RTL 源、trace_value 跨模块穿透(最深 4 层 `ibex_core→if_stage→prefetch_buffer→fetch_fifo`)且节点带真实波形值。验证套件见 `tests/verilator_fst/`。
+9 大类、37 个工具全部实现（对齐 Indago）；单一技术栈 **FST(pylibfst) + xrun.log + pyslang 网表**，无需 Surelog/UHDM/Verible。核心调试能力（会话/层次/信号/值/日志/波形/连接/驱动/trace）端到端跑通。**已在真实大型 RTL + 真实 Verilator FST 上验证**：用开源 Verilator 对 OpenTitan `tlul_adapter_host` / `tlul_socket_1n` / lowRISC `ibex_core`(17 模块/1993 信号) 生成 FST，端到端断言全 PASS——结构提取、字段级 driver、active_drivers 定位 RTL 源、trace_value 跨模块穿透(最深 4 层 `ibex_core→if_stage→prefetch_buffer→fetch_fifo`)且节点带真实波形值。验证套件见 `tests/verilator_fst/`。
 
 ---
 
@@ -16,7 +16,6 @@
 ### 数据源层 `wave_mcp/sources/`
 - [x] `fst_source.py` — pylibfst 封装：层次(scope 树)、信号(位宽/方向/类型)、值查询（点查询 / 区间 / 全量，随机访问）。
 - [x] `log_source.py` — xrun.log + UVM 报文解析（error/warning/关键词/按索引）。
-- [x] `wcp_client.py` — Surfer WCP 客户端（增删信号、分组、zoom、marker、跳转），无 viewer 时优雅降级。
 - [x] `rtl_source.py` — 基于 pyslang 网表 + FST：连接/驱动/扇入扇出/声明定位/文件查询 + active_drivers/trace 转发；无网表时结构化降级。
 
 ### 静态分析 + trace `wave_mcp/netlist/`
@@ -32,26 +31,26 @@
 
 ### 波形准备 / 编排
 - [x] `convert.py` — VCD→FST（vcd2fst，speed/balanced/size 三档 + 并行 + FIFO 流式）。
-- [x] `pipeline.py` — `run_simulation` / `prepare_session`（xrun→VCD→FST→解析日志→建网表→建会话）/ `build_manifest` / `build_netlist_maps`。
+- [x] `pipeline.py` — `prepare_session`（波形文件入口：.fst 直读 / .vcd 自动转 → 解析日志 → 建网表 → 建会话，不跑仿真器）/ `build_manifest` / `build_netlist_maps`。
 
 ### 会话 / 服务 / CLI
 - [x] `session.py` — Session/SessionManager、session.json 清单、**指纹一致性校验**、分层降级。
-- [x] `server.py` — FastMCP，41 工具，stdio / streamable-http / sse，工具支持 `session_id` 多会话隔离。
+- [x] `server.py` — FastMCP，37 工具，stdio / streamable-http / sse，工具支持 `session_id` 多会话隔离。
 - [x] `cli/build_session.py`（`wave-session`）、`cli/vcd2fst.py`（`wave-vcd2fst`）。
-- [x] `examples/make_sample.py`、`tests/smoke_test.py`。
+- [x] `examples/make_sample.py`、`examples/verilator_quickstart/`（开源 Verilator 开箱示例，无需 xrun）、`tests/smoke_test.py`。
 
 ### 工程化（部分）
 - [x] `prepare_session` 一站式入口；自动建网表；失败分级降级。
 - [x] 指纹校验（源码/波形改动报警，绝不静默给错）。
-- [x] 加密网离线打包（见 `deploy/` + `docs/DEPLOY_AIRGAP.md`）：自带独立 Python(3.11.15) + 离线 wheelhouse + stdio 无感启停，已端到端验证（含真实 MCP initialize 握手）。
+- [x] 隔离网离线打包（见 `deploy/` + `docs/DEPLOY_AIRGAP.md`）：自带独立 Python(3.11.15) + 离线 wheelhouse + stdio 无感启停，已端到端验证（含真实 MCP initialize 握手）。
 - [x] `deploy/build_vcd2fst.sh`：manylinux_2_28 容器编出 glibc-portable `vcd2fst`（最高仅需 GLIBC_2.14），已验证可转换样例 VCD。
 
 ---
 
 ## 3. 工具覆盖度（对齐 Indago）
 
-10 类全部实现，详见 `README.md` 的覆盖度表。要点：
-- 1/2/3/4/7/8/9/10 类：完成且可靠。
+全部类别实现，详见 `README.md` 的覆盖度表。要点：
+- 会话/层次/信号/值/日志/文件/覆盖率/断言：完成且可靠。
 - 5 类（连接/驱动）：静态精确；active_drivers 用分支条件求值（精确，回退启发式）。
 - 6 类（trace）：trace_value 用分支求值选驱动（准确）；**trace_x 近似**。
 
@@ -63,8 +62,7 @@
 - [x] **真实 RTL 验证（结构类，OpenTitan 四批）**：`tests/opentitan_elab_check.py` 对 4 批 10 个真实模块跑 build_netlist + pyslang 自身 elaboration 做 ground-truth 端口/实例对账。10/10 elaborate 成功、端口与实例对账全一致。已修：generate 穿透、实例端口驱动、GT 实例口径（递归 generate）、字段级建模。
 - [x] **真实大型波形验证（动态类，Verilator FST）**：`tests/verilator_fst/` —— 用开源 Verilator 生成真实 FST，对 `tlul_adapter_host` / `tlul_socket_1n` / `ibex_core` 跑 netlist+FST+trace 断言，全 PASS。验证了 active_drivers 定位 RTL 源、trace_value 跨模块穿透(最深 4 层)且节点带真实波形值。修复了 ibex 触发的 InvalidExpression 崩溃。
   - 待办：for-generate 重复 driver 计数核实；Verilator FST 默认不 dump 全部内部组合 wire，深层组合节点取值受限（trace 结构正确，止于可见边界）——如需更密的值标注可加 `--trace-structs`/显式 dump 或换 xrun。
-- [ ] **Surfer WCP 真机对接**：按运行中的 Surfer 核对 WCP 命令字段（命令名/参数），实测增删信号/zoom/marker。
-- [ ] **加密网部署演练**：在与目标机一致(glibc 2.28)的机器上跑通离线 bundle，校验启动/退出/多用户隔离。
+- [ ] **隔离网部署演练**：在与目标机一致的机器上跑通离线 bundle，校验启动/退出/多用户隔离。
 
 ### P1 — 精度 / 正确性
 - [ ] **差分回归测试框架**：同一批 (signal, time) 对拍 Indago 输出，自动比对、沉淀不一致 case 为回归用例。一致率作为"对不对/够不够"的客观标准。
@@ -74,7 +72,7 @@
 - [ ] **时间维 trace**：对寄存器(nonblocking)回溯到"上一个时钟沿"的赋值时刻，做真正的跨周期因果链（当前在寄存器处标注边界并停）。
 
 ### P2 — 性能 / 工程
-- [ ] **纯 Python FST 写入后备**：用 pylibfst writer 实现 VCD→FST，去掉 vcd2fst 原生二进制依赖（加密网移植只剩 wheel）。
+- [ ] **纯 Python FST 写入后备**：用 pylibfst writer 实现 VCD→FST，去掉 vcd2fst 原生二进制依赖（隔离网移植只剩 wheel）。
 - [ ] **大 FST 压测** + LRU 缓存 + 句柄/索引复用；point-query 与区间查询基准。
 - [ ] **netlist 增量重建**：按源码指纹缓存，仅变更模块重建。
 - [ ] **HTTP 多 Session 完善**：会话生命周期、并发隔离、（可选）鉴权、压测。
@@ -87,12 +85,12 @@
 - trace_x 为近似；active_driver 遇不支持表达式回退启发式（结果标 `selection_method`）。
 - 跨模块 trace 暂止于模块端口边界；时间维跨周期回溯未做。
 - 仅在 `examples/sample` 玩具 RTL 验证，真实 SV 未压过，可能有 bug。
-- VCD→FST 依赖 `vcd2fst`（GTKWave）系统二进制；加密网用 `deploy/build_vcd2fst.sh` 产 glibc-portable 版随包带（已验证）。
+- VCD→FST 依赖 `vcd2fst`（GTKWave）系统二进制；隔离网用 `deploy/build_vcd2fst.sh` 产 glibc-portable 版随包带（已验证）。
 - 静态结构(连接/驱动/扇入)置信度高；动态因果是"逼近"，非精确复原。
 
 ---
 
 ## 6. 技术约束备忘
-- 目标(加密网)：x86_64、glibc **2.28**、多机器多用户 Python 版本不一 → 共享盘自带独立 Python 运行时解决。
-- 依赖 wheel 的 glibc 下限：pyslang 2.27 / pylibfst 2.17（均满足 2.28）。
+- 典型目标(隔离网)：x86_64、glibc **≥ 2.17**、多机器多用户 Python 版本不一 → 共享存储自带独立 Python 运行时解决。
+- 依赖 wheel 的 glibc 下限：pyslang 2.27 / pylibfst 2.17。
 - 部署推荐 **stdio**：客户端起共享盘脚本即无感启动，进程随客户端退出，多用户进程级隔离，零运维。

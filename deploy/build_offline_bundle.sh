@@ -48,7 +48,7 @@ python3 -m pip download -r "$REPO_ROOT/requirements.txt" -d "$OUT/wheels" >/dev/
 # via mcp -> pyjwt[crypto]) and is NOT used by wave-mcp. Recent cryptography
 # wheels require a high glibc (e.g. 49.x needs manylinux_2_34 / glibc 2.34),
 # which breaks install on older air-gapped targets (glibc 2.28). Removing it
-# keeps the base MCP server (HS256 JWT + all 41 tools) fully functional.
+# keeps the base MCP server (HS256 JWT + all tools) fully functional.
 CRYPTO_WHL=$(ls "$OUT/wheels"/cryptography-*.whl 2>/dev/null || true)
 if [[ -n "$CRYPTO_WHL" ]]; then
   echo "[*] dropping unnecessary high-glibc dep: $(basename "$CRYPTO_WHL")"
@@ -96,6 +96,10 @@ cp "$REPO_ROOT/deploy/wave-mcp.template" "$OUT/wave-mcp.template"
 cp "$REPO_ROOT/deploy/mcp.json.example"  "$OUT/mcp.json.example"
 chmod +x "$OUT/install.sh"
 date -u +"%Y-%m-%dT%H:%M:%SZ" > "$OUT/VERSION"
+
+# 5b) license + third-party notices (MIT project + bundled binary provenance)
+cp "$REPO_ROOT/LICENSE" "$OUT/LICENSE" 2>/dev/null || echo "[!] no top-level LICENSE found"
+[[ -d "$REPO_ROOT/licenses" ]] && cp -r "$REPO_ROOT/licenses" "$OUT/licenses"
 
 echo "[*] bundle assembled at $OUT"
 if [[ "$DO_TAR" == "1" ]]; then

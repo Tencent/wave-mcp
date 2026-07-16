@@ -1,24 +1,41 @@
 #!/usr/bin/env bash
-# Build a glibc-portable vcd2fst inside a manylinux_2_28 container (glibc 2.28).
+# Build a glibc-portable, permissively-licensed vcd2fst inside a manylinux_2_28
+# container.
 #
-# Why: the air-gapped target has glibc 2.28 and no GTKWave. A vcd2fst built on a
-# newer host (e.g. glibc 2.38) would fail there with "GLIBC_2.3x not found".
-# Building in manylinux_2_28 yields a binary that needs only GLIBC_2.14 + libz +
-# libpthread — runs on essentially any modern Linux (incl. glibc 2.28).
+# License provenance (all permissive; this does NOT build the GPL GTKWave GUI):
+#   vcd2fst.c helper  — MIT     (gtkwave/src/helpers)
+#   fstapi / libfst   — MIT     (Tony Bybell; github.com/gtkwave/libfst)
+#   LZ4               — BSD-2   (Yann Collet)
+#   FastLZ            — MIT     (Ariya Hidayat)
+#   jrb (libfdr)      — LGPL-2.1 (this build recipe + pinned source satisfy the
+#                                 LGPL relink obligation)
+# Only the above files are compiled; the GPL GTKWave application is not used.
+# See licenses/THIRD_PARTY.md.
+#
+# Why manylinux_2_28: a vcd2fst built on a newer host (e.g. glibc 2.38) fails on
+# older targets with "GLIBC_2.3x not found". Building in manylinux_2_28 yields a
+# binary needing only GLIBC_2.14 + libz + libpthread — runs on essentially any
+# modern Linux (glibc >= 2.14).
 #
 # Output: <out>/vcd2fst  (feed it to build_offline_bundle.sh --vcd2fst <path>)
 #
-# Usage:  deploy/build_vcd2fst.sh [--out /tmp/vcd2fst-out] [--gtkwave 3.3.121]
+# Usage:
+#   deploy/build_vcd2fst.sh [--out DIR] [--gtkwave VER] [--src TARBALL] [--image IMG]
+#     --src TARBALL   build from a pre-downloaded GTKWave source tarball instead
+#                     of fetching it — enables a fully offline / reproducible
+#                     build (see third_party/vcd2fst/README.md for how to vendor).
 set -euo pipefail
 
 OUT="/tmp/vcd2fst-out"
 GTKWAVE_VER="3.3.121"
 IMAGE="quay.io/pypa/manylinux_2_28_x86_64"
+SRC=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --out) OUT="$2"; shift 2;;
     --gtkwave) GTKWAVE_VER="$2"; shift 2;;
+    --src) SRC="$2"; shift 2;;
     --image) IMAGE="$2"; shift 2;;
     *) echo "unknown arg: $1"; exit 1;;
   esac
@@ -26,15 +43,28 @@ done
 
 command -v docker >/dev/null || { echo "ERROR: docker required"; exit 1; }
 mkdir -p "$OUT"
-echo "[*] building vcd2fst (gtkwave $GTKWAVE_VER) in $IMAGE -> $OUT/vcd2fst"
 
-docker run --rm -v "$OUT":/out "$IMAGE" bash -lc "
+SRC_MOUNT=()
+if [[ -n "$SRC" ]]; then
+  [[ -f "$SRC" ]] || { echo "ERROR: --src tarball not found: $SRC"; exit 1; }
+  SRC_ABS="$(cd "$(dirname "$SRC")" && pwd)/$(basename "$SRC")"
+  SRC_MOUNT=(-v "$SRC_ABS":/src.tar.gz:ro)
+  echo "[*] building vcd2fst from local source ($SRC) in $IMAGE -> $OUT/vcd2fst"
+else
+  echo "[*] building vcd2fst (gtkwave $GTKWAVE_VER, downloaded) in $IMAGE -> $OUT/vcd2fst"
+fi
+
+docker run --rm -v "$OUT":/out "${SRC_MOUNT[@]}" "$IMAGE" bash -lc "
 set -e
 dnf -y -q install zlib-devel wget tar gzip >/dev/null 2>&1
 cd /tmp
-wget -q https://gtkwave.sourceforge.net/gtkwave-${GTKWAVE_VER}.tar.gz -O gw.tar.gz
+if [ -f /src.tar.gz ]; then
+  cp /src.tar.gz gw.tar.gz
+else
+  wget -q https://gtkwave.sourceforge.net/gtkwave-${GTKWAVE_VER}.tar.gz -O gw.tar.gz
+fi
 tar xzf gw.tar.gz
-cd gtkwave-${GTKWAVE_VER}
+cd \"\$(tar tzf gw.tar.gz | head -1 | cut -d/ -f1)\"
 mkdir -p stub
 printf '#define PACKAGE_BUGREPORT \"gtkwave\"\n#define PACKAGE_VERSION \"${GTKWAVE_VER}\"\n#define PACKAGE_STRING \"gtkwave ${GTKWAVE_VER}\"\n' > stub/config.h
 printf '#define _(x) x\n#define WAVE_LOCALE_FIX\n#define WAVE_LOCALE_RELOAD\n' > stub/wave_locale.h

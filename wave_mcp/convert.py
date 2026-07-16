@@ -80,8 +80,15 @@ class ConversionResult:
 def _check_bin():
     if shutil.which(VCD2FST_BIN) is None:
         raise ConversionError(
-            f"'{VCD2FST_BIN}' not found. Install GTKWave (provides vcd2fst) or set "
-            f"$VCD2FST_BIN.")
+            f"'{VCD2FST_BIN}' not found — needed to convert VCD -> FST.\n"
+            f"Options:\n"
+            f"  * install GTKWave (provides vcd2fst):\n"
+            f"      Debian/Ubuntu:  sudo apt install gtkwave\n"
+            f"      Fedora/RHEL:    sudo dnf install gtkwave\n"
+            f"      macOS:          brew install gtkwave\n"
+            f"  * or set $VCD2FST_BIN to a vcd2fst binary (e.g. from the offline bundle)\n"
+            f"  * or skip conversion entirely: dump FST directly from your simulator\n"
+            f"      (Verilator --trace-fst, Icarus -fst, ...) and pass the .fst.")
 
 
 # vcd2fst's -p (parallel) path is compiled behind FST_WRITER_PARALLEL. Many

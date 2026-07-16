@@ -27,7 +27,8 @@ else
   BASE_PY="$(command -v python3 || true)"
   [[ -z "$BASE_PY" ]] && { echo "ERROR: no python3 found and no bundled python/. "; exit 1; }
   echo "[*] using target python3: $BASE_PY ($($BASE_PY -V 2>&1))"
-  echo "    (note: target wheels are cp311; if this python isn't 3.11, bundle a standalone python instead)"
+  echo "    (note: the offline wheels match the build machine's Python version; if this"
+  echo "     python's version differs, bundle a matching standalone python via --python instead)"
 fi
 
 # 2) create venv + offline install -----------------------------------------

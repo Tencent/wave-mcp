@@ -1,6 +1,6 @@
 # wave-mcp — 基于 xrun 的开源 Indago MCP 替代方案
 
-去 License、无并发上限的 AI 辅助波形调试 MCP Server。用 **FST 波形 + xrun.log + pyslang RTL 网表 + urg 覆盖率/断言** 等开源数据源，对齐 Cadence Indago / Verisium Debug MCP，共 **38 个工具**。
+去 License、无并发上限的 AI 辅助波形调试 MCP Server。用 **FST 波形 + xrun.log + pyslang RTL 网表 + urg 覆盖率/断言** 等开源数据源，对齐 Cadence Indago / Verisium Debug MCP，共 **37 个工具**。本项目以 **MIT** 许可开源。
 
 > 仿真器：xrun（Cadence Xcelium）。xrun 仿真与 dump 波形本身不占 Indago License —— 真正吃 License 的是 Indago 的波形引擎与调试数据库。本项目替换掉该波形引擎层，MCP 层完全开源自建，**支持任意并发**。
 
@@ -32,10 +32,19 @@ xrun 仿真 → dump 开源波形(FST) → wave-mcp Server(多数据源聚合) �
 ## 安装
 
 ```bash
-pip install -r requirements.txt          # mcp + pylibfst + pyslang + websockets
+# 直接从 git 安装（Linux x86_64 开箱即用；依赖 mcp + pylibfst + pyslang）
+pip install git+https://github.com/<your-org>/wave-mcp.git
+# 或克隆后本地安装：
+#   git clone <repo> && cd wave_mcp && pip install -e .
+
 # 系统二进制（按需）：vcd2fst（GTKWave，VCD→FST 转换；已有 FST 则不需要）
-# 加密网离线安装见 docs/DEPLOY_AIRGAP.md；开发机发版打包见 docs/RELEASE_BUNDLE.md
+#   Debian/Ubuntu: sudo apt install gtkwave  |  macOS: brew install gtkwave
+# 离线/隔离网自包含安装见 docs/DEPLOY_AIRGAP.md；发版打包见 docs/RELEASE_BUNDLE.md
 ```
+
+> 平台支持：**Linux x86_64** 有全部依赖的预编译 wheel，`pip` 开箱即用（已测 Python 3.9–3.13）。
+> macOS / Windows / arm64 因 `pylibfst` 暂无预编译 wheel，需源码编译（cmake+gcc+zlib）；
+> 隔离网用户建议直接用离线自包含包（见下）。
 
 ## 快速开始
 
@@ -57,14 +66,23 @@ python tests/smoke_test.py
 python -m wave_mcp.server --session examples/sample/session
 ```
 
+想用**真实波形**跑通（开源、无需 xrun）？看 **Verilator quickstart**：用 Verilator
+`--trace-fst` 产出真实 FST 再 `prepare_session` 直读、查询，一条命令搞定：
+
+```bash
+python examples/verilator_quickstart/run.py   # 需 verilator>=5；详见该目录 README
+```
+
 ### 标准工作流（模型分析波形的统一入口）
 
-团队固定流程：**xrun 跑出 VCD → 转 FST → 读取分析**。这条链已固化成一个 MCP 工具 `prepare_session`——模型想开始分析波形时**第一步就调它**，一次完成"仿真 → 转换 → 解析日志 → 建 session → launch"，返回即可直接查询。
+团队固定流程：**仿真产出波形 → 转 FST → 读取分析**。`prepare_session` 是这条链的统一入口——模型想开始分析波形时**第一步就调它**，传入仿真已产出的波形文件，一次完成"（转换 →）解析日志 → 建 session → launch"，返回即可直接查询。
+
+> **它不跑仿真器**：请先用你自己的流程（xrun / Verilator / 任意）跑出波形，再把结果 `.fst` / `.vcd` 交给它。这样开源版本不承载任何 shell 执行面。
 
 ```
-prepare_session ─┬─ run xrun（dump VCD）        # sim_command，按项目配置
-                 ├─ convert VCD → FST           # 默认 speed(fastlz)+parallel
-                 ├─ parse xrun.log              # 自动作为 session 日志
+prepare_session ─┬─ 波形文件入口                 # .fst 直读 / .vcd 自动转
+                 ├─ convert VCD → FST           # 仅当传入 .vcd，默认 speed(fastlz)
+                 ├─ parse xrun.log              # 可选，作为 session 日志
                  ├─ build session.json + 指纹
                  └─ open session                # 完成后直接用查询类工具
 ```
@@ -73,24 +91,20 @@ prepare_session ─┬─ run xrun（dump VCD）        # sim_command，按项�
 
 ```jsonc
 prepare_session({
-  "out_dir":     "sessions/my_module",
-  "vcd_path":    "sim/dump.vcd",          // xrun dump 的 VCD（stream 模式时为 FIFO 路径）
-  "sim_command": "make sim MOD=my_module",// 如何跑 xrun（命令/make/脚本，按项目）
-  "cwd":         "/path/to/work",
-  "top":         "top_tb",
-  "filelist_path":"rtl.f",                // 与 xrun 同一份 filelist
-  "mode":        "speed",                  // VCD->FST：speed/balanced/size
-  "stream":      false                     // true=边仿真边转，端到端最快
+  "out_dir":      "sessions/my_module",
+  "wave_path":    "sim/dump.fst",          // 仿真产出的波形：.fst 直读 / .vcd 自动转
+  "log_path":     "sim/xrun.log",          // 可选，仿真日志（供消息类工具）
+  "top":          "top_tb",
+  "filelist_path":"rtl.f",                 // 与仿真同一份 filelist
+  "mode":         "speed"                   // VCD->FST：speed/balanced/size（仅 .vcd 时生效）
 })
 // 返回 ready + session 摘要后，接着调 get_signals_values / get_child_instances_of_instance ...
 ```
 
-> 若仿真已在外部跑完、VCD 已存在，可省略 `sim_command`，`prepare_session` 直接从转换开始。
-> 想拆开用也行：`run_simulation` → `convert_vcd_to_fst` → `launch`。
+> 传入 `.fst` 时零转换、直接读取；传入 `.vcd` 时自动转成 FST（体积约为 VCD 的 1/50）。
+> 想拆开用也行：`convert_vcd_to_fst` → `launch`。
 
-生产中用真实 xrun 流程：TB 里 `$dumpfile/$dumpvars` 产出 VCD，再转 FST（体积约为 VCD 的 1/50）；或已有 FSDB 则 `fsdb2vcd` 转换。
-
-### VCD → FST 转换（xrun 只能 dump 开源可解析的 VCD）
+### VCD → FST 转换（仿真的开源可解析 dump 是 VCD）
 
 xrun 的开源可解析波形是 VCD，而本 Server 读的是 FST（体积约 1/50、随机访问快）。提供三种入口，且**转化越快越好**用三个杠杆：`-p` 并行 + `-F`(fastlz) 最快 + FIFO 流式。
 
@@ -132,18 +146,18 @@ wave-session --vcd sim/dump.vcd --log sim/xrun.log --top top_tb --filelist rtl.f
   `python -m wave_mcp.server --transport http --host 0.0.0.0 --port 8000`
   每个工具都接受可选 `session_id` 参数；先 `launch(session_path, session_id=...)` 再调用其它工具。
 
-### 加密网（隔离网）离线部署
-多机器、多用户、Python 版本不一、无外网 → **共享盘自带独立 Python 运行时**，stdio 无感启停。
-在有网机器 `deploy/build_offline_bundle.sh` 生成自包含 bundle，拷到加密网共享盘 `install.sh` 离线安装。
+### 隔离网 / 离线环境部署
+多机器、多用户、Python 版本不一、无外网 → **共享存储自带独立 Python 运行时**，stdio 无感启停。
+在有网机器 `deploy/build_offline_bundle.sh` 生成自包含 bundle，拷到隔离网共享存储 `install.sh` 离线安装。
 详见 **`docs/DEPLOY_AIRGAP.md`**；研发进度与 To-Do 见 **`docs/PROGRESS.md`**。
 
 ---
 
-## 工具覆盖度（38 工具，对齐 Indago）
+## 工具覆盖度（37 工具，对齐 Indago）
 
 | 类别 | 工具 | 状态 |
 | --- | --- | --- |
-| 0 波形准备 | prepare_session / run_simulation / convert_vcd_to_fst | ✅ xrun→VCD→FST→session 一条龙 |
+| 0 波形准备 | prepare_session / convert_vcd_to_fst | ✅ 波形文件入口（.fst 直读 / .vcd 自动转）→ session 一条龙；不跑仿真器 |
 | 1 会话管理 | launch / connect / disconnect / get_session_info | ✅ get_session_info 含 netlist_health + definition_coverage |
 | 2 层次探索 | get_child_instances_of_instance / get_all_module_names / get_instances_by_module(_filtered) / get_scope_module_information | ✅ 模块定义名走**三层解析**：pyslang 网表(leaf/后缀/锚点) → 命名推断 → 手工 scope_map；声明位置来自网表 |
 | 3 信号查询 | get_signals_of_instance / get_signal_information | ✅ 位宽/方向/类型来自 FST（含总线聚合 + RTL 位宽校验）；声明文件+行号来自 pyslang 网表 |
@@ -162,7 +176,7 @@ wave-session --vcd sim/dump.vcd --log sim/xrun.log --top top_tb --filelist rtl.f
 - **definition_name 三层解析**：netlist（含锚点向上推导）→ 命名推断（含 interface 守卫、置信度分级）→ 手工 scope_map。
 - **netlist_health / definition_coverage**：区分 error 与 warning（大量 UVM lint 不误判为坏网表），并报告自愈回填项。
 - **vcd2fst 并行**：编译期开 `FST_WRITER_PARALLEL`，多核转换 + 能力探测/串行 fallback。
-- **加密网离线**：剔除高 glibc 的 cryptography（非必需），`--no-deps` 离线安装；自带独立 Python + glibc≤2.14 的 vcd2fst。
+- **隔离网离线**：剔除高 glibc 的 cryptography（非必需），`--no-deps` 离线安装；自带独立 Python + glibc≤2.14 的 vcd2fst。
 - **MCP 返回**：structuredContent（机器可读）+ content[].text 人读文本（无转义 `\n`/`\"`）。
 
 ---
@@ -173,7 +187,7 @@ wave-session --vcd sim/dump.vcd --log sim/xrun.log --top top_tb --filelist rtl.f
 - [x] **阶段2 基础 MCP**：FST 读取 + xrun.log 解析；实现第 3/4/7 类。**可上线，立即缓解 License 压力。**
 - [x] **阶段3 静态分析**：用 **pyslang** 完整 elaboration，离线构建并持久化 DriverMap/FanInMap/LoadMap/LocMap + instance_tree；补齐第 2.5/3行号/5/8 类。
 - [x] **阶段4 trace 引擎**：trace_value（多数场景准确）+ trace_x（近似）——"结构维(pyslang 网表) × 时间维(FST 波形值)"二维反向遍历。
-- [x] **阶段5 工程化**：`wave-session`/`prepare_session` 封装 + `session.json` + 指纹一致性校验 + 失败分级降级；加密网离线运行时打包（共享盘自带 Python + glibc 兼容 vcd2fst）已完成，见 `docs/RELEASE_BUNDLE.md` / `docs/DEPLOY_AIRGAP.md`。
+- [x] **阶段5 工程化**：`wave-session`/`prepare_session` 封装 + `session.json` + 指纹一致性校验 + 失败分级降级；隔离网离线运行时打包（共享存储自带 Python + glibc 兼容 vcd2fst）已完成，见 `docs/RELEASE_BUNDLE.md` / `docs/DEPLOY_AIRGAP.md`。
 - [x] **阶段6 数据质量与鲁棒性**：覆盖率/断言、网表自愈（incdir/包 + UVM 探测）、definition_name 三层解析、netlist_health、vcd2fst 并行、MCP 人读返回。
 
 ### 性能要点（按需求文档）
@@ -188,9 +202,9 @@ wave-session --vcd sim/dump.vcd --log sim/xrun.log --top top_tb --filelist rtl.f
 
 ```
 wave_mcp/
-  server.py              # MCP server，注册全部 38 工具（FastMCP）+ 人读文本渲染补丁
+  server.py              # MCP server，注册全部 37 工具（FastMCP）+ 人读文本渲染补丁
   session.py             # Session / SessionManager / session.json / 指纹校验 / 三层 definition_name
-  pipeline.py            # prepare_session：xrun→VCD→FST→网表→session 编排；.f filelist 解析
+  pipeline.py            # prepare_session：波形文件入口(.fst 直读/.vcd 自动转)→网表→session 编排；.f filelist 解析
   convert.py             # vcd2fst 封装：并行能力探测 + 串行 fallback + FIFO 流式
   timeutil.py            # 时间字符串 <-> FST 时间单位换算
   sources/
@@ -207,9 +221,24 @@ wave_mcp/
   cli/build_session.py   # wave-session：组装 session 目录 + 指纹
 deploy/                  # 离线 bundle 构建 + 安装脚本（见 docs/RELEASE_BUNDLE.md）
 examples/make_sample.py  # 生成样例
+examples/verilator_quickstart/  # 开源 Verilator 开箱示例（--trace-fst 产真实 FST，无需 xrun）
 tests/smoke_test.py      # 端到端冒烟测试
 tests/test_definition_name.py  # definition_name 解析单测（锚点/后缀/interface 守卫）
+LICENSE                  # MIT
+licenses/THIRD_PARTY.md  # 第三方组件许可声明（mcp/pyslang/pylibfst；离线包内 vcd2fst）
 ```
+
+---
+
+## 开源协议
+
+本项目以 **MIT** 许可发布（见 `LICENSE`）。
+
+依赖与内置组件均为宽松许可，无 copyleft 传染：`mcp` / `pyslang` / `pylibfst` 皆为
+MIT/BSD。离线包附带的 `vcd2fst` 转换器由 GTKWave 的 **MIT** 源码（libfst/fstapi +
+vcd2fst helper）构建，作为独立进程调用（聚合关系，不影响 wave-mcp 的 MIT 许可）；
+其内含的 `jrb` 组件为 LGPL-2.1，随包提供构建脚本以满足可重链接义务。详见
+`licenses/THIRD_PARTY.md`。
 
 ---
 

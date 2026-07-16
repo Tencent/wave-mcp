@@ -1,13 +1,13 @@
 # wave-mcp 发版（离线 bundle）标准流程
 
-面向**有网开发机**的发版 SOP：从源码打出一个自包含 bundle，做完自检后交付到加密网共享盘安装。
-安装侧（加密网内如何 install / 接入）见 `docs/DEPLOY_AIRGAP.md`，本文只讲**怎么打、怎么验、怎么发**。
+面向**有网开发机**的发版 SOP：从源码打出一个自包含 bundle，做完自检后交付到隔离网共享盘安装。
+安装侧（隔离网内如何 install / 接入）见 `docs/DEPLOY_AIRGAP.md`，本文只讲**怎么打、怎么验、怎么发**。
 
 ```
 [开发机] 改代码 → build_vcd2fst.sh(一次性/换版才需) → build_offline_bundle.sh → 自检 → tar
         └────────────────────────────────────────────────────────────┘
                                     ▼
-                         交付到加密网共享盘 → install.sh（见 DEPLOY_AIRGAP.md）
+                         交付到隔离网共享盘 → install.sh（见 DEPLOY_AIRGAP.md）
 ```
 
 ---
@@ -19,7 +19,7 @@
    放到固定路径，例如 `/tmp/cpython311.tar.gz`。
    > wheel 是 cp311，故必须搭配 3.11 的独立 Python。
 
-2. **带并行的 vcd2fst**（glibc≤2.14，加密网 glibc 2.28 可跑）
+2. **带并行的 vcd2fst**（glibc≤2.14，隔离网 glibc 2.28 可跑）
    ```bash
    deploy/build_vcd2fst.sh --out /tmp/vcd2fst-out      # 需要 docker
    ```
@@ -52,7 +52,7 @@ bundle 内容：
 | `install.sh` / `wave-mcp.template` / `mcp.json.example` / `VERSION` | 安装器 + 启动器模板 + 客户端配置样例 |
 
 > 打包脚本会**自动剔除 cryptography** wheel：它是 `mcp → pyjwt[crypto]` 的可选传递依赖、wave-mcp 不用，
-> 且新版需 glibc 2.34（加密网 2.28 装不上）。`install.sh` 用 `pip install --no-deps` 防止被重新拉回。
+> 且新版需 glibc 2.34（隔离网 2.28 装不上）。`install.sh` 用 `pip install --no-deps` 防止被重新拉回。
 
 ---
 
@@ -92,7 +92,7 @@ tar -xzf $B.tar.gz -C /tmp/_verify && /tmp/_verify/wave-mcp-bundle-vX.Y/install.
 
 **自检清单（逐条打勾）**
 - [ ] wheel 含本次改动的源码
-- [ ] 工具数 48
+- [ ] 工具数 37
 - [ ] wheels 32 个、无 cryptography
 - [ ] `vcd2fst -p` 通过、GLIBC ≤ 2.14
 - [ ] smoke_test / test_definition_name 通过
@@ -107,8 +107,8 @@ tar -xzf $B.tar.gz -C /tmp/_verify && /tmp/_verify/wave-mcp-bundle-vX.Y/install.
 
 | 版本 | 日期 | 关键变更 |
 | --- | --- | --- |
-| v2 | 2026-06-30 | 41 工具；含 cryptography（加密网装不上）；vcd2fst 无并行 |
-| v3 | 2026-07-01 | 剔除 cryptography + `--no-deps`，修复加密网安装 |
+| v2 | 2026-06-30 | 41 工具；含 cryptography（隔离网装不上）；vcd2fst 无并行 |
+| v3 | 2026-07-01 | 剔除 cryptography + `--no-deps`，修复隔离网安装 |
 | v4 | 2026-07-01 | 新增覆盖率/断言/module_type，41→48 工具 |
 | v4.11–v4.12 | 2026-07-01 | 网表 incdir/defines 修复、结构化诊断、CSV header 化 |
 | v4.13 | 2026-07-02 | vcd2fst 重编开 `FST_WRITER_PARALLEL`（并行可用）|
@@ -120,7 +120,7 @@ tar -xzf $B.tar.gz -C /tmp/_verify && /tmp/_verify/wave-mcp-bundle-vX.Y/install.
 ---
 
 ## 4. 交付与升级/回滚
-- 把 `wave-mcp-bundle-vX.Y.tar.gz` 拷到加密网共享盘，按 `docs/DEPLOY_AIRGAP.md` 安装到 `/shared/wave-mcp-vX.Y`。
+- 把 `wave-mcp-bundle-vX.Y.tar.gz` 拷到隔离网共享盘，按 `docs/DEPLOY_AIRGAP.md` 安装到 `/shared/wave-mcp-vX.Y`。
 - **升级**：安装新版到新目录，客户端 `command` 指向新 `bin/wave-mcp`。
 - **回滚**：客户端 `command` 指回旧 `bin/wave-mcp`（旧 bundle 保留即可）。
 
@@ -128,7 +128,7 @@ tar -xzf $B.tar.gz -C /tmp/_verify && /tmp/_verify/wave-mcp-bundle-vX.Y/install.
 
 ## 5. 常见坑
 - **vcd2fst `-p` 报 `FST_WRITER_PARALLEL not enabled`**：编译漏了 `-DHAVE_LIBPTHREAD=1 -DFST_WRITER_PARALLEL=1`（两个都要）。重编。
-- **加密网 install 报 cryptography / GLIBC_2.34**：bundle 没剔除 cryptography 或没用 `--no-deps`。重打包。
+- **隔离网 install 报 cryptography / GLIBC_2.34**：bundle 没剔除 cryptography 或没用 `--no-deps`。重打包。
 - **sanity check import 失败**：目标机 Python 与 wheel(cp311) 不匹配 → 必须用 `--python` 带独立 3.11。
 - **UVM 环境 netlist 仍 partial**：`xrun` 不在 PATH（UVM 目录探测依赖它）→ 设 `$UVMHOME`/`$CDS_INST_DIR` 或把 xrun 加进 PATH；查 `netlist_health.auto_resolved.uvm_incdirs` 是否探测到。
 - **大量 pyslang warning 但非 error**：属正常（UVM lint）；看 `netlist_health.diagnostic_errors` 是否为 0，为 0 即可信。
