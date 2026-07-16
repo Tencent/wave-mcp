@@ -5,9 +5,24 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "wave-mcp"
 version = "0.1.0"
-description = "Open-source, license-free MCP server for xrun (Xcelium) waveform debug — an Indago/Verisium Debug MCP alternative."
+description = "Open-source, license-free MCP server for RTL/UVM waveform debug (FST + sim log + SystemVerilog static analysis) — an Indago/Verisium Debug MCP alternative."
 readme = "README.md"
 requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "wukongxin", email = "wukongxin@tencent.com" }]
+keywords = ["mcp", "waveform", "fst", "vcd", "verilog", "systemverilog", "rtl", "uvm", "debug", "eda"]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+]
 dependencies = [
     "mcp>=1.2.0",
     "pylibfst>=0.2.1",
