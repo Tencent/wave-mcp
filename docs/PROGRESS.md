@@ -7,7 +7,7 @@
 
 ## 1. 一句话现状
 
-9 大类、37 个工具全部实现（对齐 Indago）；单一技术栈 **FST(pylibfst) + xrun.log + pyslang 网表**，无需 Surelog/UHDM/Verible。核心调试能力（会话/层次/信号/值/日志/波形/连接/驱动/trace）端到端跑通。**已在真实大型 RTL + 真实 Verilator FST 上验证**：用开源 Verilator 对 OpenTitan `tlul_adapter_host` / `tlul_socket_1n` / lowRISC `ibex_core`(17 模块/1993 信号) 生成 FST，端到端断言全 PASS——结构提取、字段级 driver、active_drivers 定位 RTL 源、trace_value 跨模块穿透(最深 4 层 `ibex_core→if_stage→prefetch_buffer→fetch_fifo`)且节点带真实波形值。验证套件见 `tests/verilator_fst/`。
+9 大类、37 个工具全部实现（对齐 Indago）；单一技术栈 **FST(pylibfst) + xrun.log + pyslang 网表**，无需 Surelog/UHDM/Verible。核心调试能力（会话/层次/信号/值/日志/波形/连接/驱动/trace）端到端跑通。**已在真实大型 RTL + 真实 Verilator FST 上验证**：用开源 Verilator 对 OpenTitan `tlul_adapter_host` / `tlul_socket_1n` / lowRISC `ibex_core`(17 模块/1993 信号) 生成 FST，端到端断言全 PASS——结构提取、字段级 driver、active_drivers 定位 RTL 源、trace_value 跨模块穿透(最深 4 层 `ibex_core→if_stage→prefetch_buffer→fetch_fifo`)且节点带真实波形值。（该验证套件依赖本地 OpenTitan 源码树，未随开源发布；开源侧的开箱示例见 `examples/verilator_quickstart/`。）
 
 ---
 
@@ -59,8 +59,9 @@
 ## 4. To-Do（按优先级）
 
 ### P0 — 上线 / 移植 / 真实性验证
-- [x] **真实 RTL 验证（结构类，OpenTitan 四批）**：`tests/opentitan_elab_check.py` 对 4 批 10 个真实模块跑 build_netlist + pyslang 自身 elaboration 做 ground-truth 端口/实例对账。10/10 elaborate 成功、端口与实例对账全一致。已修：generate 穿透、实例端口驱动、GT 实例口径（递归 generate）、字段级建模。
-- [x] **真实大型波形验证（动态类，Verilator FST）**：`tests/verilator_fst/` —— 用开源 Verilator 生成真实 FST，对 `tlul_adapter_host` / `tlul_socket_1n` / `ibex_core` 跑 netlist+FST+trace 断言，全 PASS。验证了 active_drivers 定位 RTL 源、trace_value 跨模块穿透(最深 4 层)且节点带真实波形值。修复了 ibex 触发的 InvalidExpression 崩溃。
+- [x] **真实 RTL 验证（结构类，OpenTitan 四批）**：用内部 OpenTitan 对账脚本对 4 批 10 个真实模块跑 build_netlist + pyslang 自身 elaboration 做 ground-truth 端口/实例对账。10/10 elaborate 成功、端口与实例对账全一致。已修：generate 穿透、实例端口驱动、GT 实例口径（递归 generate）、字段级建模。
+- [x] **真实大型波形验证（动态类，Verilator FST）**：用内部 Verilator 验证套件生成真实 FST，对 `tlul_adapter_host` / `tlul_socket_1n` / `ibex_core` 跑 netlist+FST+trace 断言，全 PASS。验证了 active_drivers 定位 RTL 源、trace_value 跨模块穿透(最深 4 层)且节点带真实波形值。修复了 ibex 触发的 InvalidExpression 崩溃。
+  > 上述两套验证脚本依赖本地 OpenTitan 源码树，属内部资产，**未随开源发布**；开源侧可跑 `examples/verilator_quickstart/`。
   - 待办：for-generate 重复 driver 计数核实；Verilator FST 默认不 dump 全部内部组合 wire，深层组合节点取值受限（trace 结构正确，止于可见边界）——如需更密的值标注可加 `--trace-structs`/显式 dump 或换 xrun。
 - [ ] **隔离网部署演练**：在与目标机一致的机器上跑通离线 bundle，校验启动/退出/多用户隔离。
 

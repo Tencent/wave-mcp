@@ -23,3 +23,7 @@ runtime/
 # offline bundle build outputs (built via deploy/, not tracked)
 wave-mcp-bundle*/
 *.tar.gz
+
+# internal validation harnesses (depend on a local OpenTitan tree; not published)
+tests/verilator_fst/
+tests/opentitan_elab_check.py
