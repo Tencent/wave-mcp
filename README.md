@@ -1,6 +1,6 @@
 # wave-mcp — 基于 xrun 的开源 Indago MCP 替代方案
 
-去 License、无并发上限的 AI 辅助波形调试 MCP Server。用 **FST 波形 + xrun.log + pyslang RTL 网表 + urg 覆盖率/断言** 等开源数据源，对齐 Cadence Indago / Verisium Debug MCP，共 **37 个工具**。本项目以 **MIT** 许可开源。
+去 License、无并发上限的 AI 辅助波形调试 MCP Server。用 **FST 波形 + xrun.log + pyslang RTL 网表 + urg 覆盖率/断言** 等开源数据源，对齐 Cadence Indago / Verisium Debug MCP 的能力（工具名为独立的简洁命名），共 **35 个工具**。本项目以 **MIT** 许可开源。
 
 > 仿真器：xrun（Cadence Xcelium）。xrun 仿真与 dump 波形本身不占 Indago License —— 真正吃 License 的是 Indago 的波形引擎与调试数据库。本项目替换掉该波形引擎层，MCP 层完全开源自建，**支持任意并发**。
 
@@ -75,7 +75,7 @@ python examples/verilator_quickstart/run.py   # 需 verilator>=5；详见该目�
 
 ### 标准工作流（模型分析波形的统一入口）
 
-团队固定流程：**仿真产出波形 → 转 FST → 读取分析**。`prepare_session` 是这条链的统一入口——模型想开始分析波形时**第一步就调它**，传入仿真已产出的波形文件，一次完成"（转换 →）解析日志 → 建 session → launch"，返回即可直接查询。
+团队固定流程：**仿真产出波形 → 转 FST → 读取分析**。`prepare_session` 是这条链的统一入口——模型想开始分析波形时**第一步就调它**，传入仿真已产出的波形文件，一次完成"（转换 →）解析日志 → 建 session → 打开"，返回即可直接查询。
 
 > **它不跑仿真器**：请先用你自己的流程（xrun / Verilator / 任意）跑出波形，再把结果 `.fst` / `.vcd` 交给它。这样开源版本不承载任何 shell 执行面。
 
@@ -98,11 +98,11 @@ prepare_session({
   "filelist_path":"rtl.f",                 // 与仿真同一份 filelist
   "mode":         "speed"                   // VCD->FST：speed/balanced/size（仅 .vcd 时生效）
 })
-// 返回 ready + session 摘要后，接着调 get_signals_values / get_child_instances_of_instance ...
+// 返回 ready + session 摘要后，接着调 signal_values / list_child_instances ...
 ```
 
 > 传入 `.fst` 时零转换、直接读取；传入 `.vcd` 时自动转成 FST（体积约为 VCD 的 1/50）。
-> 想拆开用也行：`convert_vcd_to_fst` → `launch`。
+> 想拆开用也行：`convert_vcd_to_fst` → `open_session`。
 
 ### VCD → FST 转换（仿真的开源可解析 dump 是 VCD）
 
@@ -144,7 +144,7 @@ wave-session --vcd sim/dump.vcd --log sim/xrun.log --top top_tb --filelist rtl.f
   `python -m wave_mcp.server --session <session_dir>`
 - **模式二 中心常驻 HTTP + 多 Session**：一个常驻服务，用 `session_id` 给每用户分隔离会话。
   `python -m wave_mcp.server --transport http --host 0.0.0.0 --port 8000`
-  每个工具都接受可选 `session_id` 参数；先 `launch(session_path, session_id=...)` 再调用其它工具。
+  每个工具都接受可选 `session_id` 参数；先 `open_session(session_path, session_id=...)` 再调用其它工具。
 
 ### 隔离网 / 离线环境部署
 多机器、多用户、Python 版本不一、无外网 → **共享存储自带独立 Python 运行时**，stdio 无感启停。
@@ -153,21 +153,21 @@ wave-session --vcd sim/dump.vcd --log sim/xrun.log --top top_tb --filelist rtl.f
 
 ---
 
-## 工具覆盖度（37 工具，对齐 Indago）
+## 工具覆盖度（35 工具，对齐 Indago 能力）
 
 | 类别 | 工具 | 状态 |
 | --- | --- | --- |
 | 0 波形准备 | prepare_session / convert_vcd_to_fst | ✅ 波形文件入口（.fst 直读 / .vcd 自动转）→ session 一条龙；不跑仿真器 |
-| 1 会话管理 | launch / connect / disconnect / get_session_info | ✅ get_session_info 含 netlist_health + definition_coverage |
-| 2 层次探索 | get_child_instances_of_instance / get_all_module_names / get_instances_by_module(_filtered) / get_scope_module_information | ✅ 模块定义名走**三层解析**：pyslang 网表(leaf/后缀/锚点) → 命名推断 → 手工 scope_map；声明位置来自网表 |
-| 3 信号查询 | get_signals_of_instance / get_signal_information | ✅ 位宽/方向/类型来自 FST（含总线聚合 + RTL 位宽校验）；声明文件+行号来自 pyslang 网表 |
-| 4 信号值 | get_signals_values / get_signal_values_between_times | ✅ FST 强项，随机访问 |
-| 5 连接/驱动 | get_signals_connectivity / drivers / loads / fan_in / active_drivers / driver_contributors | ✅ pyslang 网表（连接/驱动/扇入扇出，静态精确）+ **分支条件 4 值求值**选活跃驱动，不确定回退启发式；无网表时优雅降级 |
+| 1 会话管理 | open_session / close_session / session_info | ✅ session_info 含 netlist_health + definition_coverage |
+| 2 层次探索 | list_child_instances / list_modules / instances_of_module(_matching) / scope_info | ✅ 模块定义名走**三层解析**：pyslang 网表(leaf/后缀/锚点) → 命名推断 → 手工 scope_map；声明位置来自网表 |
+| 3 信号查询 | list_signals / signal_info | ✅ 位宽/方向/类型来自 FST（含总线聚合 + RTL 位宽校验）；声明文件+行号来自 pyslang 网表 |
+| 4 信号值 | signal_values / signal_values_in_range | ✅ FST 强项，随机访问 |
+| 5 连接/驱动 | signal_connectivity / signal_drivers / signal_loads / signal_fanin / active_drivers / driver_contributors | ✅ pyslang 网表（连接/驱动/扇入扇出，静态精确）+ **分支条件 4 值求值**选活跃驱动，不确定回退启发式；无网表时优雅降级 |
 | 6 值追踪 | trace_value / trace_x | ✅ pyslang 网表 × FST 值反向遍历，支持跨模块下钻；trace_x 近似 |
-| 7 仿真日志 | get_all_error_messages / warnings / containing_string / info_by_indices / information_by_indices | ✅ |
-| 8 文件查询 | get_all_files / get_files_by_short_name / get_modules_in_file | ✅（filelist + pyslang 网表） |
-| — 覆盖率 | get_coverage_summary / get_coverage_detail / get_coverage_holes | ✅ 解析 urg 文本报告 + all_bins.csv |
-| — 断言 | get_assertion_summary / get_assertion_status / get_assertion_failures | ✅ xrun.log 失败 + CSV 通过率 |
+| 7 仿真日志 | log_errors / log_warnings / search_log / log_messages_by_index | ✅ |
+| 8 文件查询 | list_files / find_files / modules_in_file | ✅（filelist + pyslang 网表） |
+| — 覆盖率 | coverage_summary / coverage_detail / coverage_holes | ✅ 解析 urg 文本报告 + all_bins.csv |
+| — 断言 | assertion_summary / assertion_status / assertion_failures | ✅ xrun.log 失败 + CSV 通过率 |
 
 全部工具均已实现（单一 pyslang + FST 后端）。第 5/6 类的活跃驱动判定 / trace_x 在条件为 X 或表达式超出 4 值求值子集时为 value-informed 近似，会标注 `selection_method`；但始终提供精确的静态驱动链 + 每节点 FST 值 + 代码位置。
 
@@ -202,7 +202,7 @@ wave-session --vcd sim/dump.vcd --log sim/xrun.log --top top_tb --filelist rtl.f
 
 ```
 wave_mcp/
-  server.py              # MCP server，注册全部 37 工具（FastMCP）+ 人读文本渲染补丁
+  server.py              # MCP server，注册全部 35 工具（FastMCP）+ 人读文本渲染补丁
   session.py             # Session / SessionManager / session.json / 指纹校验 / 三层 definition_name
   pipeline.py            # prepare_session：波形文件入口(.fst 直读/.vcd 自动转)→网表→session 编排；.f filelist 解析
   convert.py             # vcd2fst 封装：并行能力探测 + 串行 fallback + FIFO 流式

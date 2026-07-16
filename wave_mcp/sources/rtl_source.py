@@ -203,7 +203,7 @@ class RtlSource:
     # -- category 5: connectivity / drivers / loads / fan-in ---------------
     def drivers(self, full_path: str) -> dict:
         if not self.has_netlist:
-            return Unavailable("get_signals_drivers", "netlist not built").to_dict()
+            return Unavailable("signal_drivers", "netlist not built").to_dict()
         mod, leaf, recs = self.engine.module_drivers(full_path)
         if mod is None:
             return {"available": True, "signal": full_path, "drivers": [],
@@ -218,7 +218,7 @@ class RtlSource:
 
     def loads(self, full_path: str) -> dict:
         if not self.has_netlist:
-            return Unavailable("get_signals_loads", "netlist not built").to_dict()
+            return Unavailable("signal_loads", "netlist not built").to_dict()
         inst, leaf, mod = self._resolve(full_path)
         if not mod or mod not in self.maps["modules"]:
             return {"available": True, "signal": full_path, "loads": []}
@@ -229,7 +229,7 @@ class RtlSource:
     def fan_in(self, signal_path: str, transitive: bool = False,
                max_signals: int = 500) -> dict:
         if not self.has_netlist:
-            return Unavailable("get_fan_in_signals", "netlist not built").to_dict()
+            return Unavailable("signal_fanin", "netlist not built").to_dict()
         inst, leaf, mod = self._resolve(signal_path)
         if not mod or mod not in self.maps["modules"]:
             return {"available": True, "signal": signal_path, "fan_in": []}
@@ -250,7 +250,7 @@ class RtlSource:
 
     def connectivity(self, full_path: str) -> dict:
         if not self.has_netlist:
-            return Unavailable("get_signals_connectivity", "netlist not built").to_dict()
+            return Unavailable("signal_connectivity", "netlist not built").to_dict()
         inst, leaf, mod = self._resolve(full_path)
         if not mod or mod not in self.maps["modules"]:
             return {"available": True, "signal": full_path, "connected": []}
@@ -268,12 +268,12 @@ class RtlSource:
     # -- category 5.5 / 6: active drivers + trace --------------------------
     def active_drivers(self, signal_full_path: str, time: str) -> dict:
         if not self.has_netlist:
-            return Unavailable("get_active_drivers_of_signal", "netlist not built").to_dict()
+            return Unavailable("active_drivers", "netlist not built").to_dict()
         return self.engine.active_drivers(signal_full_path, time)
 
     def driver_contributors(self, driver_unique_id: str) -> dict:
         if not self.has_netlist:
-            return Unavailable("get_driver_contributors", "netlist not built").to_dict()
+            return Unavailable("driver_contributors", "netlist not built").to_dict()
         return self.engine.driver_contributors(driver_unique_id)
 
     def trace_value(self, signal_path: str, time_point: str) -> dict:

@@ -7,7 +7,7 @@
 
 ## 1. 一句话现状
 
-9 大类、37 个工具全部实现（对齐 Indago）；单一技术栈 **FST(pylibfst) + xrun.log + pyslang 网表**，无需 Surelog/UHDM/Verible。核心调试能力（会话/层次/信号/值/日志/波形/连接/驱动/trace）端到端跑通。**已在真实大型 RTL + 真实 Verilator FST 上验证**：用开源 Verilator 对 OpenTitan `tlul_adapter_host` / `tlul_socket_1n` / lowRISC `ibex_core`(17 模块/1993 信号) 生成 FST，端到端断言全 PASS——结构提取、字段级 driver、active_drivers 定位 RTL 源、trace_value 跨模块穿透(最深 4 层 `ibex_core→if_stage→prefetch_buffer→fetch_fifo`)且节点带真实波形值。（该验证套件依赖本地 OpenTitan 源码树，未随开源发布；开源侧的开箱示例见 `examples/verilator_quickstart/`。）
+9 大类、35 个工具全部实现（对齐 Indago 能力，工具名为独立简洁命名）；单一技术栈 **FST(pylibfst) + xrun.log + pyslang 网表**，无需 Surelog/UHDM/Verible。核心调试能力（会话/层次/信号/值/日志/波形/连接/驱动/trace）端到端跑通。**已在真实大型 RTL + 真实 Verilator FST 上验证**：用开源 Verilator 对 OpenTitan `tlul_adapter_host` / `tlul_socket_1n` / lowRISC `ibex_core`(17 模块/1993 信号) 生成 FST，端到端断言全 PASS——结构提取、字段级 driver、active_drivers 定位 RTL 源、trace_value 跨模块穿透(最深 4 层 `ibex_core→if_stage→prefetch_buffer→fetch_fifo`)且节点带真实波形值。（该验证套件依赖本地 OpenTitan 源码树，未随开源发布；开源侧的开箱示例见 `examples/verilator_quickstart/`。）
 
 ---
 
@@ -77,7 +77,7 @@
 - [ ] **大 FST 压测** + LRU 缓存 + 句柄/索引复用；point-query 与区间查询基准。
 - [ ] **netlist 增量重建**：按源码指纹缓存，仅变更模块重建。
 - [ ] **HTTP 多 Session 完善**：会话生命周期、并发隔离、（可选）鉴权、压测。
-- [ ] `get_scope_module_information` 补实例化代码片段；`get_signal_information` 补 enum/struct 展开。
+- [ ] `scope_info` 补实例化代码片段；`signal_info` 补 enum/struct 展开。
 - [ ] 单元测试覆盖（expr_eval 真值表、log 解析、time 换算、netlist 提取）。
 
 ---

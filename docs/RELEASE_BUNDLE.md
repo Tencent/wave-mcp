@@ -92,7 +92,7 @@ tar -xzf $B.tar.gz -C /tmp/_verify && /tmp/_verify/wave-mcp-bundle-vX.Y/install.
 
 **自检清单（逐条打勾）**
 - [ ] wheel 含本次改动的源码
-- [ ] 工具数 37
+- [ ] 工具数 35
 - [ ] wheels 32 个、无 cryptography
 - [ ] `vcd2fst -p` 通过、GLIBC ≤ 2.14
 - [ ] smoke_test / test_definition_name 通过

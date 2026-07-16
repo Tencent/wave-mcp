@@ -1,7 +1,6 @@
 """wave-mcp MCP server.
 
-Exposes ~40 tools that mirror the Cadence Indago / Verisium Debug MCP tool names
-so existing prompts / skills keep working, but backed entirely by open-source
+Exposes ~35 concise tools for waveform debug, backed entirely by open-source
 sources (FST + xrun.log + RTL static analysis). No license required;
 any number of sessions can run concurrently.
 
@@ -136,11 +135,10 @@ def _sess(session_id: Optional[str]):
 # 1. Session management
 # =============================================================================
 @mcp.tool()
-def launch(session_path: str, session_id: Optional[str] = None) -> dict[str, Any]:
+def open_session(session_path: str, session_id: Optional[str] = None) -> dict[str, Any]:
     """Open a debug session from a session directory or session.json manifest.
 
-    Open-source replacement for Indago ``launch`` — opens the FST waveform, the
-    xrun.log and the RTL netlist maps (if built).
+    Opens the FST waveform, the sim log and the RTL netlist maps (if built).
     Does NOT consume any license and supports unlimited concurrent sessions.
     """
     sid = SESSIONS.open(session_path, session_id)
@@ -149,20 +147,14 @@ def launch(session_path: str, session_id: Optional[str] = None) -> dict[str, Any
 
 
 @mcp.tool()
-def connect(session_path: str, session_id: Optional[str] = None) -> dict[str, Any]:
-    """Alias of ``launch`` (kept for Indago parity). Opens/attaches a session."""
-    return launch(session_path, session_id)
-
-
-@mcp.tool()
-def disconnect(session_id: Optional[str] = None) -> dict[str, Any]:
+def close_session(session_id: Optional[str] = None) -> dict[str, Any]:
     """Close a session and release its resources (FST handle)."""
     ok = SESSIONS.close(session_id)
     return {"status": "disconnected" if ok else "no-such-session"}
 
 
 @mcp.tool()
-def get_session_info(session_id: Optional[str] = None) -> dict[str, Any]:
+def session_info(session_id: Optional[str] = None) -> dict[str, Any]:
     """Return a summary of the active session (top, time range, counts, warnings)."""
     return _sess(session_id).summary()
 
@@ -190,7 +182,7 @@ def prepare_session(out_dir: str, wave_path: str,
     own flow first, then point this at the resulting ``.fst`` or ``.vcd``.
 
     Call this first whenever you want to start analyzing a waveform; afterwards
-    use the query tools (get_signals_values, get_child_instances_of_instance, ...).
+    use the query tools (signal_values, list_child_instances, ...).
 
     Args:
         out_dir: directory to hold the session (session.json, fst).
@@ -252,7 +244,7 @@ def convert_vcd_to_fst(vcd_path: str, fst_path: Optional[str] = None,
 # 2. Design hierarchy exploration
 # =============================================================================
 @mcp.tool()
-def get_child_instances_of_instance(instance_full_path: str = "",
+def list_child_instances(instance_full_path: str = "",
                                     number_of_levels: int = 1,
                                     max_scopes: int = 2000,
                                     filter_noise: bool = False,
@@ -271,7 +263,7 @@ def get_child_instances_of_instance(instance_full_path: str = "",
 
 
 @mcp.tool()
-def get_all_module_names(name_contains: Optional[str] = None,
+def list_modules(name_contains: Optional[str] = None,
                          session_id: Optional[str] = None) -> dict[str, Any]:
     """Get all module definition names in the design (optionally filtered)."""
     names = _sess(session_id).fst.all_module_names(name_contains)
@@ -279,14 +271,14 @@ def get_all_module_names(name_contains: Optional[str] = None,
 
 
 @mcp.tool()
-def get_instances_by_module(module: str, session_id: Optional[str] = None) -> dict[str, Any]:
+def instances_of_module(module: str, session_id: Optional[str] = None) -> dict[str, Any]:
     """Get all instantiation paths of a given module."""
     paths = _sess(session_id).fst.instances_by_module(module)
     return {"count": len(paths), "instances": paths}
 
 
 @mcp.tool()
-def get_instances_by_module_filtered(module: str, string_in_instance_name: str,
+def instances_of_module_matching(module: str, string_in_instance_name: str,
                                      session_id: Optional[str] = None) -> dict[str, Any]:
     """Get instantiation paths of a module filtered by instance-name substring."""
     paths = _sess(session_id).fst.instances_by_module(module, string_in_instance_name)
@@ -294,7 +286,7 @@ def get_instances_by_module_filtered(module: str, string_in_instance_name: str,
 
 
 @mcp.tool()
-def get_scope_module_information(scope_full_path: str,
+def scope_info(scope_full_path: str,
                                  session_id: Optional[str] = None) -> dict[str, Any]:
     """Get module info for a scope: module type, declaration & instantiation code.
 
@@ -314,7 +306,7 @@ def get_scope_module_information(scope_full_path: str,
 # 3. Signal query
 # =============================================================================
 @mcp.tool()
-def get_signals_of_instance(instance_full_path: str,
+def list_signals(instance_full_path: str,
                             filter_by_name: Optional[str] = None,
                             filter_by_type: Optional[str] = None,
                             max_signals: int = 2000,
@@ -345,7 +337,7 @@ def get_signals_of_instance(instance_full_path: str,
 
 
 @mcp.tool()
-def get_signal_information(full_path: str, session_id: Optional[str] = None) -> dict[str, Any]:
+def signal_info(full_path: str, session_id: Optional[str] = None) -> dict[str, Any]:
     """Get signal metadata: width, type, direction, and declaration file/line.
 
     Width/type/direction come from the FST; declaration file+line is resolved
@@ -365,7 +357,7 @@ def get_signal_information(full_path: str, session_id: Optional[str] = None) -> 
 # 4. Signal value query
 # =============================================================================
 @mcp.tool()
-def get_signals_values(full_path: str, max_number_of_values: int = 1000,
+def signal_values(full_path: str, max_number_of_values: int = 1000,
                        session_id: Optional[str] = None) -> dict[str, Any]:
     """Get all value changes of a signal across the whole simulation."""
     s = _sess(session_id)
@@ -376,7 +368,7 @@ def get_signals_values(full_path: str, max_number_of_values: int = 1000,
 
 
 @mcp.tool()
-def get_signal_values_between_times(full_path: str, start_time_as_string: str,
+def signal_values_in_range(full_path: str, start_time_as_string: str,
                                     end_time_as_string: str,
                                     max_number_of_values: int = 5000,
                                     session_id: Optional[str] = None) -> dict[str, Any]:
@@ -397,38 +389,38 @@ def get_signal_values_between_times(full_path: str, start_time_as_string: str,
 # 5. Connectivity & driver analysis (RTL / UHDM — stage 3/4, graceful degrade)
 # =============================================================================
 @mcp.tool()
-def get_signals_connectivity(full_path: str, session_id: Optional[str] = None) -> dict[str, Any]:
+def signal_connectivity(full_path: str, session_id: Optional[str] = None) -> dict[str, Any]:
     """Get signals directly wire-connected to the given signal (needs UHDM)."""
     return _sess(session_id).rtl.connectivity(full_path)
 
 
 @mcp.tool()
-def get_signals_drivers(full_path: str, session_id: Optional[str] = None) -> dict[str, Any]:
+def signal_drivers(full_path: str, session_id: Optional[str] = None) -> dict[str, Any]:
     """Get all code locations that can drive the given signal (static; needs UHDM)."""
     return _sess(session_id).rtl.drivers(full_path)
 
 
 @mcp.tool()
-def get_signals_loads(full_path: str, session_id: Optional[str] = None) -> dict[str, Any]:
+def signal_loads(full_path: str, session_id: Optional[str] = None) -> dict[str, Any]:
     """Get all signals affected by the given signal (fan-out; needs UHDM)."""
     return _sess(session_id).rtl.loads(full_path)
 
 
 @mcp.tool()
-def get_fan_in_signals(signal_path: str, session_id: Optional[str] = None) -> dict[str, Any]:
+def signal_fanin(signal_path: str, session_id: Optional[str] = None) -> dict[str, Any]:
     """Get all signals that can affect the given signal (fan-in; needs UHDM)."""
     return _sess(session_id).rtl.fan_in(signal_path)
 
 
 @mcp.tool()
-def get_active_drivers_of_signal(signal_full_path: str, time_as_string: str,
+def active_drivers(signal_full_path: str, time_as_string: str,
                                  session_id: Optional[str] = None) -> dict[str, Any]:
     """Get the active driver(s) of a signal at a time point (dynamic; needs UHDM+FST)."""
     return _sess(session_id).rtl.active_drivers(signal_full_path, time_as_string)
 
 
 @mcp.tool()
-def get_driver_contributors(driver_unique_id: str,
+def driver_contributors(driver_unique_id: str,
                             session_id: Optional[str] = None) -> dict[str, Any]:
     """Get the contributing signals (RHS / control) of a driver (needs UHDM)."""
     return _sess(session_id).rtl.driver_contributors(driver_unique_id)
@@ -455,21 +447,21 @@ def trace_x(signal_path: str, time_point: str,
 # 7. Simulation log
 # =============================================================================
 @mcp.tool()
-def get_all_error_messages(session_id: Optional[str] = None) -> dict[str, Any]:
+def log_errors(session_id: Optional[str] = None) -> dict[str, Any]:
     """Get all error/fatal messages from xrun.log."""
     rows = _sess(session_id).log.errors()
     return {"count": len(rows), "messages": rows}
 
 
 @mcp.tool()
-def get_all_warnings_messages(session_id: Optional[str] = None) -> dict[str, Any]:
+def log_warnings(session_id: Optional[str] = None) -> dict[str, Any]:
     """Get all warning messages from xrun.log."""
     rows = _sess(session_id).log.warnings()
     return {"count": len(rows), "messages": rows}
 
 
 @mcp.tool()
-def get_messages_containing_string(search_string: str,
+def search_log(search_string: str,
                                    session_id: Optional[str] = None) -> dict[str, Any]:
     """Search xrun.log messages containing a substring."""
     rows = _sess(session_id).log.containing(search_string)
@@ -477,17 +469,9 @@ def get_messages_containing_string(search_string: str,
 
 
 @mcp.tool()
-def get_messages_info_by_indices(indices: List[int],
-                                 session_id: Optional[str] = None) -> dict[str, Any]:
-    """Get full details for messages by their indices."""
-    rows = _sess(session_id).log.by_indices(indices)
-    return {"count": len(rows), "messages": rows}
-
-
-@mcp.tool()
-def get_messages_information_by_indices(indices: List[int],
-                                        session_id: Optional[str] = None) -> dict[str, Any]:
-    """Alias of get_messages_info_by_indices (Indago-compatible name)."""
+def log_messages_by_index(indices: List[int],
+                          session_id: Optional[str] = None) -> dict[str, Any]:
+    """Get full details for log messages by their indices."""
     rows = _sess(session_id).log.by_indices(indices)
     return {"count": len(rows), "messages": rows}
 
@@ -496,7 +480,7 @@ def get_messages_information_by_indices(indices: List[int],
 # 7b. Coverage (urg text report / all_bins.csv)
 # =============================================================================
 @mcp.tool()
-def get_coverage_summary(instance_full_path: Optional[str] = None,
+def coverage_summary(instance_full_path: Optional[str] = None,
                          max_depth: int = 2,
                          session_id: Optional[str] = None) -> dict[str, Any]:
     """Coverage summary tree (Overall/Block/Expression/Toggle/Fsm/Functional).
@@ -515,7 +499,7 @@ def get_coverage_summary(instance_full_path: Optional[str] = None,
 
 
 @mcp.tool()
-def get_coverage_detail(instance_full_path: str,
+def coverage_detail(instance_full_path: str,
                         session_id: Optional[str] = None) -> dict[str, Any]:
     """Full coverage metrics + children for one instance node."""
     cov = _sess(session_id).coverage
@@ -525,7 +509,7 @@ def get_coverage_detail(instance_full_path: str,
 
 
 @mcp.tool()
-def get_coverage_holes(threshold: float = 90.0, metric: str = "overall",
+def coverage_holes(threshold: float = 90.0, metric: str = "overall",
                        max_results: int = 100,
                        session_id: Optional[str] = None) -> dict[str, Any]:
     """List design nodes whose coverage is below ``threshold`` for ``metric``.
@@ -544,7 +528,7 @@ def get_coverage_holes(threshold: float = 90.0, metric: str = "overall",
 # 7c. Assertions (xrun.log failures + all_bins.csv status)
 # =============================================================================
 @mcp.tool()
-def get_assertion_failures(max_results: int = 300,
+def assertion_failures(max_results: int = 300,
                            session_id: Optional[str] = None) -> dict[str, Any]:
     """Assertion failures parsed from xrun.log (*E/*F,ASRT* lines).
 
@@ -557,7 +541,7 @@ def get_assertion_failures(max_results: int = 300,
 
 
 @mcp.tool()
-def get_assertion_status(name_contains: Optional[str] = None,
+def assertion_status(name_contains: Optional[str] = None,
                          only_failing: bool = False,
                          max_results: int = 500,
                          session_id: Optional[str] = None) -> dict[str, Any]:
@@ -572,13 +556,13 @@ def get_assertion_status(name_contains: Optional[str] = None,
         return {"available": False,
                 "reason": "no assertion status csv attached (urg all_bins.csv); "
                           "assertion FAILURES from the log are still available via "
-                          "get_assertion_failures"}
+                          "assertion_failures"}
     rows = asr.status(name_contains, only_failing, max_results)
     return {"available": True, "count": len(rows), "assertions": rows}
 
 
 @mcp.tool()
-def get_assertion_summary(session_id: Optional[str] = None) -> dict[str, Any]:
+def assertion_summary(session_id: Optional[str] = None) -> dict[str, Any]:
     """Assertion overview: #failures in log, #assertions, #failing, cover count."""
     return _sess(session_id).assertions.summary()
 
@@ -587,14 +571,14 @@ def get_assertion_summary(session_id: Optional[str] = None) -> dict[str, Any]:
 # 8. File query
 # =============================================================================
 @mcp.tool()
-def get_all_files(session_id: Optional[str] = None) -> dict[str, Any]:
+def list_files(session_id: Optional[str] = None) -> dict[str, Any]:
     """Get all source files participating in the design (from the filelist)."""
     files = _sess(session_id).rtl.all_files()
     return {"count": len(files), "files": files}
 
 
 @mcp.tool()
-def get_files_by_short_name(file_short_name: str, return_exact_names: bool = False,
+def find_files(file_short_name: str, return_exact_names: bool = False,
                             session_id: Optional[str] = None) -> dict[str, Any]:
     """Find full file paths by (partial) short name."""
     files = _sess(session_id).rtl.files_by_short_name(file_short_name, return_exact_names)
@@ -602,7 +586,7 @@ def get_files_by_short_name(file_short_name: str, return_exact_names: bool = Fal
 
 
 @mcp.tool()
-def get_modules_in_file(full_file_path: str, session_id: Optional[str] = None) -> dict[str, Any]:
+def modules_in_file(full_file_path: str, session_id: Optional[str] = None) -> dict[str, Any]:
     """Get all modules declared in a given file."""
     mods = _sess(session_id).rtl.modules_in_file(full_file_path)
     return {"count": len(mods), "modules": mods}
