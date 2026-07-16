@@ -58,7 +58,6 @@ def main(argv=None):
     p.add_argument("--vcd", help="VCD to convert to FST (xrun open dump format)")
     p.add_argument("--convert-mode", choices=["speed", "balanced", "size"],
                    default="speed", help="VCD->FST packing mode (default: speed)")
-    p.add_argument("--log", help="xrun.log path")
     p.add_argument("--top", default="", help="top instance name")
     p.add_argument("--filelist", help="xrun filelist (.f) — same one used for sim")
     p.add_argument("--out", required=True, help="output session directory")
@@ -108,7 +107,6 @@ def main(argv=None):
     manifest = {
         "top": args.top,
         "fst_path": fst,
-        "log_path": os.path.abspath(args.log) if args.log else None,
         "maps_path": maps_path,
         "filelist": filelist_files,
         "fst_hash": _sha1(fst),

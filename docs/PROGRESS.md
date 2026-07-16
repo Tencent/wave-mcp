@@ -7,7 +7,7 @@
 
 ## 1. 一句话现状
 
-9 大类、35 个工具全部实现（对齐 Indago 能力，工具名为独立简洁命名）；单一技术栈 **FST(pylibfst) + xrun.log + pyslang 网表**，无需 Surelog/UHDM/Verible。核心调试能力（会话/层次/信号/值/日志/波形/连接/驱动/trace）端到端跑通。**已在真实大型 RTL + 真实 Verilator FST 上验证**：用开源 Verilator 对 OpenTitan `tlul_adapter_host` / `tlul_socket_1n` / lowRISC `ibex_core`(17 模块/1993 信号) 生成 FST，端到端断言全 PASS——结构提取、字段级 driver、active_drivers 定位 RTL 源、trace_value 跨模块穿透(最深 4 层 `ibex_core→if_stage→prefetch_buffer→fetch_fifo`)且节点带真实波形值。（该验证套件依赖本地 OpenTitan 源码树，未随开源发布；开源侧的开箱示例见 `examples/verilator_quickstart/`。）
+8 大类、25 个工具全部实现（对齐 Indago 核心能力，工具名为独立简洁命名）；单一技术栈 **FST(pylibfst) + pyslang 网表**，无需 Surelog/UHDM/Verible。核心调试能力（会话/层次/信号/值/波形/连接/驱动/trace/文件）端到端跑通。**已在真实大型 RTL + 真实 Verilator FST 上验证**：用开源 Verilator 对 OpenTitan `tlul_adapter_host` / `tlul_socket_1n` / lowRISC `ibex_core`(17 模块/1993 信号) 生成 FST，端到端断言全 PASS——结构提取、字段级 driver、active_drivers 定位 RTL 源、trace_value 跨模块穿透(最深 4 层 `ibex_core→if_stage→prefetch_buffer→fetch_fifo`)且节点带真实波形值。（该验证套件依赖本地 OpenTitan 源码树，未随开源发布；开源侧的开箱示例见 `examples/verilator_quickstart/`。）
 
 ---
 
@@ -15,7 +15,6 @@
 
 ### 数据源层 `wave_mcp/sources/`
 - [x] `fst_source.py` — pylibfst 封装：层次(scope 树)、信号(位宽/方向/类型)、值查询（点查询 / 区间 / 全量，随机访问）。
-- [x] `log_source.py` — xrun.log + UVM 报文解析（error/warning/关键词/按索引）。
 - [x] `rtl_source.py` — 基于 pyslang 网表 + FST：连接/驱动/扇入扇出/声明定位/文件查询 + active_drivers/trace 转发；无网表时结构化降级。
 
 ### 静态分析 + trace `wave_mcp/netlist/`
@@ -31,7 +30,7 @@
 
 ### 波形准备 / 编排
 - [x] `convert.py` — VCD→FST（vcd2fst，speed/balanced/size 三档 + 并行 + FIFO 流式）。
-- [x] `pipeline.py` — `prepare_session`（波形文件入口：.fst 直读 / .vcd 自动转 → 解析日志 → 建网表 → 建会话，不跑仿真器）/ `build_manifest` / `build_netlist_maps`。
+- [x] `pipeline.py` — `prepare_session`（波形文件入口：.fst 直读 / .vcd 自动转 → 建网表 → 建会话，不跑仿真器）/ `build_manifest` / `build_netlist_maps`。
 
 ### 会话 / 服务 / CLI
 - [x] `session.py` — Session/SessionManager、session.json 清单、**指纹一致性校验**、分层降级。
@@ -50,7 +49,7 @@
 ## 3. 工具覆盖度（对齐 Indago）
 
 全部类别实现，详见 `README.md` 的覆盖度表。要点：
-- 会话/层次/信号/值/日志/文件/覆盖率/断言：完成且可靠。
+- 会话/层次/信号/值/文件：完成且可靠。
 - 5 类（连接/驱动）：静态精确；active_drivers 用分支条件求值（精确，回退启发式）。
 - 6 类（trace）：trace_value 用分支求值选驱动（准确）；**trace_x 近似**。
 

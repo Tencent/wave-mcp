@@ -115,23 +115,12 @@ module counter (
 endmodule
 """
 
-LOG = """xmvlog: Compiling source file counter.sv
-xmsim: *W,RNDXCEXCL (counter.sv,10): randomization note.
-UVM_INFO tb_top.sv(42) @ 10: reporter [PHASE] Starting run phase
-UVM_WARNING tb_top.sv(88) @ 25: reporter [CFG] config db lookup miss
-xmsim: *E,NOFDPC (counter.sv,14): overflow asserted unexpectedly.
-UVM_ERROR tb_top.sv(120) @ 50: reporter [SCB] data mismatch expected 00 got ff
-UVM_FATAL tb_top.sv(121) @ 50: reporter [SCB] too many errors
-"""
-
-
 def main():
     os.makedirs(OUT, exist_ok=True)
     vcd_path = os.path.join(OUT, "dump.vcd")
     fst_path = os.path.join(OUT, "dump.fst")
     sv_path = os.path.join(OUT, "counter.sv")
     tb_path = os.path.join(OUT, "top_tb.sv")
-    log_path = os.path.join(OUT, "xrun.log")
     flist = os.path.join(OUT, "rtl.f")
 
     with open(vcd_path, "w") as f:
@@ -140,8 +129,6 @@ def main():
         f.write(SV)
     with open(tb_path, "w") as f:
         f.write(TB)
-    with open(log_path, "w") as f:
-        f.write(LOG)
     with open(flist, "w") as f:
         f.write("counter.sv\ntop_tb.sv\n")
 

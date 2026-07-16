@@ -1,6 +1,6 @@
 # wave-mcp — 基于 xrun 的开源 Indago MCP 替代方案
 
-去 License、无并发上限的 AI 辅助波形调试 MCP Server。用 **FST 波形 + xrun.log + pyslang RTL 网表 + urg 覆盖率/断言** 等开源数据源，对齐 Cadence Indago / Verisium Debug MCP 的能力（工具名为独立的简洁命名），共 **35 个工具**。本项目以 **MIT** 许可开源。
+去 License、无并发上限的 AI 辅助波形调试 MCP Server。用 **FST 波形 + pyslang RTL 网表** 等开源数据源，对齐 Cadence Indago / Verisium Debug MCP 的核心能力（工具名为独立的简洁命名），共 **25 个工具**。本项目以 **MIT** 许可开源。
 
 > 仿真器：xrun（Cadence Xcelium）。xrun 仿真与 dump 波形本身不占 Indago License —— 真正吃 License 的是 Indago 的波形引擎与调试数据库。本项目替换掉该波形引擎层，MCP 层完全开源自建，**支持任意并发**。
 
@@ -11,7 +11,7 @@
 ```
 xrun 仿真 → dump 开源波形(FST) → wave-mcp Server(多数据源聚合) → LLM 客户端(MCP)
                                       ↑
-        FST + pyslang 网表 + xrun.log + urg 覆盖率/断言
+        FST 波形 + pyslang RTL 网表
 ```
 
 数据源（`wave_mcp/sources/` + `wave_mcp/netlist/`）：
@@ -19,9 +19,6 @@ xrun 仿真 → dump 开源波形(FST) → wave-mcp Server(多数据源聚合) �
 | 数据源 | 实现 | 覆盖的 Indago 类别 | 状态 |
 | --- | --- | --- | --- |
 | `fst_source.py`  | `pylibfst`（fstapi，随机访问）+ 总线聚合 | 层次探索、信号、信号值（2/3/4） | ✅ 已实现 |
-| `log_source.py`  | 纯 Python 解析 xrun.log / UVM | 仿真日志（7） | ✅ 已实现 |
-| `coverage_source.py` | 解析 urg 文本报告 + all_bins.csv | 覆盖率汇总/明细/漏洞 | ✅ 已实现 |
-| `assertion_source.py` | xrun.log 失败 + CSV 通过率 | SVA 断言状态/失败 | ✅ 已实现 |
 | `name_infer.py`  | 实例名→模块定义名命名推断 | 补全 module_type（netlist 未覆盖时兜底） | ✅ 已实现 |
 | `netlist/` + `rtl_source.py`  | **pyslang**（完整 elaboration）+ FST | 连接、驱动、扇入扇出、trace、文件/声明（5/6/8、2.5） | ✅ 已实现（单一后端，无需 Surelog/UHDM/Verible） |
 
@@ -49,13 +46,12 @@ pip install git+https://github.com/<your-org>/wave-mcp.git
 ## 快速开始
 
 ```bash
-# 1) 生成样例（手写 VCD -> vcd2fst -> FST + 伪 xrun.log + filelist）
+# 1) 生成样例（手写 VCD -> vcd2fst -> FST + filelist）
 python examples/make_sample.py
 
 # 2) 打包成 session（阶段5 的"无痛封装"）
 python -m wave_mcp.cli.build_session \
     --fst examples/sample/dump.fst \
-    --log examples/sample/xrun.log \
     --top top_tb --filelist examples/sample/rtl.f \
     --out examples/sample/session
 
@@ -75,14 +71,14 @@ python examples/verilator_quickstart/run.py   # 需 verilator>=5；详见该目�
 
 ### 标准工作流（模型分析波形的统一入口）
 
-团队固定流程：**仿真产出波形 → 转 FST → 读取分析**。`prepare_session` 是这条链的统一入口——模型想开始分析波形时**第一步就调它**，传入仿真已产出的波形文件，一次完成"（转换 →）解析日志 → 建 session → 打开"，返回即可直接查询。
+团队固定流程：**仿真产出波形 → 转 FST → 读取分析**。`prepare_session` 是这条链的统一入口——模型想开始分析波形时**第一步就调它**，传入仿真已产出的波形文件，一次完成"（转换 →）建网表 → 建 session → 打开"，返回即可直接查询。
 
 > **它不跑仿真器**：请先用你自己的流程（xrun / Verilator / 任意）跑出波形，再把结果 `.fst` / `.vcd` 交给它。这样开源版本不承载任何 shell 执行面。
 
 ```
 prepare_session ─┬─ 波形文件入口                 # .fst 直读 / .vcd 自动转
                  ├─ convert VCD → FST           # 仅当传入 .vcd，默认 speed(fastlz)
-                 ├─ parse xrun.log              # 可选，作为 session 日志
+                 ├─ build netlist (pyslang)     # 可选，enables 连接/驱动/trace
                  ├─ build session.json + 指纹
                  └─ open session                # 完成后直接用查询类工具
 ```
@@ -93,7 +89,6 @@ prepare_session ─┬─ 波形文件入口                 # .fst 直读 / .vc
 prepare_session({
   "out_dir":      "sessions/my_module",
   "wave_path":    "sim/dump.fst",          // 仿真产出的波形：.fst 直读 / .vcd 自动转
-  "log_path":     "sim/xrun.log",          // 可选，仿真日志（供消息类工具）
   "top":          "top_tb",
   "filelist_path":"rtl.f",                 // 与仿真同一份 filelist
   "mode":         "speed"                   // VCD->FST：speed/balanced/size（仅 .vcd 时生效）
@@ -118,7 +113,7 @@ wave-vcd2fst --stream --vcd sim/dump.vcd --fst sim/dump.fst   # 建 FIFO + 后�
 #   然后 TB 里 $dumpfile("sim/dump.vcd") 指向该 FIFO，正常跑 xrun 即可
 
 # 方式3：建 session 时一步到位（自动转 + 打包）
-wave-session --vcd sim/dump.vcd --log sim/xrun.log --top top_tb --filelist rtl.f --out sessions/mod
+wave-session --vcd sim/dump.vcd --top top_tb --filelist rtl.f --out sessions/mod
 ```
 
 也可让 AI 直接调用 MCP 工具 `convert_vcd_to_fst(vcd_path, fst_path, mode, parallel)`。
@@ -153,7 +148,7 @@ wave-session --vcd sim/dump.vcd --log sim/xrun.log --top top_tb --filelist rtl.f
 
 ---
 
-## 工具覆盖度（35 工具，对齐 Indago 能力）
+## 工具覆盖度（25 工具，对齐 Indago 核心能力）
 
 | 类别 | 工具 | 状态 |
 | --- | --- | --- |
@@ -164,10 +159,7 @@ wave-session --vcd sim/dump.vcd --log sim/xrun.log --top top_tb --filelist rtl.f
 | 4 信号值 | signal_values / signal_values_in_range | ✅ FST 强项，随机访问 |
 | 5 连接/驱动 | signal_connectivity / signal_drivers / signal_loads / signal_fanin / active_drivers / driver_contributors | ✅ pyslang 网表（连接/驱动/扇入扇出，静态精确）+ **分支条件 4 值求值**选活跃驱动，不确定回退启发式；无网表时优雅降级 |
 | 6 值追踪 | trace_value / trace_x | ✅ pyslang 网表 × FST 值反向遍历，支持跨模块下钻；trace_x 近似 |
-| 7 仿真日志 | log_errors / log_warnings / search_log / log_messages_by_index | ✅ |
 | 8 文件查询 | list_files / find_files / modules_in_file | ✅（filelist + pyslang 网表） |
-| — 覆盖率 | coverage_summary / coverage_detail / coverage_holes | ✅ 解析 urg 文本报告 + all_bins.csv |
-| — 断言 | assertion_summary / assertion_status / assertion_failures | ✅ xrun.log 失败 + CSV 通过率 |
 
 全部工具均已实现（单一 pyslang + FST 后端）。第 5/6 类的活跃驱动判定 / trace_x 在条件为 X 或表达式超出 4 值求值子集时为 value-informed 近似，会标注 `selection_method`；但始终提供精确的静态驱动链 + 每节点 FST 值 + 代码位置。
 
@@ -184,11 +176,11 @@ wave-session --vcd sim/dump.vcd --log sim/xrun.log --top top_tb --filelist rtl.f
 ## 开发路线图
 
 - [x] **阶段1 验证**：xrun dump VCD/FST + 波形可读。
-- [x] **阶段2 基础 MCP**：FST 读取 + xrun.log 解析；实现第 3/4/7 类。**可上线，立即缓解 License 压力。**
+- [x] **阶段2 基础 MCP**：FST 读取；实现第 3/4 类。**可上线，立即缓解 License 压力。**
 - [x] **阶段3 静态分析**：用 **pyslang** 完整 elaboration，离线构建并持久化 DriverMap/FanInMap/LoadMap/LocMap + instance_tree；补齐第 2.5/3行号/5/8 类。
 - [x] **阶段4 trace 引擎**：trace_value（多数场景准确）+ trace_x（近似）——"结构维(pyslang 网表) × 时间维(FST 波形值)"二维反向遍历。
 - [x] **阶段5 工程化**：`wave-session`/`prepare_session` 封装 + `session.json` + 指纹一致性校验 + 失败分级降级；隔离网离线运行时打包（共享存储自带 Python + glibc 兼容 vcd2fst）已完成，见 `docs/RELEASE_BUNDLE.md` / `docs/DEPLOY_AIRGAP.md`。
-- [x] **阶段6 数据质量与鲁棒性**：覆盖率/断言、网表自愈（incdir/包 + UVM 探测）、definition_name 三层解析、netlist_health、vcd2fst 并行、MCP 人读返回。
+- [x] **阶段6 数据质量与鲁棒性**：网表自愈（incdir/包 + UVM 探测）、definition_name 三层解析、netlist_health、vcd2fst 并行、MCP 人读返回。
 
 ### 性能要点（按需求文档）
 - 禁止用 pyvcd 朴素解析大 VCD（慢 10~100×、易 OOM）。
@@ -202,16 +194,13 @@ wave-session --vcd sim/dump.vcd --log sim/xrun.log --top top_tb --filelist rtl.f
 
 ```
 wave_mcp/
-  server.py              # MCP server，注册全部 35 工具（FastMCP）+ 人读文本渲染补丁
+  server.py              # MCP server，注册全部 25 工具（FastMCP）+ 人读文本渲染补丁
   session.py             # Session / SessionManager / session.json / 指纹校验 / 三层 definition_name
   pipeline.py            # prepare_session：波形文件入口(.fst 直读/.vcd 自动转)→网表→session 编排；.f filelist 解析
   convert.py             # vcd2fst 封装：并行能力探测 + 串行 fallback + FIFO 流式
   timeutil.py            # 时间字符串 <-> FST 时间单位换算
   sources/
     fst_source.py        # pylibfst：层次 / 信号 / 值 / 总线聚合
-    log_source.py        # xrun.log + UVM 解析
-    coverage_source.py   # urg 文本报告 + all_bins.csv 覆盖率解析
-    assertion_source.py  # SVA 断言状态/失败
     rtl_source.py        # pyslang 网表加载 + 查询：连接/驱动/trace/文件/netlist_health
   netlist/
     slang_netlist.py     # pyslang elaboration → maps.json（drivers/fanin/loads/instance_tree）+ 自愈 + UVM 探测

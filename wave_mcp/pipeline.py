@@ -136,7 +136,6 @@ class StepResult:
 
 
 def build_manifest(out_dir: str, fst_path: str, *, top: str = "",
-                   log_path: Optional[str] = None,
                    filelist: Optional[List[str]] = None,
                    filelist_path: Optional[str] = None,
                    uhdm_db: Optional[str] = None, maps_path: Optional[str] = None) -> str:
@@ -150,7 +149,6 @@ def build_manifest(out_dir: str, fst_path: str, *, top: str = "",
     manifest = {
         "top": top,
         "fst_path": os.path.abspath(fst_path),
-        "log_path": os.path.abspath(log_path) if log_path else None,
         "uhdm_db": os.path.abspath(uhdm_db) if uhdm_db else None,
         "maps_path": os.path.abspath(maps_path) if maps_path else None,
         "filelist": [os.path.abspath(f) for f in files],
@@ -188,7 +186,7 @@ def build_netlist_maps(out_dir: str, files: List[str],
 
 
 def prepare_session(out_dir: str, wave_path: str, *,
-                    fst_path: Optional[str] = None, log_path: Optional[str] = None,
+                    fst_path: Optional[str] = None,
                     top: str = "", filelist: Optional[List[str]] = None,
                     filelist_path: Optional[str] = None,
                     incdirs: Optional[List[str]] = None,
@@ -267,7 +265,7 @@ def prepare_session(out_dir: str, wave_path: str, *,
                                      "note": "trace/connectivity disabled; other tools still work"}))
 
     manifest_path = build_manifest(
-        out_dir, fst_path, top=top, log_path=log_path,
+        out_dir, fst_path, top=top,
         filelist=files, maps_path=maps_path)
     return {
         "session_path": out_dir,

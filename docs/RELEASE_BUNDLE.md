@@ -66,8 +66,8 @@ B=/tmp/wave-mcp-bundle-vX.Y
 # 2.1 wheel 内含最新源码（改了哪个模块就 grep 哪个）
 unzip -l $B/wheels/wave_mcp-*.whl | grep -E "name_infer|slang_netlist|server.py"
 
-# 2.2 工具数 = 48
-grep -c "@mcp.tool" $B/src/wave_mcp/server.py         # 期望 48
+# 2.2 工具数 = 25
+grep -c "@mcp.tool" $B/src/wave_mcp/server.py         # 期望 25
 
 # 2.3 wheels 数 = 32，且不含 cryptography
 ls $B/wheels | wc -l
@@ -92,7 +92,7 @@ tar -xzf $B.tar.gz -C /tmp/_verify && /tmp/_verify/wave-mcp-bundle-vX.Y/install.
 
 **自检清单（逐条打勾）**
 - [ ] wheel 含本次改动的源码
-- [ ] 工具数 35
+- [ ] 工具数 25
 - [ ] wheels 32 个、无 cryptography
 - [ ] `vcd2fst -p` 通过、GLIBC ≤ 2.14
 - [ ] smoke_test / test_definition_name 通过

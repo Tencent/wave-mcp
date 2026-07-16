@@ -44,10 +44,6 @@ def main():
     t = timeutil.time_to_fst_units("40ns", exp)
     show("count value at 40ns", s.fst.value_at("top_tb.u_counter.count", t))
 
-    show("errors", s.log.errors())
-    show("warnings", s.log.warnings())
-    show("messages containing 'mismatch'", s.log.containing("mismatch"))
-
     show("all files", s.rtl.all_files())
     show("modules in counter.sv", s.rtl.modules_in_file(s.rtl.files[0]))
 

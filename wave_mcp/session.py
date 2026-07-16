@@ -1,4 +1,4 @@
-"""Session model — aggregates the 4 data sources behind one manifest.
+"""Session model — aggregates the waveform + RTL data sources behind one manifest.
 
 A *session* is one isolated debug context (one module / one user), described by a
 ``session.json`` manifest that binds every data source together::
@@ -6,9 +6,8 @@ A *session* is one isolated debug context (one module / one user), described by 
     {
       "top": "top_tb",
       "fst_path": "sim/dump.fst",
-      "log_path": "sim/xrun.log",
-      "uhdm_db": "netlist/design.uhdm",        # optional (stage 4)
-      "maps_path": "netlist/maps.json",         # optional (stage 4)
+      "uhdm_db": "netlist/design.uhdm",        # optional
+      "maps_path": "netlist/maps.json",         # optional (pyslang netlist)
       "filelist": ["rtl/a.sv", "rtl/b.sv"],     # or "filelist_path"
       "fst_hash": "...", "filelist_hash": "..."  # consistency fingerprints
     }
@@ -24,10 +23,7 @@ import json
 import os
 from typing import Any, Dict, List, Optional
 
-from .sources.assertion_source import AssertionSource
-from .sources.coverage_source import CoverageSource
 from .sources.fst_source import FstSource
-from .sources.log_source import LogSource
 from .sources.rtl_source import RtlSource
 
 
@@ -64,7 +60,6 @@ class Session:
         self.manifest = manifest
         self.top: str = manifest.get("top", "")
         self.fst_path = _resolve(base_dir, manifest.get("fst_path"))
-        self.log_path = _resolve(base_dir, manifest.get("log_path"))
         self.uhdm_db = _resolve(base_dir, manifest.get("uhdm_db"))
         self.maps_path = _resolve(base_dir, manifest.get("maps_path"))
         self.warnings: List[str] = []
@@ -81,7 +76,6 @@ class Session:
         if not self.fst_path or not os.path.exists(self.fst_path):
             raise FileNotFoundError(f"FST not found: {self.fst_path}")
         self.fst = FstSource(self.fst_path)
-        self.log = LogSource(self.log_path) if self.log_path else LogSource("")
         self.rtl = RtlSource(self.filelist, self.maps_path, fst=self.fst)
 
         # Resolve each FST scope's module *definition* name so module_type reports
@@ -133,63 +127,7 @@ class Session:
         except Exception:
             pass
 
-        # coverage / assertion sources (optional; auto-discovered if not given)
-        cov_report = _resolve(base_dir, manifest.get("coverage_report"))
-        cov_csv = _resolve(base_dir, manifest.get("coverage_csv"))
-        if not cov_report and not cov_csv:
-            cov_report, cov_csv = self._discover_coverage()
-        self.coverage = CoverageSource(cov_report, cov_csv)
-        # assertions: reuse the sim log for failures + the coverage csv for status
-        asrt_csv = _resolve(base_dir, manifest.get("assertion_csv")) or cov_csv
-        self.assertions = AssertionSource(self.log_path, asrt_csv)
-
         self._check_consistency()
-
-    def _discover_coverage(self):
-        """Best-effort locate a urg text report and all_bins.csv near the session.
-
-        Searches the session dir and its ancestors (up to 3 levels) plus a
-        sibling ``cov/`` directory, matching common urg output names. Returns
-        ``(report_path, csv_path)`` with either possibly None.
-        """
-        report = csv_path = None
-        seeds = [self.base_dir]
-        if self.log_path:
-            seeds.append(os.path.dirname(self.log_path))
-        if self.fst_path:
-            seeds.append(os.path.dirname(self.fst_path))
-        seen = set()
-        cand_dirs: List[str] = []
-        for s in seeds:
-            d = s
-            for _ in range(4):
-                if d and d not in seen:
-                    seen.add(d)
-                    cand_dirs.append(d)
-                    cand_dirs.append(os.path.join(d, "cov"))
-                    cand_dirs.append(os.path.join(d, "cov_report"))
-                nd = os.path.dirname(d)
-                if nd == d:
-                    break
-                d = nd
-        for d in cand_dirs:
-            if not os.path.isdir(d):
-                continue
-            if report is None:
-                for nm in ("cov_report.txt", "urg_report.txt", "coverage.txt"):
-                    p = os.path.join(d, nm)
-                    if os.path.exists(p):
-                        report = p
-                        break
-            if csv_path is None:
-                for nm in ("all_bins.csv", "cov.csv"):
-                    p = os.path.join(d, nm)
-                    if os.path.exists(p):
-                        csv_path = p
-                        break
-            if report and csv_path:
-                break
-        return report, csv_path
 
     @staticmethod
     def _read_filelist(path: Optional[str]) -> List[str]:
@@ -228,13 +166,11 @@ class Session:
         return {
             "top": self.top,
             "fst_path": self.fst_path,
-            "log_path": self.log_path,
             "timescale_exp": self.fst.timescale_exp,
             "start_time": self.fst.start_time,
             "end_time": self.fst.end_time,
             "num_scopes": len(self.fst.scopes),
             "num_signals": len(self.fst.signals),
-            "num_log_messages": len(self.log.messages),
             "netlist_available": self.rtl.has_netlist,
             "netlist_health": self.rtl.netlist_health(),
             # how many module scopes have a resolved definition_name (and via
@@ -242,8 +178,6 @@ class Session:
             # whether module_type is trustworthy across the hierarchy.
             "definition_coverage": self.fst.definition_coverage(),
             "verible_available": self.rtl.verible,
-            "coverage_available": self.coverage.available,
-            "assertions_available": self.assertions.available,
             "warnings": self.warnings,
         }
 

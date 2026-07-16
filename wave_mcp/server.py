@@ -164,7 +164,7 @@ def session_info(session_id: Optional[str] = None) -> dict[str, Any]:
 # =============================================================================
 @mcp.tool()
 def prepare_session(out_dir: str, wave_path: str,
-                    fst_path: Optional[str] = None, log_path: Optional[str] = None,
+                    fst_path: Optional[str] = None,
                     top: str = "", filelist: Optional[List[str]] = None,
                     filelist_path: Optional[str] = None,
                     incdirs: Optional[List[str]] = None,
@@ -175,7 +175,7 @@ def prepare_session(out_dir: str, wave_path: str,
 
     Takes a waveform file your simulator already produced and leaves an OPEN
     session ready to query:
-        waveform (.fst read directly / .vcd auto-converted) -> parse xrun.log ->
+        waveform (.fst read directly / .vcd auto-converted) ->
         build session.json -> open session.
 
     This never runs a simulator. Run your sim (xrun / Verilator / etc.) with your
@@ -189,7 +189,6 @@ def prepare_session(out_dir: str, wave_path: str,
         wave_path: waveform file to analyze — ``.fst`` (read directly) or ``.vcd``
             (auto-converted to FST). This is a file the sim already dumped.
         fst_path: output FST when converting a VCD (default: out_dir/<vcd>.fst).
-        log_path: optional simulator log (xrun.log) to attach for message tools.
         top: top instance name.
         filelist / filelist_path: RTL source list (enables file/declaration tools).
             A .f filelist is parsed for +incdir+/+define+/-y automatically.
@@ -204,7 +203,7 @@ def prepare_session(out_dir: str, wave_path: str,
     try:
         result = pipeline.prepare_session(
             out_dir, wave_path, fst_path=fst_path,
-            log_path=log_path, top=top, filelist=filelist, filelist_path=filelist_path,
+            top=top, filelist=filelist, filelist_path=filelist_path,
             incdirs=incdirs, defines=defines, mode=mode)
     except (FileNotFoundError, ValueError, convert.ConversionError) as exc:
         return {"status": "error", "error": str(exc)}
@@ -441,130 +440,6 @@ def trace_x(signal_path: str, time_point: str,
             session_id: Optional[str] = None) -> dict[str, Any]:
     """Trace the root cause of an X value on a signal (approximate; needs UHDM+FST)."""
     return _sess(session_id).rtl.trace_x(signal_path, time_point)
-
-
-# =============================================================================
-# 7. Simulation log
-# =============================================================================
-@mcp.tool()
-def log_errors(session_id: Optional[str] = None) -> dict[str, Any]:
-    """Get all error/fatal messages from xrun.log."""
-    rows = _sess(session_id).log.errors()
-    return {"count": len(rows), "messages": rows}
-
-
-@mcp.tool()
-def log_warnings(session_id: Optional[str] = None) -> dict[str, Any]:
-    """Get all warning messages from xrun.log."""
-    rows = _sess(session_id).log.warnings()
-    return {"count": len(rows), "messages": rows}
-
-
-@mcp.tool()
-def search_log(search_string: str,
-                                   session_id: Optional[str] = None) -> dict[str, Any]:
-    """Search xrun.log messages containing a substring."""
-    rows = _sess(session_id).log.containing(search_string)
-    return {"count": len(rows), "messages": rows}
-
-
-@mcp.tool()
-def log_messages_by_index(indices: List[int],
-                          session_id: Optional[str] = None) -> dict[str, Any]:
-    """Get full details for log messages by their indices."""
-    rows = _sess(session_id).log.by_indices(indices)
-    return {"count": len(rows), "messages": rows}
-
-
-# =============================================================================
-# 7b. Coverage (urg text report / all_bins.csv)
-# =============================================================================
-@mcp.tool()
-def coverage_summary(instance_full_path: Optional[str] = None,
-                         max_depth: int = 2,
-                         session_id: Optional[str] = None) -> dict[str, Any]:
-    """Coverage summary tree (Overall/Block/Expression/Toggle/Fsm/Functional).
-
-    Parses the urg text report. Optionally root the tree at ``instance_full_path``
-    and prune to ``max_depth`` levels. Returns ``available: false`` when no
-    coverage report was found/attached to the session.
-    """
-    cov = _sess(session_id).coverage
-    if not cov.available:
-        return {"available": False,
-                "reason": "no coverage report attached; run urg and set "
-                          "coverage_report/coverage_csv in the session, or place "
-                          "cov_report.txt / all_bins.csv near the session dir"}
-    return cov.summary(instance_full_path, max_depth=max_depth)
-
-
-@mcp.tool()
-def coverage_detail(instance_full_path: str,
-                        session_id: Optional[str] = None) -> dict[str, Any]:
-    """Full coverage metrics + children for one instance node."""
-    cov = _sess(session_id).coverage
-    if not cov.available:
-        return {"available": False, "reason": "no coverage report attached"}
-    return cov.detail(instance_full_path)
-
-
-@mcp.tool()
-def coverage_holes(threshold: float = 90.0, metric: str = "overall",
-                       max_results: int = 100,
-                       session_id: Optional[str] = None) -> dict[str, Any]:
-    """List design nodes whose coverage is below ``threshold`` for ``metric``.
-
-    ``metric`` is one of overall/block/expression/toggle/fsm/functional. Results
-    are sorted ascending (worst first) — the coverage-hole worklist.
-    """
-    cov = _sess(session_id).coverage
-    if not cov.available:
-        return {"available": False, "reason": "no coverage report attached"}
-    rows = cov.low_coverage(threshold, metric, max_results)
-    return {"available": True, "count": len(rows), "holes": rows}
-
-
-# =============================================================================
-# 7c. Assertions (xrun.log failures + all_bins.csv status)
-# =============================================================================
-@mcp.tool()
-def assertion_failures(max_results: int = 300,
-                           session_id: Optional[str] = None) -> dict[str, Any]:
-    """Assertion failures parsed from xrun.log (*E/*F,ASRT* lines).
-
-    Each entry carries the assertion name (if present), time, file:line, and the
-    $error text. Empty list means no assertion fired (design passed SVA checks).
-    """
-    asr = _sess(session_id).assertions
-    rows = asr.all_failures(max_results)
-    return {"available": True, "count": len(rows), "failures": rows}
-
-
-@mcp.tool()
-def assertion_status(name_contains: Optional[str] = None,
-                         only_failing: bool = False,
-                         max_results: int = 500,
-                         session_id: Optional[str] = None) -> dict[str, Any]:
-    """Per-assertion pass status from urg all_bins.csv (Assertion Status Grade).
-
-    pass_grade 100 => never failed; <100 => failed at least once. Cover
-    properties (c_/p_) are listed with kind="cover". Set ``only_failing`` to show
-    just the assertions that failed. Returns available:false without a csv.
-    """
-    asr = _sess(session_id).assertions
-    if not asr.statuses:
-        return {"available": False,
-                "reason": "no assertion status csv attached (urg all_bins.csv); "
-                          "assertion FAILURES from the log are still available via "
-                          "assertion_failures"}
-    rows = asr.status(name_contains, only_failing, max_results)
-    return {"available": True, "count": len(rows), "assertions": rows}
-
-
-@mcp.tool()
-def assertion_summary(session_id: Optional[str] = None) -> dict[str, Any]:
-    """Assertion overview: #failures in log, #assertions, #failing, cover count."""
-    return _sess(session_id).assertions.summary()
 
 
 # =============================================================================
