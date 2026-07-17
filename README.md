@@ -1,5 +1,7 @@
 # wave-mcp — 开源、免 License 的 RTL 波形调试 MCP Server
 
+[English](README.en.md) | 简体中文
+
 用 **FST 波形 + pyslang RTL 网表** 等开源数据源，为 LLM 提供一套波形调试工具，
 对齐 Cadence Indago / Verisium Debug 的核心能力（工具名为独立的简洁命名），
 共 **25 个工具**。**无需任何商用 License，支持任意并发。** 以 **MIT** 许可开源。
