@@ -112,6 +112,7 @@ def _parse_filelist(path: str) -> Tuple[List[str], List[str], List[str]]:
         else:
             files.append(_abs(tok))
         i += 1
+
     # de-dup preserving order
     def _uniq(xs: List[str]) -> List[str]:
         seen, out = set(), []

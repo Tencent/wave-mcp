@@ -303,6 +303,7 @@ def _walk_statement(stmt, control: List[str], guard: List[dict], mb: _ModuleBuil
              "RepeatLoopStatement"):
         _walk_statement(getattr(stmt, "body", None), control, guard, mb)
         return
+
     # fallback: flat-collect assignments under unknown statement, with given control
     def cb(n):
         if type(n).__name__ == "AssignmentExpression":

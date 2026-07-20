@@ -115,6 +115,7 @@ module counter (
 endmodule
 """
 
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     vcd_path = os.path.join(OUT, "dump.vcd")
