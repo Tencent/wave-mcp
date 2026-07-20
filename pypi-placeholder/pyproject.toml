@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wave-mcp"
+version = "0.0.1"
+description = "Open-source, license-free MCP server for RTL waveform debug (name-reservation placeholder; full release coming soon)."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "wukongxin", email = "wukongxin@tencent.com" }]
+keywords = ["mcp", "waveform", "fst", "verilog", "systemverilog", "rtl", "debug", "eda"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+]
+
+[project.urls]
+Homepage = "https://github.com/your-org/wave-mcp"
+Repository = "https://github.com/your-org/wave-mcp"
+Issues = "https://github.com/your-org/wave-mcp/issues"
+
+# metadata-only placeholder: ship no Python modules, only README + metadata.
+[tool.setuptools]
+py-modules = []
