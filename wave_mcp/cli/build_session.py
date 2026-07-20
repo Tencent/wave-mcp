@@ -101,8 +101,8 @@ def main(argv=None):
             maps_path = os.path.abspath(maps_out)
             print(f"[ok] netlist: {len(res.get('modules', {}))} modules, "
                   f"{res.get('diagnostics', 0)} diagnostics -> {maps_out}")
-        except Exception as exc:  # noqa: BLE001
-            print(f"[warn] netlist build failed ({exc}); categories 5/6 disabled")
+        except Exception as exc:  # noqa: BLE001  # pylint: disable=broad-except
+            print(f"[warn] netlist build failed ({exc}); connectivity/trace disabled")
 
     manifest = {
         "top": args.top,

@@ -14,7 +14,6 @@ isolated sessions; in stdio mode it defaults to the one open session.
 from __future__ import annotations
 
 import argparse
-import os
 from typing import Any, List, Optional
 
 from mcp.server.fastmcp import FastMCP
@@ -94,7 +93,7 @@ def _install_readable_text_patch() -> None:
         import pydantic_core
         from mcp.server.fastmcp.utilities import func_metadata as _fm
         from mcp.types import TextContent
-    except Exception:
+    except (ImportError, AttributeError):
         return
     _orig = getattr(_fm, "_convert_to_content", None)
     if _orig is None or getattr(_orig, "_wave_readable", False):
@@ -112,7 +111,7 @@ def _install_readable_text_patch() -> None:
                     if isinstance(obj, (dict, list)):
                         b = TextContent(type="text",
                                         text="\n".join(_render_text(obj)))
-                except Exception:
+                except (ValueError, TypeError):
                     pass
             out.append(b)
         return out

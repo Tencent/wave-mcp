@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Callable, Dict, Iterable, List, Optional, Set
+from typing import Callable, Dict, Iterable, Optional, Set
 
 # module / macromodule / primitive declarations (interfaces/packages excluded on
 # purpose: those are not instantiated as design "modules" in the hierarchy view).

@@ -50,7 +50,6 @@ def test_tc3_interface_not_inferred():
 
 
 def test_tc4_name_inference_fallback():
-    known = {"my_custom": "my_custom"}
     r = make_name_resolver(["my_custom"], allow_prefix=False)
     assert r("top_tb.u_my_custom") == "my_custom"
 
@@ -106,7 +105,7 @@ def test_dffr_prefix_still_works_without_netlist():
     assert r("top.u_dffre_dec_scorb_wid_p1_o") == "dffre"
 
 
-if __name__ == "__main__":
+def _run_all():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed = 0
     for fn in fns:
@@ -114,3 +113,7 @@ if __name__ == "__main__":
         print(f"PASS {fn.__name__}")
         passed += 1
     print(f"\nOK: {passed}/{len(fns)} definition_name tests passed.")
+
+
+if __name__ == "__main__":
+    _run_all()

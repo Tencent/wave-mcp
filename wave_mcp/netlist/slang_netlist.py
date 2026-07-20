@@ -21,12 +21,19 @@ from __future__ import annotations
 import os
 from typing import Dict, List, Optional
 
+# This module intentionally uses broad ``except Exception`` at many points: its
+# whole job is to extract as much of the netlist as possible from a possibly
+# broken/partial pyslang elaboration, where a single failing member (SVA,
+# unresolved dep, FFI quirk) must never abort the whole build. Each site is a
+# deliberate graceful-degradation boundary, so broad-except is disabled here.
+# pylint: disable=broad-except
+
 try:
     import pyslang as ps
     from pyslang.syntax import SyntaxTree
     from pyslang.ast import Compilation
     _PYSLANG_OK = True
-except Exception:  # pragma: no cover
+except ImportError:  # pragma: no cover
     _PYSLANG_OK = False
 
 
@@ -433,7 +440,7 @@ def _record_instance(inst, parent_mb, builders, loc, prefix, instance_tree):
     iname = inst.name
     conns = {}
     conn_dirs: Dict[str, str] = {}
-    f, ln = loc.of(inst.location)
+    _f, ln = loc.of(inst.location)
     try:
         for pc in inst.portConnections:
             port = getattr(pc, "port", None)

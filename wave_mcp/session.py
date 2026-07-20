@@ -93,8 +93,8 @@ class Session:
                 netmap = self.rtl.engine.resolve_definitions(
                     list(self.fst.scopes.keys()))
                 self.fst.apply_definition_map(netmap, source="netlist")
-            except Exception:
-                pass
+            except Exception:  # pylint: disable=broad-except
+                pass  # best-effort L1: never let definition resolution fail open
             # let FST bus-aggregation validate merged widths against RTL decls
             self.fst.width_hint = self.rtl.signal_width
 
@@ -118,14 +118,14 @@ class Session:
                 self.fst.annotate_definitions(
                     make_name_resolver(known, allow_prefix=True),
                     source="inferred_prefix", only_empty=True, skip_kinds=noise)
-        except Exception:
-            pass
+        except Exception:  # pylint: disable=broad-except
+            pass  # best-effort L2: name inference is optional, never crash open
 
         # L3: manual authoritative override from the manifest.
         try:
             self.fst.apply_scope_map(manifest.get("scope_map") or {})
-        except Exception:
-            pass
+        except Exception:  # pylint: disable=broad-except
+            pass  # best-effort L3: manual override is optional, never crash open
 
         self._check_consistency()
 

@@ -128,8 +128,8 @@ def _parallel_supported() -> bool:
         if proc.returncode == 0 and os.path.exists(fst) \
                 and _PARALLEL_DISABLED_MARK not in out:
             _PARALLEL_SUPPORTED = True
-    except Exception:
-        _PARALLEL_SUPPORTED = False
+    except (OSError, subprocess.SubprocessError):
+        _PARALLEL_SUPPORTED = False  # probe failure -> assume no parallel (serial always works)
     return _PARALLEL_SUPPORTED
 
 

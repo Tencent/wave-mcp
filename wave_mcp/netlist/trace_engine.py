@@ -318,7 +318,7 @@ class TraceEngine:
             head, idx = driver_unique_id.rsplit("#", 1)
             mod, leaf = head.split(".", 1)
             rec = self.modules[mod]["drivers"][leaf][int(idx)]
-        except Exception:
+        except (KeyError, ValueError, IndexError):
             return {"available": False, "reason": f"unknown driver id {driver_unique_id}"}
         return {"available": True, "driver_unique_id": driver_unique_id,
                 "rhs_signals": rec["rhs"], "control_signals": rec["control"],

@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass, field
-from functools import lru_cache
 from typing import Dict, List, Optional, Tuple
 
 import re
@@ -167,8 +166,8 @@ class FstSource:
                 stype = _SCOPE_TYPE.get(h.u.scope.typ, str(h.u.scope.typ))
                 try:
                     component = pylibfst.string(h.u.scope.component)
-                except Exception:
-                    component = ""
+                except Exception:  # pylint: disable=broad-except
+                    component = ""  # FFI field may be absent/undecodable; optional
                 parent = cur
                 cur = f"{cur}.{name}" if cur else name
                 sc = Scope(full_path=cur, name=name, scope_type=stype,
@@ -262,8 +261,8 @@ class FstSource:
                 continue
             try:
                 dn = resolver(path)
-            except Exception:
-                dn = None
+            except Exception:  # pylint: disable=broad-except
+                dn = None  # resolver is caller-supplied; treat any failure as unresolved
             if dn:
                 sc.definition_name = dn
                 sc.definition_source = source
@@ -405,7 +404,7 @@ class FstSource:
         """
         base = instance_full_path or ""
         collected: List[Signal] = []
-        for full, sig in self.signals.items():
+        for sig in self.signals.values():
             if sig.scope != base:
                 continue
             if not sig.matches_type(filter_by_type):
@@ -431,8 +430,8 @@ class FstSource:
         try:
             w = self.width_hint(full)
             return int(w) if w else None
-        except Exception:
-            return None
+        except Exception:  # pylint: disable=broad-except
+            return None  # width hint is caller-supplied; any failure -> no hint
 
     def _aggregate_arrays(self, sigs: List["Signal"],
                           underscore_style: bool = False) -> List[dict]:
@@ -588,8 +587,6 @@ class FstSource:
         m = _RANGE_SUFFIX.match(full_path)  # strip trailing [hi:lo] if present
         if m:
             base = m.group(1)
-        prefix = base + " ["   # writers emit "base [idx]" (note the space) ...
-        prefix2 = base + "["   # ... but tolerate the no-space form too
         elems: List[Tuple[int, "Signal"]] = []
         for fp, s in self.signals.items():
             mm = _ELEM_INDEX.match(fp)

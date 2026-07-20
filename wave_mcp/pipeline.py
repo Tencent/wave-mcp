@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
 from . import convert
-from .netlist import build_netlist, NetlistError
+from .netlist import build_netlist
 
 
 def _sha1(path: str, limit: int = 1 << 20) -> Optional[str]:
@@ -258,7 +258,9 @@ def prepare_session(out_dir: str, wave_path: str, *,
                                      "note": ("" if modules > 0 else
                                               "0 modules extracted — check incdirs/"
                                               "defines/top; trace/connectivity limited")}))
-        except (NetlistError, Exception) as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001  # pylint: disable=broad-except
+            # any netlist-build failure degrades gracefully: trace/connectivity
+            # off, all other tools keep working (never abort session prep).
             steps.append(StepResult("build_netlist", False, time.time() - t0,
                                     {"error": str(exc),
                                      "incdirs": len(inc), "defines": len(defs),

@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from ..netlist.trace_engine import TraceEngine
 
@@ -75,9 +75,9 @@ class RtlSource:
         if not self.has_netlist:
             return None
         try:
-            inst, leaf, mod = self._resolve(full_path)
-        except Exception:
-            return None
+            _inst, leaf, mod = self._resolve(full_path)
+        except Exception:  # pylint: disable=broad-except
+            return None  # unresolvable path -> no width hint (never crash)
         if not mod or mod not in self.maps.get("modules", {}):
             return None
         m = self.maps["modules"][mod]
@@ -204,7 +204,7 @@ class RtlSource:
     def drivers(self, full_path: str) -> dict:
         if not self.has_netlist:
             return Unavailable("signal_drivers", "netlist not built").to_dict()
-        mod, leaf, recs = self.engine.module_drivers(full_path)
+        mod, _leaf, recs = self.engine.module_drivers(full_path)
         if mod is None:
             return {"available": True, "signal": full_path, "drivers": [],
                     "note": "module not resolved (possibly a TB-only signal)"}
