@@ -1,8 +1,10 @@
 # wave-mcp — Open-source, license-free MCP server for RTL waveform debug
 
+<img src="docs/images/penglai-logo.png" alt="Penglai Lab" width="200"/>
+
 English | [简体中文](README.md)
 
-An MCP toolkit that lets an LLM debug RTL waveforms using open-source data
+wave-mcp is an open-source RTL waveform debug MCP server from the **Penglai Lab** verification team at Tencent. It is an MCP toolkit that lets an LLM debug RTL waveforms using open-source data
 sources — **FST waveforms + a pyslang RTL netlist**. It mirrors the core
 capabilities of Cadence Indago / Verisium Debug (with its own concise tool
 names), exposing **25 tools**. **No commercial license required; unlimited
@@ -60,7 +62,7 @@ by a `session.json` manifest that binds the data sources.
 
 ```bash
 # install from git (works out of the box on Linux x86_64; deps: mcp + pylibfst + pyslang)
-pip install git+https://github.com/<your-org>/wave-mcp.git
+pip install git+https://github.com/Tencent/wave-mcp.git
 # or clone and install locally:
 #   git clone <repo> && cd wave-mcp && pip install -e .
 

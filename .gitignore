@@ -27,3 +27,8 @@ wave-mcp-bundle*/
 # internal validation harnesses (depend on a local OpenTitan tree; not published)
 tests/verilator_fst/
 tests/opentitan_elab_check.py
+
+.agent
+
+# uploaded files (temporary)
+knot-uploads/

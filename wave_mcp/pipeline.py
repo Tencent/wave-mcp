@@ -3,7 +3,7 @@
 This wires the team's standard workflow into one entry point so an LLM client can
 go from "I want to analyze the waveform" to a ready session in a single call:
 
-    waveform file (.fst / .vcd)  ->  [convert VCD to FST]  ->  parse xrun.log  ->
+    waveform file (.fst / .vcd)  ->  [convert VCD to FST]  ->
     build session.json           ->  open session          ->  ready to query
 
 The entry point takes a *waveform file your simulator already produced*:

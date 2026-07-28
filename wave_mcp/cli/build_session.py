@@ -1,13 +1,13 @@
 """Build a self-contained debug session directory + manifest.
 
 This is the 'no-pain wrapper' from the requirements (stage 5): from the same
-filelist used by xrun, assemble a ``session.json`` that binds the FST waveform,
-xrun.log and (optionally) the RTL netlist, recording fingerprints so the server
+filelist used by the simulator, assemble a ``session.json`` that binds the FST
+waveform and (optionally) the RTL netlist, recording fingerprints so the server
 can detect stale data.
 
 Usage::
 
-    wave-session --fst sim/dump.fst --log sim/xrun.log --top top_tb \
+    wave-session --fst sim/dump.fst --top top_tb \
                  --filelist rtl.f --out sessions/my_module
 
 The pyslang netlist (connectivity / driver / trace, categories 5/6) is built by

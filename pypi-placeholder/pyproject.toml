@@ -9,7 +9,7 @@ description = "Open-source, license-free MCP server for RTL waveform debug (name
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
-authors = [{ name = "wukongxin", email = "wukongxin@tencent.com" }]
+authors = [{ name = "wukongxin", email = "xinxin000816@gmail.com" }]
 keywords = ["mcp", "waveform", "fst", "verilog", "systemverilog", "rtl", "debug", "eda"]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
@@ -21,9 +21,9 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/your-org/wave-mcp"
-Repository = "https://github.com/your-org/wave-mcp"
-Issues = "https://github.com/your-org/wave-mcp/issues"
+Homepage = "https://github.com/Tencent/wave-mcp"
+Repository = "https://github.com/Tencent/wave-mcp"
+Issues = "https://github.com/Tencent/wave-mcp/issues"
 
 # metadata-only placeholder: ship no Python modules, only README + metadata.
 [tool.setuptools]

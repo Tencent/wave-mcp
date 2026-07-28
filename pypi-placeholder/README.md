@@ -11,7 +11,7 @@ with **no commercial license required and unlimited concurrency**.
 It does **not** run a simulator — you produce the waveform with your own flow
 (Verilator `--trace-fst`, or convert a VCD to FST) and hand the result to it.
 
-- Source & docs: https://github.com/your-org/wave-mcp
+- Source & docs: https://github.com/Tencent/wave-mcp
 - License: MIT
 
 > `pip install wave-mcp` will install the real package once the first functional

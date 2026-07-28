@@ -76,8 +76,8 @@ bundle 里的所有 Python 依赖都是 wheel（glibc 兼容已满足），**唯
    ```
    这样产出的二进制在任何 glibc≥2.14 的机器都能跑（含目标 2.28）。再 `--vcd2fst /tmp/vcd2fst-out/vcd2fst` 打进 bundle。
 2. **从一台 glibc 2.28 机器拷现成 vcd2fst** + `ldd` 出的 `libz` 等，用 `--vcd2fst` 打进 bundle（脚本会一并带 `bin/lib/`、设好 `LD_LIBRARY_PATH`）。
-   > 不要直接用 glibc 2.38 机器（如本开发机）编的 vcd2fst —— 会报 `GLIBC_2.3x not found`。
-3. **目标机装 GTKWave**：若隔离网有内部 yum 镜像，`dnf install gtkwave` 也行（很多隔离网装不了，故非首选）。
+> 不要直接用 glibc 2.38 机器编的 vcd2fst —— 会报 `GLIBC_2.3x not found`。
+3. **目标机装 GTKWave**：若隔离网有本地 yum 镜像，`dnf install gtkwave` 也行（很多隔离网装不了，故非首选）。
 
 > 校验：`ldd /shared/wave-mcp/bin/vcd2fst` 不应报 `not found`；`objdump -T vcd2fst | grep GLIBC | sort -V | tail -1` 应 ≤ 目标 glibc。
 

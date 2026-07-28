@@ -1,7 +1,7 @@
 """wave-mcp MCP server.
 
-Exposes ~35 concise tools for waveform debug, backed entirely by open-source
-sources (FST + xrun.log + RTL static analysis). No license required;
+Exposes 25 concise tools for waveform debug, backed entirely by open-source
+sources (FST + RTL static analysis). No license required;
 any number of sessions can run concurrently.
 
 Deployment modes:

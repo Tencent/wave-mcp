@@ -1,8 +1,10 @@
 # wave-mcp — 开源、免 License 的 RTL 波形调试 MCP Server
 
+<img src="docs/images/penglai-logo.png" alt="蓬莱实验室" width="200"/>
+
 [English](README.en.md) | 简体中文
 
-用 **FST 波形 + pyslang RTL 网表** 等开源数据源，为 LLM 提供一套波形调试工具，
+wave-mcp 是腾讯蓬莱实验室验证团队开源的一款 RTL 波形调试 MCP Server，用 **FST 波形 + pyslang RTL 网表** 等开源数据源，为 LLM 提供一套波形调试工具，
 对齐 Cadence Indago / Verisium Debug 的核心能力（工具名为独立的简洁命名），
 共 **25 个工具**。**无需任何商用 License，支持任意并发。** 以 **MIT** 许可开源。
 
@@ -46,7 +48,7 @@
 
 ```bash
 # 从 git 安装（Linux x86_64 开箱即用；依赖 mcp + pylibfst + pyslang）
-pip install git+https://github.com/<your-org>/wave-mcp.git
+pip install git+https://github.com/Tencent/wave-mcp.git
 # 或克隆后本地安装：
 #   git clone <repo> && cd wave-mcp && pip install -e .
 
