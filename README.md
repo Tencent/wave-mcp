@@ -4,8 +4,7 @@
 
 [English](README.en.md) | 简体中文
 
-wave-mcp 是腾讯蓬莱实验室验证团队开源的一款 RTL 波形调试 MCP Server，用 **FST 波形 + pyslang RTL 网表** 等开源数据源，为 LLM 提供一套波形调试工具，
-对齐 Cadence Indago / Verisium Debug 的核心能力（工具名为独立的简洁命名），
+wave-mcp 是腾讯**蓬莱实验室**验证团队开源的一款 RTL 波形调试 MCP Server，用 **FST 波形 + pyslang RTL 网表** 等开源数据源，为 LLM 提供一套波形调试工具，
 共 **25 个工具**。**无需任何商用 License，支持任意并发。** 以 **MIT** 许可开源。
 
 > 只要你的仿真器能 dump **FST**（Verilator `--trace-fst`、Icarus、或把 VCD 转成 FST），

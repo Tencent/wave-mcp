@@ -5,9 +5,7 @@
 English | [简体中文](README.md)
 
 wave-mcp is an open-source RTL waveform debug MCP server from the **Penglai Lab** verification team at Tencent. It is an MCP toolkit that lets an LLM debug RTL waveforms using open-source data
-sources — **FST waveforms + a pyslang RTL netlist**. It mirrors the core
-capabilities of Cadence Indago / Verisium Debug (with its own concise tool
-names), exposing **25 tools**. **No commercial license required; unlimited
+sources — **FST waveforms + a pyslang RTL netlist**. **No commercial license required; unlimited
 concurrency.** Released under the **MIT** license.
 
 > As long as your simulator can dump **FST** (Verilator `--trace-fst`, Icarus,
