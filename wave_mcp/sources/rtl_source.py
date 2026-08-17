@@ -196,8 +196,12 @@ class RtlSource:
         return f"{inst}.{name}" if inst else name
 
     def _resolve(self, full_path: str):
-        inst, leaf = self.engine.split(full_path)
-        mod = self.engine.resolve_module(inst)
+        """Resolve using resolve_path (generate-scope aware).
+
+        Returns (inst, leaf, mod) where inst is the matched instance prefix
+        and leaf is the signal/port name within the resolved module.
+        """
+        mod, inst, leaf, _recs = self.engine.resolve_path(full_path)
         return inst, leaf, mod
 
     # -- category 5: connectivity / drivers / loads / fan-in ---------------
@@ -206,14 +210,35 @@ class RtlSource:
             return Unavailable("signal_drivers", "netlist not built").to_dict()
         mod, _leaf, recs = self.engine.module_drivers(full_path)
         if mod is None:
+            inst, leaf = self.engine.split(full_path)
+            reason, hint = self.engine.classify_empty(inst, leaf, None, "drivers")
             return {"available": True, "signal": full_path, "drivers": [],
-                    "note": "module not resolved (possibly a TB-only signal)"}
-        inst, _ = self.engine.split(full_path)
+                    "reason": reason, "hint": hint}
+        if not recs:
+            inst, leaf = self.engine.split(full_path)
+            reason, hint = self.engine.classify_empty(inst, leaf, mod, "drivers")
+            return {"available": True, "signal": full_path, "module": mod,
+                    "drivers": [], "reason": reason, "hint": hint}
+        inst, leaf = self.engine.split(full_path)
         out = []
         for r in recs:
-            out.append({**{k: r[k] for k in ("kind", "file", "line", "snippet")},
+            d = {**{k: r[k] for k in ("kind", "file", "line", "snippet")},
                         "rhs": [self._full(inst, s) for s in r["rhs"]],
-                        "control": [self._full(inst, s) for s in r["control"]]})
+                        "control": [self._full(inst, s) for s in r["control"]]}
+            # Include port_ref for instance_port drivers so callers can trace
+            # cross-module connections without a separate active_drivers call.
+            if r.get("port_ref"):
+                pr = r["port_ref"]
+                d["port_ref"] = {
+                    "instance": pr.get("instance"),
+                    "def": pr.get("def"),
+                    "port": pr.get("port"),
+                    "direction": pr.get("direction")}
+            # Include guard conditions so callers can evaluate which branch
+            # is active without a separate active_drivers call.
+            if r.get("guard"):
+                d["guard"] = r["guard"]
+            out.append(d)
         return {"available": True, "signal": full_path, "module": mod, "drivers": out}
 
     def loads(self, full_path: str) -> dict:
@@ -221,8 +246,34 @@ class RtlSource:
             return Unavailable("signal_loads", "netlist not built").to_dict()
         inst, leaf, mod = self._resolve(full_path)
         if not mod or mod not in self.maps["modules"]:
-            return {"available": True, "signal": full_path, "loads": []}
-        lds = self.maps["modules"][mod].get("loads", {}).get(leaf, [])
+            reason, hint = self.engine.classify_empty(inst, leaf, mod, "loads")
+            return {"available": True, "signal": full_path,
+                    "loads": [], "reason": reason, "hint": hint}
+        m = self.maps["modules"][mod]
+        lds = m.get("loads", {}).get(leaf, [])
+        # Cross-module loads: if this signal is a sub-module output port (e.g.
+        # uart_core.tx), its loads are stored in the PARENT module under the key
+        # "instance_name.port_name" (e.g. "uart_core.tx").  Search all modules
+        # for loads entries that reference this signal as "instance.leaf".
+        if not lds and inst:
+            # Build the relative instance-leaf key as seen from the parent
+            parts = inst.split(".")
+            for i in range(len(parts) - 1, 0, -1):
+                parent_inst = ".".join(parts[:i])
+                parent_mod = self.engine.resolve_module(parent_inst)
+                if parent_mod and parent_mod in self.maps["modules"]:
+                    pm = self.maps["modules"][parent_mod]
+                    # The sub-module is parts[i]; the signal is leaf
+                    inst_leaf = f"{parts[i]}.{leaf}"
+                    cross_lds = pm.get("loads", {}).get(inst_leaf, [])
+                    if cross_lds:
+                        lds = [self._full(parent_inst, s) for s in cross_lds]
+                        return {"available": True, "signal": full_path,
+                                "loads": lds}
+        if not lds:
+            reason, hint = self.engine.classify_empty(inst, leaf, mod, "loads")
+            return {"available": True, "signal": full_path,
+                    "loads": [], "reason": reason, "hint": hint}
         return {"available": True, "signal": full_path,
                 "loads": [self._full(inst, s) for s in lds]}
 
@@ -232,7 +283,9 @@ class RtlSource:
             return Unavailable("signal_fanin", "netlist not built").to_dict()
         inst, leaf, mod = self._resolve(signal_path)
         if not mod or mod not in self.maps["modules"]:
-            return {"available": True, "signal": signal_path, "fan_in": []}
+            reason, hint = self.engine.classify_empty(inst, leaf, mod, "fanin")
+            return {"available": True, "signal": signal_path,
+                    "fan_in": [], "reason": reason, "hint": hint}
         fmap = self.maps["modules"][mod].get("fanin", {})
         if not transitive:
             res = fmap.get(leaf, [])
@@ -245,6 +298,10 @@ class RtlSource:
                 seen.add(s)
                 stack.extend(fmap.get(s, []))
             res = sorted(seen)
+        if not res:
+            reason, hint = self.engine.classify_empty(inst, leaf, mod, "fanin")
+            return {"available": True, "signal": signal_path,
+                    "fan_in": [], "reason": reason, "hint": hint}
         return {"available": True, "signal": signal_path,
                 "fan_in": [self._full(inst, s) for s in res]}
 
@@ -253,7 +310,9 @@ class RtlSource:
             return Unavailable("signal_connectivity", "netlist not built").to_dict()
         inst, leaf, mod = self._resolve(full_path)
         if not mod or mod not in self.maps["modules"]:
-            return {"available": True, "signal": full_path, "connected": []}
+            reason, hint = self.engine.classify_empty(inst, leaf, mod, "loads")
+            return {"available": True, "signal": full_path,
+                    "connected": [], "reason": reason, "hint": hint}
         m = self.maps["modules"][mod]
         peers = set(m.get("fanin", {}).get(leaf, [])) | set(m.get("loads", {}).get(leaf, []))
         # instance port connections referencing this signal
@@ -262,8 +321,17 @@ class RtlSource:
             for port, sig in ins.get("conns", {}).items():
                 if sig == leaf:
                     port_peers.append(f"{self._full(inst, ins['name'])}.{port}")
+        # De-duplicate while preserving sorted order: the same target may
+        # appear via both fanin/loads and instance port connections, producing
+        # redundant entries that confuse the user.
+        result = sorted(set(
+            [self._full(inst, s) for s in sorted(peers)] + port_peers))
+        if not result:
+            reason, hint = self.engine.classify_empty(inst, leaf, mod, "loads")
+            return {"available": True, "signal": full_path,
+                    "connected": [], "reason": reason, "hint": hint}
         return {"available": True, "signal": full_path,
-                "connected": [self._full(inst, s) for s in sorted(peers)] + port_peers}
+                "connected": result}
 
     # -- category 5.5 / 6: active drivers + trace --------------------------
     def active_drivers(self, signal_full_path: str, time: str) -> dict:
@@ -276,12 +344,14 @@ class RtlSource:
             return Unavailable("driver_contributors", "netlist not built").to_dict()
         return self.engine.driver_contributors(driver_unique_id)
 
-    def trace_value(self, signal_path: str, time_point: str) -> dict:
+    def trace_value(self, signal_path: str, time_point: str,
+                    max_depth: int = 12) -> dict:
         if not self.has_netlist:
             return Unavailable("trace_value", "netlist not built").to_dict()
-        return self.engine.trace_value(signal_path, time_point)
+        return self.engine.trace_value(signal_path, time_point, max_depth=max_depth)
 
-    def trace_x(self, signal_path: str, time_point: str) -> dict:
+    def trace_x(self, signal_path: str, time_point: str,
+                max_depth: int = 12) -> dict:
         if not self.has_netlist:
             return Unavailable("trace_x", "netlist not built").to_dict()
-        return self.engine.trace_x(signal_path, time_point)
+        return self.engine.trace_x(signal_path, time_point, max_depth=max_depth)

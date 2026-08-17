@@ -54,6 +54,19 @@ def serialize_expr(e) -> dict:
             return {"k": "const", "lit": str(e.value)}
         if t == "ConversionExpression":
             return serialize_expr(e.operand)
+        if t == "ElementSelectExpression":
+            base = serialize_expr(getattr(e, "value", None))
+            sel = getattr(e, "selector", None)
+            if sel is not None and type(sel).__name__ == "IntegerLiteral":
+                try:
+                    return {"k": "bitselect", "base": base, "idx": int(sel.value)}
+                except (ValueError, TypeError):
+                    pass
+            return base
+        if t == "ConditionalExpression":
+            return {"k": "cond", "cond": serialize_expr(getattr(e, "pred", None)),
+                    "t": serialize_expr(getattr(e, "left", None)),
+                    "f": serialize_expr(getattr(e, "right", None))}
         if t == "UnaryExpression":
             return {"k": "un", "op": str(e.op).split(".")[-1].split(":")[0],
                     "a": serialize_expr(e.operand)}
@@ -118,21 +131,75 @@ def _lvalue_paths(node) -> List[str]:
 
 
 def _named_values(node) -> List[str]:
-    """Collect referenced signal names under an expression / timing / statement."""
-    out: List[str] = []
-    if node is None:
-        return out
+    """Collect referenced signal names under an expression / timing / statement.
 
-    def cb(n):
-        if type(n).__name__ == "NamedValueExpression":
+    Uses explicit type-based recursion for compound expressions because
+    pyslang's ``visit()`` does not descend into children of some expression
+    types (notably ``ElementSelectExpression`` and ``MemberAccessExpression``),
+    causing signal names inside bit/field selects to be missed — which in turn
+    leaves ``control`` lists empty for conditional drivers whose condition
+    uses an indexed signal (e.g. ``if (racl_addr_hit_read[0])``).
+    """
+    out: List[str] = []
+
+    def _extract(n):
+        if n is None:
+            return
+        t = type(n).__name__
+        if t == "NamedValueExpression":
             try:
                 out.append(n.symbol.name)
             except Exception:
                 pass
-    try:
-        node.visit(cb)
-    except Exception:
-        pass
+            return
+        # Explicit recursion for compound expressions whose children
+        # ``visit()`` may not traverse.
+        if t in ("ElementSelectExpression", "RangeSelectExpression",
+                 "MemberAccessExpression"):
+            _extract(getattr(n, "value", None))
+            sel = getattr(n, "selector", None)
+            if sel is not None:
+                _extract(sel)
+            return
+        if t == "ConversionExpression":
+            _extract(getattr(n, "operand", None))
+            return
+        if t == "BinaryExpression":
+            _extract(getattr(n, "left", None))
+            _extract(getattr(n, "right", None))
+            return
+        if t == "UnaryExpression":
+            _extract(getattr(n, "operand", None))
+            return
+        if t == "ConditionalExpression":
+            _extract(getattr(n, "pred", None))
+            _extract(getattr(n, "left", None))
+            _extract(getattr(n, "right", None))
+            return
+        if t == "ConcatenationExpression":
+            try:
+                for op in n.operands:
+                    _extract(op)
+            except Exception:
+                pass
+            return
+        if t == "AssignmentExpression":
+            _extract(getattr(n, "left", None))
+            _extract(getattr(n, "right", None))
+            return
+        # Fallback: try visit for unknown statement/expression types
+        def cb(inner):
+            if type(inner).__name__ == "NamedValueExpression":
+                try:
+                    out.append(inner.symbol.name)
+                except Exception:
+                    pass
+        try:
+            n.visit(cb)
+        except Exception:
+            pass
+
+    _extract(node)
     # de-dup preserve order
     seen = set()
     res = []
@@ -177,6 +244,14 @@ def _width(sym) -> int:
         w = getattr(t, "bitWidth", None)
         if w:
             return int(w)
+        # Unpacked array / enum: try the element type's bitWidth.
+        # pyslang's bitWidth on an unpacked array type returns 0/None, so we
+        # descend to the canonical element type to get the real bit width.
+        et = getattr(t, "elementType", None)
+        if et is not None:
+            ew = getattr(et, "bitWidth", None)
+            if ew:
+                return int(ew)
     except Exception:
         pass
     return 1
@@ -230,11 +305,40 @@ class _ModuleBuilder:
             for r in recs:
                 aff.update(r["rhs"])
                 aff.update(r["control"])
+                # Instance-port drivers carry their driving source in port_ref
+                # (e.g. {"instance": "u_sub", "port": "intr_o"}) rather than in
+                # rhs/control.  Fold that into fanin/loads so that signals driven
+                # only by sub-module output ports are not empty.
+                pr = r.get("port_ref")
+                if pr and not r["rhs"] and not r["control"]:
+                    src = f"{pr['instance']}.{pr['port']}"
+                    aff.add(src)
             fanin[lhs] = sorted(aff)
             for s in aff:
                 loads.setdefault(s, [])
                 if lhs not in loads[s]:
                     loads[s].append(lhs)
+        # Build loads from instance INPUT port connections: when external signal S
+        # is connected to a sub-module input port P, S drives instance.port.
+        # Without this, signals whose only fan-out is to sub-module inputs appear
+        # to have empty loads (P0 fix).
+        for ins in self.instances:
+            iname = ins.get("name", "")
+            conns = ins.get("conns", {})
+            conn_dirs = ins.get("conn_dirs", {})
+            for port, sig in conns.items():
+                if not sig:
+                    continue
+                direction = conn_dirs.get(port, "")
+                if direction in ("input", "inout"):
+                    port_path = f"{iname}.{port}"
+                    loads.setdefault(sig, [])
+                    if port_path not in loads[sig]:
+                        loads[sig].append(port_path)
+                    # Also add to fanin of the port path (reverse direction)
+                    fanin.setdefault(port_path, [])
+                    if sig not in fanin[port_path]:
+                        fanin[port_path].append(sig)
         loc = {}
         for n, d in {**self.ports, **self.signals}.items():
             loc[n] = {"file": d.get("file"), "line": d.get("line")}
@@ -258,10 +362,18 @@ def _walk_statement(stmt, control: List[str], guard: List[dict], mb: _ModuleBuil
         body = getattr(stmt, "body", None)
         items = []
         if body is not None:
-            try:
-                items = list(body)
-            except TypeError:
-                items = [body]
+            # pyslang wraps the statement list in a StatementList object
+            # that is not directly iterable (list() raises TypeError).  Use
+            # its ``.list`` attribute to get the real Python list of statements
+            # so that ConditionalStatement / CaseStatement inside the block are
+            # properly recursed with updated control/guard context.
+            if hasattr(body, "list"):
+                items = body.list
+            else:
+                try:
+                    items = list(body)
+                except TypeError:
+                    items = [body]
         for s in items:
             _walk_statement(s, control, guard, mb)
         return
@@ -282,6 +394,13 @@ def _walk_statement(stmt, control: List[str], guard: List[dict], mb: _ModuleBuil
     if t == "CaseStatement":
         case_expr = getattr(stmt, "expr", None)
         cond_sigs = _named_values(case_expr)
+        # For ``unique case (1'b1)`` patterns (common in reggen output), the
+        # case expression is a constant and the real condition signals are in
+        # the item labels (e.g. ``racl_addr_hit_read[0]``).  Collect those too
+        # so the control list is not empty for the branch assignments.
+        for item in getattr(stmt, "items", []) or []:
+            for lab in (getattr(item, "expressions", None) or []):
+                cond_sigs += _named_values(lab)
         ctl = control + cond_sigs
         case_node = serialize_expr(case_expr) if case_expr is not None else {"k": "unknown"}
         for item in getattr(stmt, "items", []) or []:

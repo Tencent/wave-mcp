@@ -107,6 +107,21 @@ def evaluate(node: dict, vf: ValueFn) -> Optional[str]:
         return _norm(vf(node["name"]))
     if k == "const":
         return parse_literal(node.get("lit"))
+    if k == "bitselect":
+        base_val = evaluate(node.get("base"), vf)
+        if base_val is None:
+            return None
+        idx = node.get("idx", 0)
+        if idx < 0 or idx >= len(base_val):
+            return "x"
+        return base_val[-(idx + 1)]  # MSB-first string; index 0 = LSB = last char
+    if k == "cond":
+        ct = truth(evaluate(node.get("cond"), vf))
+        if ct == "1":
+            return evaluate(node.get("t"), vf)
+        if ct == "0":
+            return evaluate(node.get("f"), vf)
+        return "x"
     if k == "un":
         return _eval_unary(node, vf)
     if k == "bin":

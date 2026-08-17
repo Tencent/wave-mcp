@@ -27,6 +27,15 @@ wave-mcp-bundle*/
 # internal validation harnesses (depend on a local OpenTitan tree; not published)
 tests/verilator_fst/
 tests/opentitan_elab_check.py
+tests/opentitan_uart/
+tests/opentitan_multi/
+tests/xiangshan_test/
+tests/quality_reports/
+tests/quality_reports_v2/
+tests/functional_reports/
+tests/full_quality_check.py
+tests/full_quality_check_all_tools.py
+tests/functional_verify.py
 
 .agent
 

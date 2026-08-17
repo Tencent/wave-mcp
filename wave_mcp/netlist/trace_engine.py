@@ -155,6 +155,13 @@ class TraceEngine:
         be a field-qualified name (e.g. ``tl_h_o.a_ready``). Falls back to the
         deepest dotted prefix that resolves to a module when ``rsplit('.', 1)``
         misattributes a struct field onto the instance part.
+
+        Generate-scope aware: when the instance path contains generate scopes
+        (``gen_xxx``, ``array[idx]``) absent from ``instance_tree``, the walk-
+        back picks the nearest parent that *does* resolve. If the original
+        trailing token is a declared port/signal in that parent module, it is
+        used as the leaf — this correctly recovers signals inside generate
+        blocks without relying on naming conventions.
         """
         # fast path: trailing token is the leaf
         inst, leaf = self.split(full_path)
@@ -162,15 +169,24 @@ class TraceEngine:
         if mod and mod in self.modules:
             return (mod, inst, leaf,
                     self._lookup_drivers(self.modules[mod]["drivers"], leaf))
-        # field-level path: walk back to deepest instance prefix
+        # walk back to deepest instance prefix that resolves to a module
         parts = full_path.split(".")
+        orig_leaf = parts[-1]
         for cut in range(len(parts) - 1, 0, -1):
-            inst = ".".join(parts[:cut])
-            leaf = ".".join(parts[cut:])
-            mod = self.resolve_module(inst)
-            if mod and mod in self.modules:
-                return (mod, inst, leaf,
-                        self._lookup_drivers(self.modules[mod]["drivers"], leaf))
+            cand_inst = ".".join(parts[:cut])
+            cand_mod = self.resolve_module(cand_inst)
+            if cand_mod and cand_mod in self.modules:
+                m = self.modules[cand_mod]
+                # generate-scope recovery: if the original trailing token is a
+                # real port/signal in the resolved parent module, use it as the
+                # leaf instead of the joined field-level name.
+                if orig_leaf in m.get("ports", {}) or orig_leaf in m.get("signals", {}):
+                    return (cand_mod, cand_inst, orig_leaf,
+                            self._lookup_drivers(m["drivers"], orig_leaf))
+                # field-level path (struct/bit-select): use joined leaf
+                cand_leaf = ".".join(parts[cut:])
+                return (cand_mod, cand_inst, cand_leaf,
+                        self._lookup_drivers(m["drivers"], cand_leaf))
         return None, inst, leaf, []
 
     @staticmethod
@@ -185,6 +201,84 @@ class TraceEngine:
     def module_drivers(self, full_path: str) -> Tuple[Optional[str], str, List[dict]]:
         mod, _inst, leaf, recs = self.resolve_path(full_path)
         return mod, leaf, recs
+
+    # -- empty-result classification ----------------------------------------
+    def classify_empty(self, inst: str, leaf: str, mod: Optional[str],
+                       context: str) -> Tuple[str, str]:
+        """Classify why a connectivity query returned empty for this signal.
+
+        context: "loads" | "fanin" | "drivers"
+        Returns (reason, hint) so callers can distinguish structurally-expected
+        emptiness (input ports, parameters, DUT outputs) from genuine gaps.
+        """
+        if not mod or mod not in self.modules:
+            return ("unresolved_path",
+                    f"Cannot resolve '{leaf}' to any module in the netlist. "
+                    "It may be a testbench-only signal, a generate-scope "
+                    "reference, or a hierarchical path the netlist did not "
+                    "elaborate.")
+
+        m = self.modules[mod]
+        port_info = m.get("ports", {}).get(leaf)
+        sig_info = m.get("signals", {}).get(leaf)
+
+        # Not in ports or signals → likely parameter / localparam / constant
+        if not port_info and not sig_info:
+            return ("parameter_or_constant",
+                    f"'{leaf}' is not declared as a port or signal in module "
+                    f"'{mod}'. It is likely a parameter, localparam, enum "
+                    "value, or constant — these have no dynamic connectivity.")
+
+        if port_info:
+            direction = port_info.get("direction", "implicit")
+            if context in ("fanin", "drivers"):
+                if direction == "input":
+                    return ("primary_input",
+                            f"'{leaf}' is an input port of module '{mod}'. "
+                            "Input ports are driven externally (testbench or "
+                            "parent module) and have no internal RTL driver.")
+                if direction == "inout":
+                    return ("inout_port",
+                            f"'{leaf}' is an inout port of module '{mod}'. "
+                            "Bidirectional ports may have conditional drivers "
+                            "not captured in static analysis.")
+            if context == "loads":
+                if direction == "output":
+                    has_parent = bool(inst) and "." in inst and any(
+                        inst.startswith(p + ".") for p in self.instance_tree)
+                    if has_parent:
+                        return ("submodule_output_port",
+                                f"'{leaf}' is an output port of instance "
+                                f"'{inst}' (module '{mod}'). Its loads are "
+                                "tracked at the parent module level; if empty, "
+                                "the parent may not connect this output to any "
+                                "consumer.")
+                    return ("dut_output_port",
+                            f"'{leaf}' is an output port of the top-level DUT "
+                            f"'{mod}'. DUT outputs connect to the testbench, "
+                            "which is outside the netlist scope.")
+                if direction == "input":
+                    return ("unused_input",
+                            f"'{leaf}' is an input port of module '{mod}' with "
+                            "no internal loads. The signal is declared but not "
+                            "read by any logic in this module.")
+
+        if sig_info:
+            kind = sig_info.get("kind", "signal")
+            if context == "loads":
+                return ("unused_signal",
+                        f"'{leaf}' is a {kind} in module '{mod}' with no "
+                        "loads. Nothing in this module reads this signal.")
+            if context in ("fanin", "drivers"):
+                return ("undriven_signal",
+                        f"'{leaf}' is a {kind} in module '{mod}' with no "
+                        "driver. It may be a tie-off, unused declaration, or "
+                        "driven by a construct not captured in static analysis "
+                        "(e.g. generate).")
+
+        return ("genuinely_empty",
+                "No connectivity entries found; the signal exists in the "
+                "netlist but has no recorded connections for this query type.")
 
     # -- value helpers ------------------------------------------------------
     def _units(self, time: str) -> int:
@@ -209,8 +303,9 @@ class TraceEngine:
         if mod is None:
             return {"available": False, "reason": f"cannot resolve module for {signal_full_path}"}
         if not recs:
+            reason, hint = self.classify_empty(inst, leaf, mod, "drivers")
             return {"available": True, "signal": signal_full_path, "time": time,
-                    "active_drivers": [], "note": "no RTL driver (primary input / port / constant)"}
+                    "active_drivers": [], "reason": reason, "hint": hint}
         units = self._units(time)
         annotated = []
         for i, r in enumerate(recs):
@@ -317,9 +412,19 @@ class TraceEngine:
         try:
             head, idx = driver_unique_id.rsplit("#", 1)
             mod, leaf = head.split(".", 1)
-            rec = self.modules[mod]["drivers"][leaf][int(idx)]
-        except (KeyError, ValueError, IndexError):
+            idx = int(idx)
+        except (ValueError, IndexError):
             return {"available": False, "reason": f"unknown driver id {driver_unique_id}"}
+        if mod not in self.modules:
+            return {"available": False, "reason": f"unknown driver id {driver_unique_id}"}
+        # Use _lookup_drivers to handle field-qualified paths (e.g. tl_h_o.a_ready
+        # when the driver key is the root tl_h_o).  Direct dict lookup fails for
+        # reggen-generated struct field assigns, causing driver_contributors to
+        # return unavailable.
+        recs = self._lookup_drivers(self.modules[mod]["drivers"], leaf)
+        if idx >= len(recs):
+            return {"available": False, "reason": f"driver index {idx} out of range for {driver_unique_id}"}
+        rec = recs[idx]
         return {"available": True, "driver_unique_id": driver_unique_id,
                 "rhs_signals": rec["rhs"], "control_signals": rec["control"],
                 "file": rec["file"], "line": rec["line"], "snippet": rec["snippet"]}
@@ -394,17 +499,38 @@ class TraceEngine:
             return entry
 
         root = node(signal_path, 0)
-        return {"available": True, "signal": signal_path, "time": time_point,
-                "mode": "trace_x" if x_only else "trace_value", "tree": root}
 
-    def trace_x(self, signal_path: str, time_point: str) -> dict:
+        # Build tree summary for the user (P2: Indago reports depth/truncation)
+        tree_summary = {"max_depth": 0, "total_nodes": 0,
+                        "truncated_nodes": 0, "modules_crossed": 0}
+
+        def _summarize(n, depth=0):
+            if not isinstance(n, dict):
+                return
+            tree_summary["total_nodes"] += 1
+            tree_summary["max_depth"] = max(tree_summary["max_depth"], depth)
+            if n.get("truncated"):
+                tree_summary["truncated_nodes"] += 1
+            if n.get("crosses_into"):
+                tree_summary["modules_crossed"] += 1
+            for c in n.get("contributors", []):
+                _summarize(c, depth + 1)
+
+        _summarize(root)
+
+        return {"available": True, "signal": signal_path, "time": time_point,
+                "mode": "trace_x" if x_only else "trace_value", "tree": root,
+                "tree_summary": tree_summary}
+
+    def trace_x(self, signal_path: str, time_point: str,
+                max_depth: int = 12) -> dict:
         val = self.fst.value_at(signal_path, self._units(time_point)) \
             if signal_path in self.fst.signals else None
         if not self._is_x(val):
             return {"available": True, "signal": signal_path, "time": time_point,
                     "result": "no-x", "value": (val or {}).get("value"),
                     "note": "signal has no X/Z at this time"}
-        res = self.trace_value(signal_path, time_point, x_only=True)
+        res = self.trace_value(signal_path, time_point, max_depth=max_depth, x_only=True)
         res["note"] = ("X-trace is approximate: follows fan-ins that are X at the time "
                        "point; X-optimism corner cases may not be covered.")
         return res

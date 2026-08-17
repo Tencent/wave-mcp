@@ -383,6 +383,24 @@ def signal_values_in_range(full_path: str, start_time_as_string: str,
     return {"count": len(rows), "values": rows}
 
 
+@mcp.tool()
+def signal_value_at(full_path: str, time_as_string: str,
+                    session_id: Optional[str] = None) -> dict[str, Any]:
+    """Get the value of a signal at a specific time point (e.g. "5000ns").
+
+    Unlike ``signal_values_in_range`` which returns all changes, this returns a
+    single value: the signal's value held at exactly that time (last change at
+    or before the time point).
+    """
+    s = _sess(session_id)
+    exp = s.fst.timescale_exp
+    t = timeutil.time_to_fst_units(time_as_string, exp)
+    val = s.fst.value_at(full_path, t)
+    if val is None:
+        return {"error": f"signal not found: {full_path}"}
+    return {"signal": full_path, "time": time_as_string, **val}
+
+
 # =============================================================================
 # 5. Connectivity & driver analysis (RTL / UHDM — stage 3/4, graceful degrade)
 # =============================================================================
@@ -405,9 +423,15 @@ def signal_loads(full_path: str, session_id: Optional[str] = None) -> dict[str, 
 
 
 @mcp.tool()
-def signal_fanin(signal_path: str, session_id: Optional[str] = None) -> dict[str, Any]:
-    """Get all signals that can affect the given signal (fan-in; needs UHDM)."""
-    return _sess(session_id).rtl.fan_in(signal_path)
+def signal_fanin(signal_path: str, transitive: bool = False,
+                 session_id: Optional[str] = None) -> dict[str, Any]:
+    """Get all signals that can affect the given signal (fan-in; needs UHDM).
+
+    Args:
+        transitive: if True, recursively expand fan-in across hierarchy levels
+            (cross-module fan-in). Default False (direct fan-in only).
+    """
+    return _sess(session_id).rtl.fan_in(signal_path, transitive=transitive)
 
 
 @mcp.tool()
@@ -429,16 +453,31 @@ def driver_contributors(driver_unique_id: str,
 # =============================================================================
 @mcp.tool()
 def trace_value(signal_path: str, time_point: str,
+                max_depth: int = 12,
                 session_id: Optional[str] = None) -> dict[str, Any]:
-    """Trace how a signal's value at a time point was produced (needs UHDM+FST)."""
-    return _sess(session_id).rtl.trace_value(signal_path, time_point)
+    """Trace how a signal's value at a time point was produced (needs UHDM+FST).
+
+    Args:
+        max_depth: maximum recursion depth for the trace tree (default 12, range 1-50).
+            Increase for deep designs; decrease for faster, shallower traces.
+    """
+    s = _sess(session_id)
+    depth = max(1, min(int(max_depth), 50))
+    return s.rtl.trace_value(signal_path, time_point, max_depth=depth)
 
 
 @mcp.tool()
 def trace_x(signal_path: str, time_point: str,
+            max_depth: int = 12,
             session_id: Optional[str] = None) -> dict[str, Any]:
-    """Trace the root cause of an X value on a signal (approximate; needs UHDM+FST)."""
-    return _sess(session_id).rtl.trace_x(signal_path, time_point)
+    """Trace the root cause of an X value on a signal (approximate; needs UHDM+FST).
+
+    Args:
+        max_depth: maximum recursion depth for the X-trace tree (default 12, range 1-50).
+    """
+    s = _sess(session_id)
+    depth = max(1, min(int(max_depth), 50))
+    return s.rtl.trace_x(signal_path, time_point, max_depth=depth)
 
 
 # =============================================================================

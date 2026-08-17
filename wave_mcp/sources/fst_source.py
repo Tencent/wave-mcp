@@ -521,17 +521,44 @@ class FstSource:
             rtl_w = self._rtl_width(base_scope, base_name)
             if rtl_w is not None:
                 entry["rtl_width"] = rtl_w
-                entry["width_matches_rtl"] = (rtl_w == total_w)
-                if rtl_w != total_w:
-                    # trust the RTL declaration for the reported width
-                    entry["width"] = rtl_w
+                # Unpacked array: RTL (pyslang) reports the per-element bit
+                # width, not the total array bit width.  When FST elements are
+                # uniform and each matches the RTL element width, the
+                # aggregation is correct even though total_w != rtl_w.
+                # When they genuinely differ (e.g. enum bit-width disagreement
+                # between pyslang and the simulator), keep the FST-computed
+                # total width — it reflects what the waveform actually contains.
+                if uniform and rtl_w == elem_w:
+                    entry["width_matches_rtl"] = True
+                else:
+                    entry["width_matches_rtl"] = (rtl_w == total_w)
+                    if rtl_w != total_w:
+                        # Do NOT override width with rtl_w: the FST-computed
+                        # total is what the waveform actually holds.  Just flag
+                        # the discrepancy so callers know.
+                        entry["width_discrepancy"] = (
+                            f"FST total={total_w} ({len(elems)}x{elem_w}-bit) vs "
+                            f"RTL declared={rtl_w}; keeping FST width")
             merged.append(entry)
         return passthrough + merged
 
     def signal_info(self, full_path: str) -> Optional[dict]:
         sig = self.signals.get(full_path)
         if not sig:
-            return None
+            # aggregated bus name (e.g. "...bus[15:0]"): resolve to the base
+            # signal and report its aggregated width from element signals.
+            elems = self._element_signals(full_path)
+            if not elems:
+                return None
+            # use the first element's metadata; width is the sum of all elements
+            first = elems[0]
+            total_w = sum(s.length for s in elems)
+            d = first.to_dict()
+            d["width"] = total_w
+            d["msb"] = total_w - 1 if total_w > 1 else 0
+            d["lsb"] = 0
+            d["aggregated_from"] = len(elems)
+            return d
         d = sig.to_dict()
         d.update({
             "msb": sig.length - 1 if sig.length > 1 else 0,
@@ -618,6 +645,56 @@ class FstSource:
             "aggregated_from": len(elems),
         }
 
+    def _values_between_aggregated(self, full_path: str,
+                                    start_units: int, end_units: int,
+                                    max_values: int) -> Optional[List[dict]]:
+        """Value-over-time for an aggregated bus (e.g. ``bus[15:0]``).
+
+        Collects each element signal's value timeline, merges by timestamp
+        (MSB-first concatenation), and returns the combined timeline.
+        """
+        elems = self._element_signals(full_path)
+        if not elems:
+            return None
+        # collect per-element timelines
+        per_elem: List[Dict[int, str]] = []
+        for s in elems:
+            rows = self._iter_values(s, start_units, end_units, max_values)
+            per_elem.append({t: v for t, v in rows})
+        # merge timestamps: union of all element timestamps, sorted
+        all_ts = sorted(set().union(*[set(d.keys()) for d in per_elem]))
+        if not all_ts:
+            return []
+        # also include start and end timestamps so the range is covered even if
+        # no element changed exactly at those points — fetch point values.
+        for boundary in (start_units, end_units):
+            if boundary not in all_ts:
+                # insert boundary with point values from each element
+                all_ts.append(boundary)
+        all_ts = sorted(set(all_ts))
+        # build merged rows; carry forward last known value per element
+        last_vals: List[str] = [""] * len(elems)
+        out: List[dict] = []
+        for t in all_ts:
+            if t < start_units or t > end_units:
+                continue
+            parts: List[str] = []
+            for i, d in enumerate(per_elem):
+                if t in d:
+                    last_vals[i] = d[t]
+                parts.append(last_vals[i])
+            val = "".join(parts)
+            out.append({
+                "time": timeutil.format_fst_time(t, self.timescale_exp),
+                "time_units": t,
+                "value": val,
+                "hex": self._to_hex(val),
+                "aggregated_from": len(elems),
+            })
+            if len(out) >= max_values:
+                break
+        return out
+
     def _iter_values(self, sig: Signal, start: int, end: int,
                      max_values: int) -> List[Tuple[int, str]]:
         collected: List[Tuple[int, str]] = []
@@ -643,7 +720,11 @@ class FstSource:
                        max_values: int = 5000) -> Optional[List[dict]]:
         sig = self.signals.get(full_path)
         if not sig:
-            return None
+            # aggregated bus name (e.g. "...bus[15:0]"): iterate all element
+            # signals and merge their value timelines (MSB-first concatenation
+            # at each timestamp). This mirrors value_at's aggregation approach.
+            return self._values_between_aggregated(full_path, start_units,
+                                                    end_units, max_values)
         rows = self._iter_values(sig, start_units, end_units, max_values)
         return [
             {
