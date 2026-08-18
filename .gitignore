@@ -36,6 +36,10 @@ tests/fourstate/session_ext/
 tests/functional_verify.py
 tests/full_quality_check_all_tools.py
 
+# fieldkit run artifacts (the tool itself IS published)
+fieldkit_session/
+fieldkit_report.json
+
 .agent
 
 # uploaded files (temporary)
