@@ -1,5 +1,5 @@
-# Core MCP framework (>=1.27.2 fixes CVE-2026-52869/52870 authorization issues)
-mcp>=1.27.2,<2
+# Core MCP framework (SDK v2, protocol 2026-07-28; v2 includes the CVE-2026-52869/52870 fixes)
+mcp>=2.0.0,<3
 
 # FST waveform reader (C fstapi bindings, random-access, fast)
 pylibfst>=0.2.1

@@ -218,7 +218,7 @@ wave-session --vcd sim/dump.vcd --top top_tb --filelist rtl.f --out sessions/mod
 
 ```
 wave_mcp/
-  server.py              # MCP server，注册全部 27 工具（FastMCP）
+  server.py              # MCP server，注册全部 27 工具（mcp SDK v2 MCPServer）
   session.py             # Session / SessionManager / session.json / 指纹校验 / 三层 definition_name
   pipeline.py            # prepare_session / prepare_static_session：波形或纯 RTL →网表→session 编排
   convert.py             # vcd2fst 封装：并行能力探测 + 串行 fallback + FIFO 流式

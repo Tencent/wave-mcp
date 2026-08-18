@@ -231,7 +231,7 @@ wave-session --vcd sim/dump.vcd --top top_tb --filelist rtl.f --out sessions/mod
 
 ```
 wave_mcp/
-  server.py              # MCP server, registers all 25 tools (FastMCP)
+  server.py              # MCP server, registers all 27 tools (mcp SDK v2 MCPServer)
   session.py             # Session / SessionManager / session.json / fingerprint check / 3-layer definition_name
   pipeline.py            # prepare_session: waveform-file entry (.fst direct / .vcd auto-convert) → netlist → session
   convert.py             # vcd2fst wrapper: parallel capability probe + serial fallback + FIFO streaming

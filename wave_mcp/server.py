@@ -17,7 +17,7 @@ from __future__ import annotations
 import argparse
 from typing import Any, List, Optional
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from . import convert, pipeline, timeutil
 from .session import SessionManager
@@ -92,7 +92,7 @@ def _install_readable_text_patch() -> None:
     """
     try:
         import pydantic_core
-        from mcp.server.fastmcp.utilities import func_metadata as _fm
+        from mcp.server.mcpserver.utilities import func_metadata as _fm
         from mcp.types import TextContent
     except (ImportError, AttributeError):
         return
@@ -123,7 +123,7 @@ def _install_readable_text_patch() -> None:
 
 _install_readable_text_patch()
 
-mcp = FastMCP("wave-mcp")
+mcp = MCPServer("wave-mcp")
 SESSIONS = SessionManager()
 
 
@@ -716,7 +716,7 @@ def modules_in_file(full_file_path: str, session_id: Optional[str] = None) -> di
 # =============================================================================
 def main():
     parser = argparse.ArgumentParser(description="wave-mcp: open-source xrun waveform debug MCP server")
-    parser.add_argument("--transport", choices=["stdio", "http", "sse"], default="stdio")
+    parser.add_argument("--transport", choices=["stdio", "http"], default="stdio")
     parser.add_argument("--session", help="optional session dir/json to auto-open at startup")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
@@ -727,14 +727,9 @@ def main():
 
     if args.transport == "stdio":
         mcp.run(transport="stdio")
-    elif args.transport == "http":
-        mcp.settings.host = args.host
-        mcp.settings.port = args.port
-        mcp.run(transport="streamable-http")
     else:
-        mcp.settings.host = args.host
-        mcp.settings.port = args.port
-        mcp.run(transport="sse")
+        # mcp SDK v2: transport options moved from settings to run() kwargs.
+        mcp.run(transport="streamable-http", host=args.host, port=args.port)
 
 
 if __name__ == "__main__":
