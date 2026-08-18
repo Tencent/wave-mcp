@@ -73,9 +73,15 @@ class Session:
         ]
 
         # --- open sources ---
-        if not self.fst_path or not os.path.exists(self.fst_path):
-            raise FileNotFoundError(f"FST not found: {self.fst_path}")
-        self.fst = FstSource(self.fst_path)
+        # FST is optional: a *static session* (netlist-only, no waveform) opens
+        # with fst=None; waveform-dependent tools degrade gracefully while all
+        # structural tools (connectivity/drivers/loads/fanin/files) work.
+        if self.fst_path:
+            if not os.path.exists(self.fst_path):
+                raise FileNotFoundError(f"FST not found: {self.fst_path}")
+            self.fst = FstSource(self.fst_path)
+        else:
+            self.fst = None
         self.rtl = RtlSource(self.filelist, self.maps_path, fst=self.fst)
 
         # Resolve each FST scope's module *definition* name so module_type reports
@@ -86,7 +92,7 @@ class Session:
         #   L2 inferred : instance-name -> module-def naming-convention match
         #                 (netlist-independent; works even when elaboration fails)
         #   L3 manual   : session.json "scope_map" override (authoritative)
-        if self.rtl.has_netlist and getattr(self.rtl, "engine", None):
+        if self.fst is not None and self.rtl.has_netlist and getattr(self.rtl, "engine", None):
             try:
                 # batch resolve so anchor propagation ("向上推导") can recover the
                 # DUT-root scope from its already-matched children via the netlist.
@@ -110,7 +116,7 @@ class Session:
             known = set(extract_module_names(self.filelist))
             if self.rtl.has_netlist:
                 known |= set((self.rtl.maps.get("modules") or {}).keys())
-            if known:
+            if known and self.fst is not None:
                 noise = {"begin", "fork", "clocking"}
                 self.fst.annotate_definitions(
                     make_name_resolver(known, allow_prefix=False),
@@ -123,7 +129,8 @@ class Session:
 
         # L3: manual authoritative override from the manifest.
         try:
-            self.fst.apply_scope_map(manifest.get("scope_map") or {})
+            if self.fst is not None:
+                self.fst.apply_scope_map(manifest.get("scope_map") or {})
         except Exception:  # pylint: disable=broad-except
             pass  # best-effort L3: manual override is optional, never crash open
 
@@ -163,26 +170,51 @@ class Session:
 
     # -- info ---------------------------------------------------------------
     def summary(self) -> Dict[str, Any]:
-        return {
+        out: Dict[str, Any] = {
             "top": self.top,
+            # tell LLM clients up front which tool families apply, so a static
+            # session doesn't need trial-and-error against value/trace tools.
+            "mode": "full" if self.fst is not None else "static",
             "fst_path": self.fst_path,
-            "timescale_exp": self.fst.timescale_exp,
-            "start_time": self.fst.start_time,
-            "end_time": self.fst.end_time,
-            "num_scopes": len(self.fst.scopes),
-            "num_signals": len(self.fst.signals),
             "netlist_available": self.rtl.has_netlist,
             "netlist_health": self.rtl.netlist_health(),
-            # how many module scopes have a resolved definition_name (and via
-            # which source: netlist / inferred / manual). Tells the client
-            # whether module_type is trustworthy across the hierarchy.
-            "definition_coverage": self.fst.definition_coverage(),
             "verible_available": self.rtl.verible,
             "warnings": self.warnings,
         }
+        if self.fst is not None:
+            out.update({
+                "timescale_exp": self.fst.timescale_exp,
+                "start_time": self.fst.start_time,
+                "end_time": self.fst.end_time,
+                "num_scopes": len(self.fst.scopes),
+                "num_signals": len(self.fst.signals),
+                # how many module scopes have a resolved definition_name (and via
+                # which source: netlist / inferred / manual). Tells the client
+                # whether module_type is trustworthy across the hierarchy.
+                "definition_coverage": self.fst.definition_coverage(),
+            })
+        else:
+            mods = self.rtl.maps.get("modules", {}) if self.rtl.has_netlist else {}
+            tree = self.rtl.maps.get("instance_tree", {}) if self.rtl.has_netlist else {}
+            out.update({
+                "num_modules": len(mods),
+                "num_instances": len(tree),
+                "available_tools": [
+                    "signal_connectivity", "signal_drivers", "signal_loads",
+                    "signal_fanin", "driver_contributors", "list_modules",
+                    "instances_of_module", "instances_of_module_matching",
+                    "list_child_instances", "list_files", "find_files",
+                    "modules_in_file", "scope_info", "signal_info"],
+                "unavailable_tools_hint":
+                    "value/trace tools (signal_values*, trace_*, active_drivers) "
+                    "need a waveform; use prepare_session once your sim has "
+                    "dumped an FST/VCD.",
+            })
+        return out
 
     def close(self):
-        self.fst.close()
+        if self.fst is not None:
+            self.fst.close()
 
 
 def open_session(session_path: str) -> Session:

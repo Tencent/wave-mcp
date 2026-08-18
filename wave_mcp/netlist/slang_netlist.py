@@ -44,6 +44,33 @@ class NetlistError(RuntimeError):
 _DIR_MAP = {"In": "input", "Out": "output", "InOut": "inout", "Ref": "ref"}
 
 
+def _cond_pred(e):
+    """Return the predicate expression of a ConditionalExpression.
+
+    pyslang >= 8 stores the predicate in ``conditions[].expr`` (a list to
+    support ``?:`` pattern matching); older builds exposed ``pred``. Reading
+    only ``pred`` silently returns None on modern pyslang, which drops the
+    ternary condition from control/fanin — so try ``conditions`` first.
+    """
+    conds = getattr(e, "conditions", None)
+    if conds:
+        try:
+            exprs = [getattr(c, "expr", None) for c in conds]
+            exprs = [x for x in exprs if x is not None]
+            if exprs:
+                return exprs if len(exprs) > 1 else exprs[0]
+        except Exception:
+            pass
+    return getattr(e, "pred", None)
+
+
+def _cond_pred_expr_node(e) -> dict:
+    p = _cond_pred(e)
+    if isinstance(p, list):
+        return _and_all([serialize_expr(x) for x in p])
+    return serialize_expr(p)
+
+
 def serialize_expr(e) -> dict:
     """Serialize a pyslang expression into a small dict tree for expr_eval."""
     try:
@@ -64,7 +91,7 @@ def serialize_expr(e) -> dict:
                     pass
             return base
         if t == "ConditionalExpression":
-            return {"k": "cond", "cond": serialize_expr(getattr(e, "pred", None)),
+            return {"k": "cond", "cond": _cond_pred_expr_node(e),
                     "t": serialize_expr(getattr(e, "left", None)),
                     "f": serialize_expr(getattr(e, "right", None))}
         if t == "UnaryExpression":
@@ -172,7 +199,9 @@ def _named_values(node) -> List[str]:
             _extract(getattr(n, "operand", None))
             return
         if t == "ConditionalExpression":
-            _extract(getattr(n, "pred", None))
+            p = _cond_pred(n)
+            for px in (p if isinstance(p, list) else [p]):
+                _extract(px)
             _extract(getattr(n, "left", None))
             _extract(getattr(n, "right", None))
             return
@@ -540,6 +569,23 @@ def _process_body(inst, mb: _ModuleBuilder, builders, loc: _Loc, prefix: str,
         _process_member(m, mb, builders, loc, prefix, instance_tree)
 
 
+def _is_z_literal(e) -> bool:
+    """True if the expression is a literal whose bits are all Z (tri-state
+    'not driving' branch, e.g. ``4'bzzzz``)."""
+    try:
+        if type(e).__name__ == "ConversionExpression":
+            return _is_z_literal(e.operand)
+        if type(e).__name__ in ("IntegerLiteral", "UnbasedUnsizedIntegerLiteral"):
+            txt = str(e.value).lower()
+            # forms: "4'bzzzz", "'z", "z"; take digits after the base marker
+            if "'" in txt:
+                txt = txt.split("'", 1)[1].lstrip("sbodh")
+            return len(txt) > 0 and set(txt) <= {"z", "?", "_"}
+    except Exception:
+        pass
+    return False
+
+
 def _record_assignment_continuous(a, mb: _ModuleBuilder):
     # A continuous-assign whose RHS/LHS failed to elaborate surfaces as an
     # InvalidExpression (no .left/.right). Skip it rather than crash so a single
@@ -549,10 +595,30 @@ def _record_assignment_continuous(a, mb: _ModuleBuilder):
     lhs = _lvalue_paths(a.left)
     rhs = _named_values(a.right)
     loc = a.sourceRange.start
+
+    # Top-level ternary on the RHS: the condition is a *control* of this
+    # driver. For the tri-state idiom ``assign o = en ? v : 'z`` (or the
+    # mirrored form) the driver only drives when the enable selects the
+    # non-Z branch — record that as a guard so active_drivers can evaluate
+    # it against FST values (4-state aware: X guard -> None).
+    control: List[str] = []
+    guard: List[dict] = []
+    r = a.right
+    while type(r).__name__ == "ConversionExpression":
+        r = r.operand
+    if type(r).__name__ == "ConditionalExpression":
+        p = _cond_pred(r)
+        for px in (p if isinstance(p, list) else [p]):
+            control.extend(_named_values(px))
+        cond_node = _cond_pred_expr_node(r)
+        if _is_z_literal(getattr(r, "right", None)):
+            guard = [{"cond": cond_node, "expect": 1}]   # drives on true branch
+        elif _is_z_literal(getattr(r, "left", None)):
+            guard = [{"cond": cond_node, "expect": 0}]   # drives on false branch
     for l in (lhs or [None]):
         if l is None:
             continue
-        mb.add_driver(l, "assign", rhs, [], loc)
+        mb.add_driver(l, "assign", rhs, control, loc, guard)
 
 
 def _record_instance(inst, parent_mb, builders, loc, prefix, instance_tree):

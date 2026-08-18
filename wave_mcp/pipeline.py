@@ -136,11 +136,14 @@ class StepResult:
                 "elapsed_sec": round(self.elapsed_sec, 3), **self.detail}
 
 
-def build_manifest(out_dir: str, fst_path: str, *, top: str = "",
+def build_manifest(out_dir: str, fst_path: Optional[str], *, top: str = "",
                    filelist: Optional[List[str]] = None,
                    filelist_path: Optional[str] = None,
                    uhdm_db: Optional[str] = None, maps_path: Optional[str] = None) -> str:
-    """Write session.json binding all data sources + fingerprints. Returns path."""
+    """Write session.json binding all data sources + fingerprints. Returns path.
+
+    ``fst_path=None`` produces a *static* (netlist-only) session manifest.
+    """
     os.makedirs(out_dir, exist_ok=True)
     files = list(filelist or [])
     filelist_hash = None
@@ -149,11 +152,11 @@ def build_manifest(out_dir: str, fst_path: str, *, top: str = "",
         filelist_hash = _sha1(filelist_path, limit=0)
     manifest = {
         "top": top,
-        "fst_path": os.path.abspath(fst_path),
+        "fst_path": os.path.abspath(fst_path) if fst_path else None,
         "uhdm_db": os.path.abspath(uhdm_db) if uhdm_db else None,
         "maps_path": os.path.abspath(maps_path) if maps_path else None,
         "filelist": [os.path.abspath(f) for f in files],
-        "fst_hash": _sha1(fst_path),
+        "fst_hash": _sha1(fst_path) if fst_path else None,
         "filelist_hash": filelist_hash,
     }
     out_manifest = os.path.join(out_dir, "session.json")
@@ -184,6 +187,95 @@ def build_netlist_maps(out_dir: str, files: List[str],
     build_netlist(files, top=top or None, incdirs=incdirs, defines=defines,
                   out_path=maps_path)
     return maps_path
+
+
+def _netlist_fresh(out_dir: str, files: List[str]) -> Optional[str]:
+    """Return the existing ``out_dir/netlist/maps.json`` when it can be reused.
+
+    Reusable = maps.json exists, parses, has modules, and is newer than every
+    source file. Saves the (expensive) re-elaboration when upgrading a static
+    session to a full one, or re-running prepare on an unchanged design.
+    """
+    maps_path = os.path.join(out_dir, "netlist", "maps.json")
+    if not os.path.exists(maps_path):
+        return None
+    try:
+        with open(maps_path) as fh:
+            if not json.load(fh).get("modules"):
+                return None
+    except (OSError, ValueError):
+        return None
+    maps_mtime = os.path.getmtime(maps_path)
+    for f in files:
+        if os.path.exists(f) and os.path.getmtime(f) > maps_mtime:
+            return None
+    return maps_path
+
+
+def prepare_static_session(out_dir: str, *,
+                           top: str = "", filelist: Optional[List[str]] = None,
+                           filelist_path: Optional[str] = None,
+                           incdirs: Optional[List[str]] = None,
+                           defines: Optional[List[str]] = None) -> dict:
+    """Build a *static* (netlist-only) session — no waveform required.
+
+    RTL sources -> pyslang netlist -> session.json with ``fst_path: null``.
+    Connectivity / drivers / loads / fan-in / files / declaration tools all
+    work; value & trace tools stay off until a waveform session is prepared.
+    Reuses an existing fresh ``netlist/maps.json`` instead of re-elaborating.
+    """
+    steps: List[StepResult] = []
+    os.makedirs(out_dir, exist_ok=True)
+
+    files = list(filelist or [])
+    inc = list(incdirs or [])
+    defs = list(defines or [])
+    if filelist_path and os.path.exists(filelist_path):
+        f_files, f_inc, f_defs = _parse_filelist(filelist_path)
+        if not files:
+            files = f_files
+        inc = inc + [d for d in f_inc if d not in inc]
+        defs = defs + [d for d in f_defs if d not in defs]
+    files = [f for f in files if f and os.path.exists(f)]
+    if not files:
+        raise ValueError("static session needs RTL sources: pass filelist or "
+                         "filelist_path (no valid source file found)")
+
+    reused = _netlist_fresh(out_dir, files)
+    if reused:
+        maps_path = reused
+        steps.append(StepResult("build_netlist", True, 0.0,
+                                {"maps_path": maps_path, "reused": True,
+                                 "note": "existing netlist is up to date; "
+                                         "skipped re-elaboration"}))
+    else:
+        t0 = time.time()
+        maps_path = build_netlist_maps(out_dir, files, top=top,
+                                       incdirs=inc or None, defines=defs or None)
+        modules = 0
+        diagnostics = 0
+        if maps_path and os.path.exists(maps_path):
+            with open(maps_path) as fh:
+                _m = json.load(fh)
+                modules = len(_m.get("modules", {}))
+                diagnostics = _m.get("diagnostics", 0)
+        steps.append(StepResult("build_netlist", modules > 0, time.time() - t0,
+                                {"maps_path": maps_path, "modules": modules,
+                                 "diagnostics": diagnostics,
+                                 "incdirs": len(inc), "defines": len(defs),
+                                 "note": ("" if modules > 0 else
+                                          "0 modules extracted — check incdirs/"
+                                          "defines/top")}))
+
+    manifest_path = build_manifest(out_dir, None, top=top,
+                                   filelist=files, maps_path=maps_path)
+    return {
+        "session_path": out_dir,
+        "manifest": manifest_path,
+        "fst_path": None,
+        "maps_path": maps_path,
+        "steps": [s.to_dict() for s in steps],
+    }
 
 
 def prepare_session(out_dir: str, wave_path: str, *,
@@ -238,34 +330,48 @@ def prepare_session(out_dir: str, wave_path: str, *,
         inc = inc + [d for d in f_inc if d not in inc]
         defs = defs + [d for d in f_defs if d not in defs]
 
-    # build the pyslang netlist (categories 5/6); degrade gracefully on failure
+    # build the pyslang netlist (categories 5/6); degrade gracefully on failure.
+    # An existing fresh netlist (e.g. built by prepare_static_session on the
+    # same out_dir) is reused instead of re-elaborated.
     maps_path = None
     if build_netlist_flag and files:
-        t0 = time.time()
-        try:
-            maps_path = build_netlist_maps(out_dir, files, top=top,
-                                           incdirs=inc or None, defines=defs or None)
-            modules = 0
-            diagnostics = 0
-            if maps_path and os.path.exists(maps_path):
-                with open(maps_path) as fh:
-                    _m = json.load(fh)
-                    modules = len(_m.get("modules", {}))
-                    diagnostics = _m.get("diagnostics", 0)
-            steps.append(StepResult("build_netlist", modules > 0, time.time() - t0,
-                                    {"maps_path": maps_path, "modules": modules,
-                                     "diagnostics": diagnostics,
-                                     "incdirs": len(inc), "defines": len(defs),
-                                     "note": ("" if modules > 0 else
-                                              "0 modules extracted — check incdirs/"
-                                              "defines/top; trace/connectivity limited")}))
-        except Exception as exc:  # noqa: BLE001  # pylint: disable=broad-except
-            # any netlist-build failure degrades gracefully: trace/connectivity
-            # off, all other tools keep working (never abort session prep).
-            steps.append(StepResult("build_netlist", False, time.time() - t0,
-                                    {"error": str(exc),
-                                     "incdirs": len(inc), "defines": len(defs),
-                                     "note": "trace/connectivity disabled; other tools still work"}))
+        reused = _netlist_fresh(out_dir, [f for f in files if f])
+        if reused:
+            maps_path = reused
+            steps.append(StepResult("build_netlist", True, 0.0,
+                                    {"maps_path": maps_path, "reused": True,
+                                     "note": "existing netlist is up to date; "
+                                             "skipped re-elaboration"}))
+        else:
+            t0 = time.time()
+            try:
+                maps_path = build_netlist_maps(
+                    out_dir, files, top=top,
+                    incdirs=inc or None, defines=defs or None)
+                modules = 0
+                diagnostics = 0
+                if maps_path and os.path.exists(maps_path):
+                    with open(maps_path) as fh:
+                        _m = json.load(fh)
+                        modules = len(_m.get("modules", {}))
+                        diagnostics = _m.get("diagnostics", 0)
+                steps.append(StepResult(
+                    "build_netlist", modules > 0, time.time() - t0,
+                    {"maps_path": maps_path, "modules": modules,
+                     "diagnostics": diagnostics,
+                     "incdirs": len(inc), "defines": len(defs),
+                     "note": ("" if modules > 0 else
+                              "0 modules extracted — check incdirs/"
+                              "defines/top; trace/connectivity limited")}))
+            except Exception as exc:  # noqa: BLE001  # pylint: disable=broad-except
+                # any netlist-build failure degrades gracefully: trace/
+                # connectivity off, all other tools keep working (never abort
+                # session prep).
+                steps.append(StepResult(
+                    "build_netlist", False, time.time() - t0,
+                    {"error": str(exc),
+                     "incdirs": len(inc), "defines": len(defs),
+                     "note": "trace/connectivity disabled; other tools still work"}))
 
     manifest_path = build_manifest(
         out_dir, fst_path, top=top,

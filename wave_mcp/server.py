@@ -1,8 +1,9 @@
 """wave-mcp MCP server.
 
-Exposes 25 concise tools for waveform debug, backed entirely by open-source
-sources (FST + RTL static analysis). No license required;
-any number of sessions can run concurrently.
+Exposes 27 concise tools for waveform debug and static RTL analysis, backed
+entirely by open-source sources (FST + RTL static analysis). No license
+required; any number of sessions can run concurrently. Static-only sessions
+(open_static_session) work from RTL sources alone — no waveform needed.
 
 Deployment modes:
   * stdio (default, recommended): ``wave-mcp`` — one server per user/module.
@@ -130,6 +131,15 @@ def _sess(session_id: Optional[str]):
     return SESSIONS.get(session_id)
 
 
+def _no_waveform(feature: str) -> dict[str, Any]:
+    """Uniform graceful-degradation reply for waveform tools in a static session."""
+    return {"available": False, "feature": feature,
+            "reason": "static-only session (no waveform opened)",
+            "hint": "Run your simulation, then call prepare_session with the "
+                    "dumped .fst/.vcd (same out_dir reuses the netlist) to "
+                    "enable value & trace queries."}
+
+
 # =============================================================================
 # 1. Session management
 # =============================================================================
@@ -213,6 +223,48 @@ def prepare_session(out_dir: str, wave_path: str,
 
 
 @mcp.tool()
+def open_static_session(out_dir: str,
+                        top: str = "", filelist: Optional[List[str]] = None,
+                        filelist_path: Optional[str] = None,
+                        incdirs: Optional[List[str]] = None,
+                        defines: Optional[List[str]] = None,
+                        session_id: Optional[str] = None) -> dict[str, Any]:
+    """Open a pure static-analysis session from RTL sources — NO waveform needed.
+
+    Builds the RTL netlist (pyslang elaboration) and opens the session in one
+    call, so you can explore a design before any simulation exists:
+    connectivity, drivers, loads, fan-in, hierarchy, module/file/declaration
+    queries all work from source code alone.
+
+    Use this to understand design structure, review driver/fan-in relations,
+    or check interfaces before running a sim. Waveform tools (signal_values*,
+    trace_value, trace_x, active_drivers) return a clear "needs waveform" hint;
+    later, call prepare_session with the SAME out_dir and your dumped .fst/.vcd
+    to upgrade — the already-built netlist is reused, not re-elaborated.
+
+    Args:
+        out_dir: directory to hold the session (session.json, netlist maps).
+        top: top module name for elaboration.
+        filelist / filelist_path: RTL source list. A .f filelist is parsed for
+            +incdir+/+define+/-y automatically.
+        incdirs: extra `+incdir+` directories for netlist elaboration.
+        defines: extra `+define+NAME[=VAL]` macros for elaboration.
+
+    Returns the session summary (mode: "static") plus per-step timing.
+    """
+    try:
+        result = pipeline.prepare_static_session(
+            out_dir, top=top, filelist=filelist, filelist_path=filelist_path,
+            incdirs=incdirs, defines=defines)
+    except (FileNotFoundError, ValueError) as exc:
+        return {"status": "error", "error": str(exc)}
+    sid = SESSIONS.open(result["session_path"], session_id)
+    sess = SESSIONS.get(sid)
+    return {"status": "ready", "session_id": sid, "steps": result["steps"],
+            **sess.summary()}
+
+
+@mcp.tool()
 def convert_vcd_to_fst(vcd_path: str, fst_path: Optional[str] = None,
                        mode: str = "speed", parallel: bool = True) -> dict[str, Any]:
     """Convert an xrun-produced VCD to FST (fast).
@@ -255,6 +307,26 @@ def list_child_instances(instance_full_path: str = "",
     """
     s = _sess(session_id)
     levels = max(1, min(int(number_of_levels), 10))
+    if s.fst is None:
+        # static mode: answer from the netlist instance_tree (paths are rooted
+        # at the elaborated top — no testbench prefix, unlike FST paths).
+        if not s.rtl.has_netlist:
+            return _no_waveform("list_child_instances")
+        tree = s.rtl.maps.get("instance_tree", {})
+        prefix = instance_full_path.strip(".")
+        base_depth = len(prefix.split(".")) if prefix else 0
+        rows = []
+        for key, mod in sorted(tree.items()):
+            if prefix and not key.startswith(prefix + "."):
+                continue
+            depth = len(key.split(".")) - base_depth
+            if 1 <= depth <= levels:
+                rows.append({"path": key, "module_type": mod,
+                             "scope_kind": "module", "source": "netlist"})
+            if len(rows) >= min(max_scopes, 10000):
+                break
+        return {"count": len(rows), "instances": rows, "mode": "static",
+                "note": "paths are netlist-rooted (no testbench prefix)"}
     rows = s.fst.child_instances(instance_full_path, levels,
                                  min(max_scopes, 10000), filter_noise=filter_noise)
     return {"count": len(rows), "instances": rows}
@@ -264,14 +336,61 @@ def list_child_instances(instance_full_path: str = "",
 def list_modules(name_contains: Optional[str] = None,
                          session_id: Optional[str] = None) -> dict[str, Any]:
     """Get all module definition names in the design (optionally filtered)."""
-    names = _sess(session_id).fst.all_module_names(name_contains)
+    s = _sess(session_id)
+    if s.fst is None:
+        if not s.rtl.has_netlist:
+            return _no_waveform("list_modules")
+        names = sorted(s.rtl.maps.get("modules", {}).keys())
+        if name_contains:
+            sub = name_contains.lower()
+            names = [n for n in names if sub in n.lower()]
+        return {"count": len(names), "modules": names[:3000], "mode": "static"}
+    names = s.fst.all_module_names(name_contains)
     return {"count": len(names), "modules": names[:3000]}
+
+
+def _static_instances(s, module: str, name_filter: Optional[str] = None):
+    """Instance paths of a module from the netlist instance_tree (static mode)."""
+    tree = s.rtl.maps.get("instance_tree", {})
+    paths = sorted(k for k, m in tree.items() if m == module)
+    if name_filter:
+        sub = name_filter.lower()
+        paths = [p for p in paths if sub in p.rsplit(".", 1)[-1].lower()]
+    return paths
+
+
+def _static_resolve_module(s, instance_path: str) -> Optional[str]:
+    """Resolve an instance path (or bare module name) to a module definition.
+
+    Mirrors TraceEngine leaf anchoring: exact instance_tree key first, then
+    unique leaf-suffix match, finally a bare module-definition name.
+    """
+    tree = s.rtl.maps.get("instance_tree", {})
+    path = instance_path.strip(".")
+    if path in tree:
+        return tree[path]
+    if path:
+        leaf = path.rsplit(".", 1)[-1]
+        cands = {m for k, m in tree.items()
+                 if k == leaf or k.endswith("." + leaf)}
+        if len(cands) == 1:
+            return cands.pop()
+        if path in s.rtl.maps.get("modules", {}):
+            return path  # bare module-definition name
+    return None
 
 
 @mcp.tool()
 def instances_of_module(module: str, session_id: Optional[str] = None) -> dict[str, Any]:
     """Get all instantiation paths of a given module."""
-    paths = _sess(session_id).fst.instances_by_module(module)
+    s = _sess(session_id)
+    if s.fst is None:
+        if not s.rtl.has_netlist:
+            return _no_waveform("instances_of_module")
+        paths = _static_instances(s, module)
+        return {"count": len(paths), "instances": paths, "mode": "static",
+                "note": "paths are netlist-rooted (no testbench prefix)"}
+    paths = s.fst.instances_by_module(module)
     return {"count": len(paths), "instances": paths}
 
 
@@ -279,7 +398,14 @@ def instances_of_module(module: str, session_id: Optional[str] = None) -> dict[s
 def instances_of_module_matching(module: str, string_in_instance_name: str,
                                      session_id: Optional[str] = None) -> dict[str, Any]:
     """Get instantiation paths of a module filtered by instance-name substring."""
-    paths = _sess(session_id).fst.instances_by_module(module, string_in_instance_name)
+    s = _sess(session_id)
+    if s.fst is None:
+        if not s.rtl.has_netlist:
+            return _no_waveform("instances_of_module_matching")
+        paths = _static_instances(s, module, string_in_instance_name)
+        return {"count": len(paths), "instances": paths, "mode": "static",
+                "note": "paths are netlist-rooted (no testbench prefix)"}
+    paths = s.fst.instances_by_module(module, string_in_instance_name)
     return {"count": len(paths), "instances": paths}
 
 
@@ -292,6 +418,16 @@ def scope_info(scope_full_path: str,
     from the RTL source via Verible-tier scanning.
     """
     s = _sess(session_id)
+    if s.fst is None:
+        if not s.rtl.has_netlist:
+            return _no_waveform("scope_info")
+        mod = _static_resolve_module(s, scope_full_path)
+        if not mod:
+            return {"error": f"scope not found in netlist: {scope_full_path}",
+                    "hint": "static-mode paths are netlist-rooted (no "
+                            "testbench prefix); try list_child_instances"}
+        return {"path": scope_full_path, "module_type": mod, "mode": "static",
+                "declaration": s.rtl.module_declaration(mod)}
     info = s.fst.scope_info(scope_full_path)
     if not info:
         return {"error": f"scope not found: {scope_full_path}"}
@@ -327,7 +463,41 @@ def list_signals(instance_full_path: str,
     ``_<n>``. When a netlist is present, merged widths are validated against RTL
     declarations (``width_matches_rtl`` / ``rtl_width`` fields on bus entries).
     """
-    rows = _sess(session_id).fst.signals_of_instance(
+    s = _sess(session_id)
+    if s.fst is None:
+        if not s.rtl.has_netlist:
+            return _no_waveform("list_signals")
+        mod = _static_resolve_module(s, instance_full_path)
+        if not mod or mod not in s.rtl.maps.get("modules", {}):
+            return {"error": f"instance not found in netlist: {instance_full_path}",
+                    "hint": "static-mode paths are netlist-rooted (no "
+                            "testbench prefix); try list_child_instances"}
+        m = s.rtl.maps["modules"][mod]
+        sub = (filter_by_name or "").lower()
+        want = (filter_by_type or "").lower()
+        rows = []
+        ports = m.get("ports", {})
+        for name, p in ports.items():
+            if sub and sub not in name.lower():
+                continue
+            direction = p.get("direction", "")
+            if want and want not in ("port", direction):
+                continue
+            rows.append({"name": name, "width": p.get("width"),
+                         "direction": direction, "type": "Port",
+                         "file": p.get("file"), "line": p.get("line")})
+        if not want or want.startswith("internal"):
+            for name, sig in m.get("signals", {}).items():
+                if name in ports or (sub and sub not in name.lower()):
+                    continue
+                rows.append({"name": name, "width": sig.get("width"),
+                             "type": "Internal", "kind": sig.get("kind"),
+                             "file": sig.get("file"), "line": sig.get("line")})
+        rows = rows[:min(max_signals, 10000)]
+        return {"count": len(rows), "signals": rows, "mode": "static",
+                "module": mod,
+                "note": "from RTL netlist (declared signals); no runtime values"}
+    rows = s.fst.signals_of_instance(
         instance_full_path, filter_by_name, filter_by_type,
         min(max_signals, 10000), aggregate_buses=aggregate_buses,
         underscore_style=underscore_style)
@@ -342,6 +512,29 @@ def signal_info(full_path: str, session_id: Optional[str] = None) -> dict[str, A
     (best-effort) from the RTL source.
     """
     s = _sess(session_id)
+    if s.fst is None:
+        if not s.rtl.has_netlist:
+            return _no_waveform("signal_info")
+        inst, _sep, leaf = full_path.strip(".").rpartition(".")
+        mod = _static_resolve_module(s, inst) if inst else None
+        if mod and mod in s.rtl.maps.get("modules", {}):
+            m = s.rtl.maps["modules"][mod]
+            p = m.get("ports", {}).get(leaf)
+            sig = m.get("signals", {}).get(leaf)
+            src = p or sig
+            if src:
+                return {"name": leaf, "path": full_path, "module": mod,
+                        "width": src.get("width"),
+                        "direction": (p or {}).get("direction"),
+                        "type": "Port" if p else "Internal",
+                        "mode": "static",
+                        "declaration": {"file": src.get("file"),
+                                        "line": src.get("line")}}
+        decl = s.rtl.signal_declaration(full_path.rsplit(".", 1)[-1].split("[")[0])
+        if decl:
+            return {"name": full_path.rsplit(".", 1)[-1], "path": full_path,
+                    "mode": "static", "declaration": decl}
+        return {"error": f"signal not found in netlist: {full_path}"}
     info = s.fst.signal_info(full_path)
     if not info:
         return {"error": f"signal not found: {full_path}"}
@@ -359,6 +552,8 @@ def signal_values(full_path: str, max_number_of_values: int = 1000,
                        session_id: Optional[str] = None) -> dict[str, Any]:
     """Get all value changes of a signal across the whole simulation."""
     s = _sess(session_id)
+    if s.fst is None:
+        return _no_waveform("signal_values")
     rows = s.fst.all_values(full_path, max_number_of_values)
     if rows is None:
         return {"error": f"signal not found: {full_path}"}
@@ -372,6 +567,8 @@ def signal_values_in_range(full_path: str, start_time_as_string: str,
                                     session_id: Optional[str] = None) -> dict[str, Any]:
     """Get value changes of a signal within [start, end] (e.g. "100ns".."500ns")."""
     s = _sess(session_id)
+    if s.fst is None:
+        return _no_waveform("signal_values_in_range")
     exp = s.fst.timescale_exp
     start = (s.fst.start_time if start_time_as_string in ("min", "")
              else timeutil.time_to_fst_units(start_time_as_string, exp))
@@ -393,6 +590,8 @@ def signal_value_at(full_path: str, time_as_string: str,
     or before the time point).
     """
     s = _sess(session_id)
+    if s.fst is None:
+        return _no_waveform("signal_value_at")
     exp = s.fst.timescale_exp
     t = timeutil.time_to_fst_units(time_as_string, exp)
     val = s.fst.value_at(full_path, t)
@@ -438,7 +637,10 @@ def signal_fanin(signal_path: str, transitive: bool = False,
 def active_drivers(signal_full_path: str, time_as_string: str,
                                  session_id: Optional[str] = None) -> dict[str, Any]:
     """Get the active driver(s) of a signal at a time point (dynamic; needs UHDM+FST)."""
-    return _sess(session_id).rtl.active_drivers(signal_full_path, time_as_string)
+    s = _sess(session_id)
+    if s.fst is None:
+        return _no_waveform("active_drivers")
+    return s.rtl.active_drivers(signal_full_path, time_as_string)
 
 
 @mcp.tool()
@@ -462,6 +664,8 @@ def trace_value(signal_path: str, time_point: str,
             Increase for deep designs; decrease for faster, shallower traces.
     """
     s = _sess(session_id)
+    if s.fst is None:
+        return _no_waveform("trace_value")
     depth = max(1, min(int(max_depth), 50))
     return s.rtl.trace_value(signal_path, time_point, max_depth=depth)
 
@@ -476,6 +680,8 @@ def trace_x(signal_path: str, time_point: str,
         max_depth: maximum recursion depth for the X-trace tree (default 12, range 1-50).
     """
     s = _sess(session_id)
+    if s.fst is None:
+        return _no_waveform("trace_x")
     depth = max(1, min(int(max_depth), 50))
     return s.rtl.trace_x(signal_path, time_point, max_depth=depth)
 

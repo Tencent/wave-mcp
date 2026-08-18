@@ -61,9 +61,31 @@ def main(argv=None):
     p.add_argument("--top", default="", help="top instance name")
     p.add_argument("--filelist", help="xrun filelist (.f) — same one used for sim")
     p.add_argument("--out", required=True, help="output session directory")
+    p.add_argument("--static", action="store_true",
+                   help="build a static (netlist-only) session — no waveform "
+                        "needed; value/trace tools stay off until an FST is added")
     p.add_argument("--no-netlist", action="store_true",
                    help="skip building the pyslang netlist (disables categories 5/6)")
     args = p.parse_args(argv)
+
+    if args.static:
+        if args.no_netlist:
+            p.error("--static requires the netlist (drop --no-netlist)")
+        if not args.filelist:
+            p.error("--static requires --filelist")
+        from .. import pipeline
+        try:
+            result = pipeline.prepare_static_session(
+                args.out, top=args.top, filelist_path=args.filelist)
+        except (FileNotFoundError, ValueError) as exc:
+            p.error(str(exc))
+        for step in result["steps"]:
+            tag = "ok" if step.get("ok") else "warn"
+            print(f"[{tag}] {step['step']}: {step.get('note') or step.get('maps_path')}")
+        print(f"[ok] static session written: {result['manifest']}")
+        print("     waveform=no (value/trace tools disabled; connectivity/"
+              "drivers/loads/fanin enabled)")
+        return 0
 
     os.makedirs(args.out, exist_ok=True)
 

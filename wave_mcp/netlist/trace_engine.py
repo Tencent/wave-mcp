@@ -457,7 +457,41 @@ class TraceEngine:
                 return entry
             if not recs:
                 entry["boundary"] = "primary-input/port/constant"
+                if x_only and self._is_x(val):
+                    entry["note"] = ("X root cause candidate: no driver in this "
+                                     "module — undriven primary input / port "
+                                     "(driven above this scope or not at all)")
                 return entry
+
+            # multi-driver net: if branch-guard evaluation says 2+ drivers are
+            # simultaneously active (tri-state contention -> X), expose ALL of
+            # them as parallel branches instead of heuristically picking one.
+            if len(recs) > 1:
+                vf = self._value_fn(inst, units)
+                actives = [i for i, r in enumerate(recs)
+                           if self._guard_holds(r.get("guard", []), vf)]
+                if len(actives) >= 2:
+                    entry["driver_conflict"] = {
+                        "reason": "multiple drivers active at this time "
+                                  "(bus contention -> X)",
+                        "active_driver_count": len(actives),
+                        "total_driver_count": len(recs)}
+                    conflict_nodes = []
+                    for i in actives:
+                        r = recs[i]
+                        dnode = {"driver": {
+                            "kind": r["kind"], "file": r["file"],
+                            "line": r["line"], "snippet": r["snippet"],
+                            "selection_method": "conflict"}}
+                        contribs = []
+                        for s2 in dict.fromkeys(r["rhs"] + r["control"]):
+                            child_full = f"{inst}.{s2}" if inst else s2
+                            contribs.append(node(child_full, depth + 1))
+                        if contribs:
+                            dnode["contributors"] = contribs
+                        conflict_nodes.append(dnode)
+                    entry["conflicting_drivers"] = conflict_nodes
+                    return entry
 
             # choose driver: precise branch-guard evaluation, heuristic fallback
             ai, method = self._active_by_guard(inst, recs, units)
@@ -486,7 +520,7 @@ class TraceEngine:
                 return entry
 
             contributors = []
-            for s in rec["rhs"] + rec["control"]:
+            for s in dict.fromkeys(rec["rhs"] + rec["control"]):
                 child_full = f"{inst}.{s}" if inst else s
                 if x_only:
                     cv = self.fst.value_at(child_full, units) if child_full in self.fst.signals else None
@@ -515,6 +549,9 @@ class TraceEngine:
                 tree_summary["modules_crossed"] += 1
             for c in n.get("contributors", []):
                 _summarize(c, depth + 1)
+            for d in n.get("conflicting_drivers", []):
+                for c in d.get("contributors", []):
+                    _summarize(c, depth + 1)
 
         _summarize(root)
 
