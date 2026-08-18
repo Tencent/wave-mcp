@@ -146,7 +146,7 @@ def stage_env(rep: Report):
     pv = platform.python_version()
     rep.sec("env", python=pv, os=platform.system().lower(),
             machine=platform.machine(), glibc="-".join(platform.libc_ver()) or "n/a")
-    if sys.version_info < (3, 9):
+    if sys.version_info < (3, 10):
         rep.err("E-ENV-PYVER", f"py{pv}")
     for mod in ("wave_mcp", "pyslang", "pylibfst"):
         try:

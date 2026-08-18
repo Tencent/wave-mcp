@@ -55,7 +55,7 @@ pip install git+https://github.com/Tencent/wave-mcp.git
 #   Debian/Ubuntu: sudo apt install gtkwave   |   macOS: brew install gtkwave
 ```
 
-> **平台支持**：**Linux x86_64** 有全部依赖的预编译 wheel，`pip` 开箱即用（已测 Python 3.9–3.13）。
+> **平台支持**：**Linux x86_64** 有全部依赖的预编译 wheel，`pip` 开箱即用（已测 Python 3.10–3.13；mcp SDK 要求 ≥3.10）。
 > macOS / Windows / arm64 因 `pylibfst` 暂无预编译 wheel，需源码编译（cmake+gcc+zlib）。
 > 隔离网 / 离线环境见 [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md)。
 

@@ -69,7 +69,7 @@ pip install git+https://github.com/Tencent/wave-mcp.git
 ```
 
 > **Platform support**: **Linux x86_64** has prebuilt wheels for all
-> dependencies, so `pip` works out of the box (tested on Python 3.9–3.13).
+> dependencies, so `pip` works out of the box (tested on Python 3.10–3.13; the mcp SDK requires >=3.10).
 > macOS / Windows / arm64 currently lack a prebuilt `pylibfst` wheel and require
 > building from source (cmake+gcc+zlib).
 > For air-gapped / offline environments, see [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md).

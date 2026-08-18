@@ -73,7 +73,7 @@ if [[ -n "$PYTHON_SRC" ]]; then
   fi
   [[ -x "$OUT/python/bin/python3" ]] && echo "    standalone python OK" || echo "    WARN: python/bin/python3 not found"
 else
-  echo "[!] --python not given: bundle will rely on target's python3 (>=3.9, x86_64)."
+  echo "[!] --python not given: bundle will rely on target's python3 (>= 3.10, x86_64)."
   echo "    For version-independence, fetch python-build-standalone (install_only, x86_64-unknown-linux-gnu)"
   echo "    on a connected machine and re-run with --python <tarball>."
 fi
