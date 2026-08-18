@@ -68,6 +68,20 @@ def _exc_code(exc: Exception) -> str:
     return f"{type(exc).__name__}@{_digest(str(exc))}"
 
 
+def _bucket(n: int) -> str:
+    for b in (1, 2, 4, 8, 16, 32, 64, 128):
+        if n <= b:
+            return f"<={b}"
+    return ">128"
+
+
+def _hist(d: dict) -> str:
+    """dict -> 'key:count,key:count' sorted by count desc (keys are format/
+    enum tokens like 'wire' or '<=8', never project identifiers)."""
+    items = sorted(d.items(), key=lambda kv: -kv[1])
+    return ",".join(f"{k}:{v}" for k, v in items[:8]) or "none"
+
+
 class Report:
     def __init__(self):
         self.sections = {}
@@ -172,7 +186,116 @@ def stage_selftest(rep: Report):
     rep.sec("selftest", checks=checks, passed=passed)
 
 
-def stage_project(rep: Report, wave, filelist, top, budget_s):
+def stage_fingerprint(rep: Report, wave, session):
+    """Structural fingerprints for OFF-SITE synthetic reproduction.
+
+    Everything emitted is a statistic over format/enum tokens (var types,
+    bucketed counts, naming-pattern classes). No identifier is ever emitted;
+    identifier NAMES are reduced to charset-class counts only.
+    """
+    import re
+
+    # -- VCD dialect fingerprint (header scan, first 4 MB of text) ----------
+    if wave and not wave.lower().endswith(".fst") and os.path.exists(wave):
+        var_types = {}
+        id_classes = {"plain": 0, "escaped": 0, "with_range": 0,
+                      "with_index": 0}
+        scope_types = {}
+        depth = 0
+        max_depth = 0
+        extras = set()
+        try:
+            with open(wave, "r", errors="replace") as fh:
+                for _ in range(200000):
+                    line = fh.readline()
+                    if not line or line.startswith("#"):
+                        break
+                    t = line.split()
+                    if not t:
+                        continue
+                    if t[0] == "$var" and len(t) >= 5:
+                        var_types[t[1]] = var_types.get(t[1], 0) + 1
+                        name = " ".join(t[4:-1])
+                        if name.startswith("\\"):
+                            id_classes["escaped"] += 1
+                        elif re.search(r"\[\d+:\d+\]", name):
+                            id_classes["with_range"] += 1
+                        elif re.search(r"\[\d+\]", name):
+                            id_classes["with_index"] += 1
+                        else:
+                            id_classes["plain"] += 1
+                    elif t[0] == "$scope" and len(t) >= 2:
+                        scope_types[t[1]] = scope_types.get(t[1], 0) + 1
+                        depth += 1
+                        max_depth = max(max_depth, depth)
+                    elif t[0] == "$upscope":
+                        depth = max(0, depth - 1)
+                    elif t[0] in ("$dumpoff", "$dumpon", "$comment",
+                                  "$timescale", "$version"):
+                        extras.add(t[0])
+            rep.sec("fingerprint.vcd",
+                    var_types=_hist(var_types),
+                    identifier_classes=_hist(id_classes),
+                    scope_types=_hist(scope_types),
+                    max_scope_depth=max_depth,
+                    header_directives=",".join(sorted(extras)) or "none")
+        except OSError as exc:
+            rep.err("E-FST-OPEN", f"fingerprint:{_exc_code(exc)}")
+
+    # -- waveform / netlist structure fingerprint ----------------------------
+    if session is None:
+        return
+    s = session
+    try:
+        widths = {}
+        for sig in s.fst.signals.values():
+            w = int(getattr(sig, "length", 1) or 1)
+            widths[_bucket(w)] = widths.get(_bucket(w), 0) + 1
+        depths = {}
+        kinds = {}
+        namepat = {"genblk_numbered": 0, "indexed_block": 0, "named": 0}
+        for path, sc in s.fst.scopes.items():
+            d = path.count(".") + 1
+            depths[_bucket(d)] = depths.get(_bucket(d), 0) + 1
+            k = getattr(sc, "scope_type", "?") or "?"
+            kinds[k] = kinds.get(k, 0) + 1
+            leaf = path.rsplit(".", 1)[-1]
+            if re.fullmatch(r"genblk\d+(\[\d+\])?", leaf):
+                namepat["genblk_numbered"] += 1
+            elif re.search(r"\[\d+\]$", leaf):
+                namepat["indexed_block"] += 1
+            else:
+                namepat["named"] += 1
+        rep.sec("fingerprint.wave",
+                signal_width_hist=_hist(widths),
+                scope_depth_hist=_hist(depths),
+                scope_kind_hist=_hist(kinds),
+                block_naming=_hist(namepat))
+        if s.rtl.has_netlist:
+            mods = s.rtl.maps.get("modules", {})
+            drv_kinds = {}
+            per_mod_drv = {}
+            skipped = {}
+            for m in mods.values():
+                nrec = 0
+                for recs in (m.get("drivers", {}) or {}).values():
+                    for r in recs:
+                        drv_kinds[r.get("kind", "?")] = \
+                            drv_kinds.get(r.get("kind", "?"), 0) + 1
+                        nrec += 1
+                per_mod_drv[_bucket(nrec)] = per_mod_drv.get(_bucket(nrec), 0) + 1
+                sk = int(m.get("skipped_members", 0) or 0)
+                if sk:
+                    skipped[_bucket(sk)] = skipped.get(_bucket(sk), 0) + 1
+            rep.sec("fingerprint.netlist",
+                    driver_kind_hist=_hist(drv_kinds),
+                    drivers_per_module_hist=_hist(per_mod_drv),
+                    modules_with_skips=_hist(skipped))
+    except Exception as exc:  # noqa: BLE001
+        rep.err("E-TOOL-CRASH", f"fingerprint:{_exc_code(exc)}")
+
+
+def stage_project(rep: Report, wave, filelist, top, budget_s, fingerprint=False):
     """Sanitized real-project run: counts / ratios / timings / codes only."""
     from wave_mcp import pipeline
     from wave_mcp.session import open_session
@@ -275,6 +398,8 @@ def stage_project(rep: Report, wave, filelist, top, budget_s):
     if slow:
         rep.sec("project", slow_tools=";".join(slow))
         rep.err("E-PERF-SLOW", f"n={len(slow)}")
+    if fingerprint:
+        stage_fingerprint(rep, wave, s)
     s.close()
 
 
@@ -285,6 +410,10 @@ def main():
     ap.add_argument("--top", default="", help="top module name")
     ap.add_argument("--budget", type=float, default=30.0,
                     help="per-tool time budget seconds (default 30)")
+    ap.add_argument("--fingerprint", action="store_true",
+                    help="collect structural fingerprints (statistics over "
+                         "format/enum tokens; still fully sanitized) to help "
+                         "off-site synthetic reproduction")
     ap.add_argument("--json", default="fieldkit_report.json",
                     help="L2 json output path")
     args = ap.parse_args()
@@ -293,7 +422,8 @@ def main():
     stage_env(rep)
     stage_selftest(rep)
     if args.wave:
-        stage_project(rep, args.wave, args.filelist, args.top, args.budget)
+        stage_project(rep, args.wave, args.filelist, args.top, args.budget,
+                      fingerprint=args.fingerprint)
 
     print(rep.l1_text())
     try:
