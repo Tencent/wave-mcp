@@ -12,7 +12,7 @@ Run: python tests/test_definition_name.py   (plain asserts, no pytest needed)
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from wave_mcp.netlist.trace_engine import TraceEngine
 from wave_mcp.netlist.name_infer import infer_definition, make_name_resolver
