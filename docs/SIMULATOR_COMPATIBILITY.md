@@ -55,8 +55,29 @@ FST 路径：top_tb.U_DECODE.u_decode_unit   （根在仿真顶层）
 ## 已验证 / 未验证的环境
 
 - **已验证**：Xcelium(xrun) 的 VCD→FST、Verilator `--trace-fst`。
-- **未验证**：真实 VCS dump。纯模块实例的设计大概率无碍；含大量 generate/数组
-  实例的设计建议按下方步骤实测。
+- **已验证（四态）**：Icarus Verilog 12.0 的 VCD→FST。Verilator 是两态仿真器，
+  波形里没有真实 X/Z；四态路径用 Icarus 专项验证（`tests/fourstate/`，两套设计
+  共 71 项严格断言），覆盖：
+  - 未复位寄存器 X、X 经组合逻辑传播、驱动后 X 清除；
+  - 三态总线悬空 Z、单驱动取值、双驱动冲突出 X、撤驱回 Z；三态 assign 的
+    guard 四态求值（`guard_active` 在使能已知时精确 True/False，使能为 X 时
+    如实报 None）；
+  - `trace_x`：X 因果树逐级回溯（含 file/line/snippet）；多驱动冲突时展开
+    全部活跃驱动为并列分支（`conflicting_drivers` + `driver_conflict` 元信息）；
+    X 根因叶节点带终止原因说明（未驱动的输入端口）；
+  - always 块 if/else guard 在复位为 X 时判定为 None、复位已知时可判定；
+    case/casez（通配）驱动的 control 含选择子、X 选择子走 default；
+  - 位选/段选驱动与部分位 X 总线；X 门控锁存器；for-generate 逐位三态阵列
+    （逐位 Z 值正确）；wor 线或消解（1 胜出）；
+  - 部分 dump（`$dumpvars` 深度限制，RTL 有的信号波形没有）：值查询返回空、
+    静态 drivers 仍可用，均不崩溃；
+  - 负路径：不存在的信号、越界时间、损坏的 FST 文件均干净报错不崩溃。
+  该轮测试修复了两个真实缺陷：pyslang 11 下 ternary 条件信号从 control/fanin
+  丢失（`pred` 恒 None，需读 `conditions[].expr`）；连续赋值从不提取
+  guard/control 导致 `active_drivers` 对 assign 类驱动无筛选能力。修复后在
+  OpenTitan uart/aes 重建网表回归 10 万+ 项检查全过。
+- **未验证**：真实 VCS dump；真实 xrun + 业务代码（UVM 层次、加密 IP、
+  interface/modport、xrun 对未命名 generate 块的命名差异）——内网测试计划中。
 
 ## 换到新仿真器时的验证步骤
 

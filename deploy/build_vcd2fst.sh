@@ -10,7 +10,7 @@
 #   jrb (libfdr)      — LGPL-2.1 (this build recipe + pinned source satisfy the
 #                                 LGPL relink obligation)
 # Only the above files are compiled; the GPL GTKWave application is not used.
-# See licenses/THIRD_PARTY.md.
+# See docs/THIRD_PARTY.md.
 #
 # Why manylinux_2_28: a vcd2fst built on a newer host (e.g. glibc 2.38) fails on
 # older targets with "GLIBC_2.3x not found". Building in manylinux_2_28 yields a
@@ -23,7 +23,7 @@
 #   deploy/build_vcd2fst.sh [--out DIR] [--gtkwave VER] [--src TARBALL] [--image IMG]
 #     --src TARBALL   build from a pre-downloaded GTKWave source tarball instead
 #                     of fetching it — enables a fully offline / reproducible
-#                     build (see third_party/vcd2fst/README.md for how to vendor).
+#                     build (see deploy/VCD2FST_BUILD.md for how to vendor).
 set -euo pipefail
 
 OUT="/tmp/vcd2fst-out"

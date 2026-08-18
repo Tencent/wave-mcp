@@ -5,7 +5,7 @@
 [English](README.en.md) | 简体中文
 
 wave-mcp 是腾讯**蓬莱实验室**验证团队开源的一款 RTL 波形调试 MCP Server，用 **FST 波形 + pyslang RTL 网表** 等开源数据源，为 LLM 提供一套波形调试工具，
-共 **25 个工具**。**无需任何商用 License，支持任意并发。** 以 **MIT** 许可开源。
+共 **27 个工具**。**无需任何商用 License，支持任意并发。** 以 **MIT** 许可开源。
 
 > 只要你的仿真器能 dump **FST**（Verilator `--trace-fst`、Icarus、或把 VCD 转成 FST），
 > wave-mcp 就能读它做调试。它**不跑仿真器**——你用自己的流程跑出波形，把结果交给它即可。
@@ -82,7 +82,7 @@ python -m wave_mcp.cli.build_session \
     --out examples/sample/session
 
 # 3) 端到端冒烟测试
-python tests/smoke_test.py
+python tests/unit/smoke_test.py
 
 # 4) 启动 MCP Server（stdio，推荐：一人一进程）
 python -m wave_mcp.server --session examples/sample/session
@@ -118,6 +118,28 @@ prepare_session({
 
 > 传入 `.fst` 零转换直读；传入 `.vcd` 自动转成 FST（体积约为 VCD 的 1/50）。
 > 想拆开用也行：`convert_vcd_to_fst` → `open_session`。
+
+### 纯静态分析（无波形，仿真前即可用）
+
+`open_static_session` 只凭 RTL 源码建网表并打开 session——**不需要任何波形、不跑仿真**。
+适合仿真前的代码理解：查接口、查驱动/扇入扇出关系、浏览层次结构、做 code review。
+
+```jsonc
+open_static_session({
+  "out_dir":      "sessions/my_module",
+  "top":          "uart",
+  "filelist_path":"rtl.f"
+})
+// 返回 mode:"static" + 可用工具清单；连接/驱动/层次/文件/声明类工具全部可用，
+// 值/追踪类工具返回明确的 "needs waveform" 提示
+```
+
+之后仿真产出波形时，用**同一个 out_dir** 调 `prepare_session` 升级为完整 session——
+已建好的网表直接复用，不会重新弹性展开。CLI 同样支持：
+
+```bash
+wave-session --static --filelist rtl.f --top uart --out sessions/my_module
+```
 
 ### VCD → FST 转换
 
@@ -164,15 +186,15 @@ wave-session --vcd sim/dump.vcd --top top_tb --filelist rtl.f --out sessions/mod
 
 ---
 
-## 工具（25 个）
+## 工具（27 个）
 
 | 类别 | 工具 | 说明 |
 | --- | --- | --- |
-| 波形准备 | `prepare_session` / `convert_vcd_to_fst` | 波形文件入口（.fst 直读 / .vcd 自动转）→ session 一条龙；不跑仿真器 |
+| 波形准备 | `prepare_session` / `open_static_session` / `convert_vcd_to_fst` | 波形入口（.fst 直读 / .vcd 自动转）→ session 一条龙；`open_static_session` 无波形纯静态分析；不跑仿真器 |
 | 会话管理 | `open_session` / `close_session` / `session_info` | `session_info` 含 netlist_health + definition_coverage |
-| 层次探索 | `list_child_instances` / `list_modules` / `instances_of_module`(`_matching`) / `scope_info` | 模块定义名走三层解析：pyslang 网表 → 命名推断 → 手工 scope_map |
-| 信号查询 | `list_signals` / `signal_info` | 位宽/方向/类型来自 FST（含总线聚合）；声明文件+行号来自网表 |
-| 信号值 | `signal_values` / `signal_values_in_range` | FST 强项，随机访问 |
+| 层次探索 | `list_child_instances` / `list_modules` / `instances_of_module`(`_matching`) / `scope_info` | 模块定义名走三层解析：pyslang 网表 → 命名推断 → 手工 scope_map；静态模式走网表 instance_tree |
+| 信号查询 | `list_signals` / `signal_info` | 位宽/方向/类型来自 FST（含总线聚合）；声明文件+行号来自网表；静态模式走网表声明表 |
+| 信号值 | `signal_values` / `signal_values_in_range` / `signal_value_at` | FST 强项，随机访问 |
 | 连接/驱动 | `signal_connectivity` / `signal_drivers` / `signal_loads` / `signal_fanin` / `active_drivers` / `driver_contributors` | pyslang 网表（静态精确）+ 分支条件 4 值求值选活跃驱动；无网表时优雅降级 |
 | 值追踪 | `trace_value` / `trace_x` | pyslang 网表 × FST 值反向遍历，支持跨模块下钻；trace_x 近似 |
 | 文件查询 | `list_files` / `find_files` / `modules_in_file` | filelist + pyslang 网表 |
@@ -196,9 +218,9 @@ wave-session --vcd sim/dump.vcd --top top_tb --filelist rtl.f --out sessions/mod
 
 ```
 wave_mcp/
-  server.py              # MCP server，注册全部 25 工具（FastMCP）
+  server.py              # MCP server，注册全部 27 工具（FastMCP）
   session.py             # Session / SessionManager / session.json / 指纹校验 / 三层 definition_name
-  pipeline.py            # prepare_session：波形文件入口(.fst 直读/.vcd 自动转)→网表→session 编排
+  pipeline.py            # prepare_session / prepare_static_session：波形或纯 RTL →网表→session 编排
   convert.py             # vcd2fst 封装：并行能力探测 + 串行 fallback + FIFO 流式
   timeutil.py            # 时间字符串 <-> FST 时间单位换算
   sources/
@@ -214,9 +236,9 @@ wave_mcp/
 deploy/                  # 离线 bundle 构建 + 安装脚本（见 docs/DEPLOY_AIRGAP.md）
 examples/make_sample.py             # 生成极小样例
 examples/verilator_quickstart/      # Verilator 开箱示例（--trace-fst 产真实 FST，无需 xrun）
-tests/                              # smoke_test / 单元测试
+tests/                              # 统一回归入口 run_regression.py + unit/ 四态等套件
 LICENSE                            # MIT
-licenses/THIRD_PARTY.md            # 第三方组件许可声明
+docs/THIRD_PARTY.md                # 第三方组件许可声明
 ```
 
 ---
@@ -229,4 +251,4 @@ licenses/THIRD_PARTY.md            # 第三方组件许可声明
 MIT/BSD。离线包附带的 `vcd2fst` 转换器由 GTKWave 的 **MIT** 源码（libfst/fstapi +
 vcd2fst helper）构建，作为独立进程调用（聚合关系，不影响 wave-mcp 的 MIT 许可）；
 其内含的 `jrb` 组件为 LGPL-2.1，随包提供构建脚本以满足可重链接义务。
-详见 [`licenses/THIRD_PARTY.md`](licenses/THIRD_PARTY.md)。
+详见 [`docs/THIRD_PARTY.md`](docs/THIRD_PARTY.md)。

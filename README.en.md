@@ -98,7 +98,7 @@ python -m wave_mcp.cli.build_session \
     --out examples/sample/session
 
 # 3) end-to-end smoke test
-python tests/smoke_test.py
+python tests/unit/smoke_test.py
 
 # 4) start the MCP server (stdio, recommended: one process per user)
 python -m wave_mcp.server --session examples/sample/session
@@ -249,9 +249,9 @@ wave_mcp/
 deploy/                  # offline bundle build + install scripts (see docs/DEPLOY_AIRGAP.md)
 examples/make_sample.py             # generate a tiny sample
 examples/verilator_quickstart/      # Verilator out-of-the-box example (--trace-fst produces a real FST, no xrun)
-tests/                              # smoke_test / unit tests
+tests/                              # regression entry run_regression.py + unit/ 4-state suites
 LICENSE                            # MIT
-licenses/THIRD_PARTY.md            # third-party component license notices
+docs/THIRD_PARTY.md                # third-party component license notices
 ```
 
 ---
@@ -267,4 +267,4 @@ sources (libfst/fstapi + the vcd2fst helper) and invoked as a separate process
 (an aggregation relationship that does not affect wave-mcp's MIT license); its
 embedded `jrb` component is LGPL-2.1, and the build script is shipped with the
 bundle to satisfy the relink obligation.
-See [`licenses/THIRD_PARTY.md`](licenses/THIRD_PARTY.md).
+See [`docs/THIRD_PARTY.md`](docs/THIRD_PARTY.md).
