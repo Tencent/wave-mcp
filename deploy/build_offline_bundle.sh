@@ -44,21 +44,34 @@ echo "[*] building project wheel + downloading dependency wheels ..."
 python3 -m pip wheel --no-deps -w "$OUT/wheels" "$REPO_ROOT" >/dev/null
 python3 -m pip download -r "$REPO_ROOT/requirements.txt" -d "$OUT/wheels" >/dev/null
 
-# Drop cryptography: it is only an OPTIONAL extra of pyjwt (pulled transitively
-# via mcp -> pyjwt[crypto]) and is NOT used by wave-mcp. Recent cryptography
-# wheels require a high glibc (e.g. 49.x needs manylinux_2_34 / glibc 2.34),
-# which breaks install on older air-gapped targets (glibc 2.28). Removing it
-# keeps the base MCP server (HS256 JWT + all tools) fully functional.
+# mcp SDK v2 imports cryptography at module load (server/request_state.py),
+# so it MUST be present — but recent wheels (>=44) need manylinux_2_34
+# (glibc 2.34) which breaks older air-gapped targets (glibc 2.28). Swap in
+# the newest manylinux_2_28 build instead.
 CRYPTO_WHL=$(ls "$OUT/wheels"/cryptography-*.whl 2>/dev/null || true)
-if [[ -n "$CRYPTO_WHL" ]]; then
-  echo "[*] dropping unnecessary high-glibc dep: $(basename "$CRYPTO_WHL")"
+if [[ -n "$CRYPTO_WHL" && "$CRYPTO_WHL" == *manylinux_2_34* ]]; then
+  echo "[*] replacing high-glibc cryptography with manylinux_2_28 build ..."
   rm -f "$CRYPTO_WHL"
+  python3 -m pip download "cryptography==43.0.3" --no-deps -d "$OUT/wheels" >/dev/null
 fi
 echo "    wheels: $(ls "$OUT/wheels" | wc -l) files"
 
 # 2) project source (for reference / editable use) --------------------------
 cp -r "$REPO_ROOT/wave_mcp" "$OUT/src/"
 cp "$REPO_ROOT/requirements.txt" "$REPO_ROOT/pyproject.toml" "$OUT/src/" 2>/dev/null || true
+
+# 2b) field test kit + built-in sample (fieldkit selftest needs examples/sample)
+echo "[*] adding fieldkit + regression entry + sample session ..."
+mkdir -p "$OUT/tests"
+cp -r "$REPO_ROOT/tests/fieldkit" "$OUT/tests/fieldkit"
+cp -r "$REPO_ROOT/tests/unit"     "$OUT/tests/unit"
+cp    "$REPO_ROOT/tests/run_regression.py" "$OUT/tests/"
+cp    "$REPO_ROOT/tests/README.md"         "$OUT/tests/" 2>/dev/null || true
+mkdir -p "$OUT/tests/fourstate"
+cp -r "$REPO_ROOT/tests/fourstate/rtl" "$REPO_ROOT/tests/fourstate/tb" \
+      "$REPO_ROOT/tests/fourstate"/run_fourstate*.py "$OUT/tests/fourstate/" 2>/dev/null || true
+mkdir -p "$OUT/examples"
+cp -r "$REPO_ROOT/examples/sample" "$OUT/examples/sample"
 
 # 3) standalone python (relocatable; makes target Python-version-independent)
 if [[ -n "$PYTHON_SRC" ]]; then
@@ -99,7 +112,7 @@ date -u +"%Y-%m-%dT%H:%M:%SZ" > "$OUT/VERSION"
 
 # 5b) license + third-party notices (MIT project + bundled binary provenance)
 cp "$REPO_ROOT/LICENSE" "$OUT/LICENSE" 2>/dev/null || echo "[!] no top-level LICENSE found"
-[[ -d "$REPO_ROOT/licenses" ]] && cp -r "$REPO_ROOT/licenses" "$OUT/licenses"
+cp "$REPO_ROOT/docs/THIRD_PARTY.md" "$OUT/THIRD_PARTY.md" 2>/dev/null || true
 
 echo "[*] bundle assembled at $OUT"
 if [[ "$DO_TAR" == "1" ]]; then

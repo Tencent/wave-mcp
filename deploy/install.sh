@@ -38,10 +38,9 @@ echo "[*] creating venv at $RUNTIME"
 "$RUNTIME/bin/python" -m pip install --no-index --find-links "$HERE/wheels" --upgrade pip >/dev/null 2>&1 || true
 echo "[*] installing wave-mcp + deps from offline wheelhouse ..."
 # Install every wheel in the offline wheelhouse with --no-deps. The wheelhouse
-# already contains the complete, resolved dependency set, so we do NOT let pip
-# re-resolve — this avoids pip chasing the optional `pyjwt[crypto]` extra
-# (declared by mcp) and failing on the deliberately-omitted cryptography wheel
-# (high glibc, unused by wave-mcp). See build_offline_bundle.sh step 1.
+# already contains the complete, resolved dependency set (including a
+# glibc-2.28-compatible cryptography build required by mcp SDK v2), so we do
+# NOT let pip re-resolve. See build_offline_bundle.sh step 1.
 "$RUNTIME/bin/python" -m pip install --no-index --no-deps "$HERE"/wheels/*.whl
 
 # 3) generate launcher ------------------------------------------------------
