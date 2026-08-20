@@ -44,3 +44,6 @@ fieldkit_report.json
 
 # uploaded files (temporary)
 knot-uploads/
+
+# internal dev docs (roadmaps, plans, todos — not for public release)
+dev-docs/
