@@ -34,14 +34,18 @@ wave-mcp provides full waveform debugging capability with a **pure open-source s
 Fully validated on a **real production chip project** (tens of modules), with OpenTitan and
 XiangShan added to the test set:
 
+![Validation overview](docs/images/validation-overview.png)
+
 | Dimension | Result |
 | --- | --- |
 | Test scale | **100+ test cases** (production project + OpenTitan 27 IPs + XiangShan 38 IPs) |
 | Data accuracy | **2.25M signals validated, 100% value correctness** |
-| Tool calls | 350,000+ calls all passed |
+| Tool calls | 3.1 million+ calls all passed |
 | Driver analysis | drivers / fan-in / connectivity / tracing fully validated on production projects |
 | Huge modules | **million-scale scopes analyzed stably** |
 | Tool coverage | All 27/27 tools exercised |
+
+![Tool call distribution](docs/images/tool-calls-distribution.png)
 
 ## Features
 
