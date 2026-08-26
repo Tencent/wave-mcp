@@ -116,6 +116,25 @@ python -m wave_mcp.server --session sessions/my_module
 
 Or call the `prepare_session` MCP tool directly from your Code Agent — see below.
 
+## CLI queries (`wave-mcp query`)
+
+All 27 tools are also callable from the terminal, without an agent:
+
+```bash
+wave-mcp query --list                            # list every tool
+
+wave-mcp query signal_values --session sessions/my_module \
+    --full_path top.u_tx.tx_serial              # query signal value changes
+
+wave-mcp query signal_drivers --session sessions/my_module \
+    --json-args '{"full_path": "top.u_tx.tx_serial"}'   # JSON args
+```
+
+- Flags are generated from each tool's signature; `wave-mcp query <tool> --help`
+- Human-readable output by default; add `--json` for the full structured result
+- Handy for CI scripts, development debugging and quick checks; every new tool
+  gets a CLI surface automatically
+
 ## Code Agent integration
 
 `prepare_session` is the unified MCP entry point. When your Code Agent wants to analyze a

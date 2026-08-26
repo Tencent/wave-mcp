@@ -104,6 +104,24 @@ python -m wave_mcp.server --session sessions/my_module
 
 或者在你的 Code Agent 里直接用 MCP 工具 `prepare_session`，见下文集成示例。
 
+## 命令行查询（wave-mcp query）
+
+不挂 Code Agent 时，也能在终端直接调用全部 27 个工具（与 MCP 同名同参数）：
+
+```bash
+wave-mcp query --list                            # 列出全部 27 个工具
+
+wave-mcp query signal_values --session sessions/my_module \
+    --full_path top.u_tx.tx_serial              # 查询信号值变化
+
+wave-mcp query signal_drivers --session sessions/my_module \
+    --json-args '{"full_path": "top.u_tx.tx_serial"}'   # JSON 传参
+```
+
+- 参数按工具签名自动生成，`wave-mcp query <工具名> --help` 查看
+- 默认输出人读文本，加 `--json` 输出完整结构化结果
+- 适合 CI 脚本、开发调试、快速验证；每次新增工具自动获得 CLI 接口
+
 ## Code Agent 集成
 
 `prepare_session` 是 MCP 统一入口，Code Agent 想分析波形时**第一步调它**，

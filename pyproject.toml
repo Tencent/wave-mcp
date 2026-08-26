@@ -34,7 +34,7 @@ Repository = "https://github.com/Tencent/wave-mcp"
 Issues = "https://github.com/Tencent/wave-mcp/issues"
 
 [project.scripts]
-wave-mcp = "wave_mcp.server:main"
+wave-mcp = "wave_mcp.cli.main:main"
 wave-session = "wave_mcp.cli.build_session:main"
 wave-vcd2fst = "wave_mcp.cli.vcd2fst:main"
 
