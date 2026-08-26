@@ -40,6 +40,9 @@ tests/full_quality_check_all_tools.py
 fieldkit_session/
 fieldkit_report.json
 
+# static-analysis example run artifacts
+examples/static_analysis/session/
+
 .agent
 
 # uploaded files (temporary)
