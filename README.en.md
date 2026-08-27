@@ -80,6 +80,13 @@ XiangShan added to the test set:
 > macOS / Windows / arm64 currently lack a prebuilt `pylibfst` wheel and require building from
 > source (cmake+gcc+zlib). For air-gapped / offline environments, see
 > [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md).
+> **glibc < 2.28 (e.g. CentOS 7 / RHEL 7, glibc 2.17)**: the `pip install` path does not work
+> (official `pyslang` wheels require manylinux_2_28, so pip falls back to a source build that
+> will almost certainly fail). Two options: (1) run inside a container (e.g. `python:3.11-slim`)
+> or upgrade the OS; (2) build an offline bundle with `--target-glibc 2.17` (self-built
+> pyslang-compatible wheel, supports glibc >= 2.17) — see section 1c of
+> [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md) (note: the wheel must be rebuilt on every
+> pyslang upgrade).
 
 ---
 

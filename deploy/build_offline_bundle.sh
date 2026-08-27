@@ -15,8 +15,15 @@
 #
 # Usage:
 #   deploy/build_offline_bundle.sh --out /tmp/wave-mcp-bundle \
+#       [--target-glibc 2.28|2.17] \
 #       [--python <cpython-*-install_only.tar.gz | dir | URL>] \
+#       [--pyslang-wheel <pyslang-*manylinux2014*.whl>] \
 #       [--vcd2fst /usr/bin/vcd2fst] [--no-tar]
+#
+# --target-glibc sets the minimum glibc of the TARGET machines (default 2.28):
+#   2.28  official pyslang/cryptography wheels (Ubuntu 18.10+ / CentOS 8+)
+#   2.17  CentOS 7 / RHEL 7 support; requires a self-built pyslang wheel from
+#         deploy/build_pyslang_manylinux2014.sh, passed via --pyslang-wheel
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -24,37 +31,99 @@ OUT=""
 PYTHON_SRC=""
 VCD2FST_SRC=""
 DO_TAR=1
+TARGET_GLIBC="2.28"
+PYSLANG_WHEEL=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --out) OUT="$2"; shift 2;;
     --python) PYTHON_SRC="$2"; shift 2;;
     --vcd2fst) VCD2FST_SRC="$2"; shift 2;;
+    --target-glibc) TARGET_GLIBC="$2"; shift 2;;
+    --pyslang-wheel) PYSLANG_WHEEL="$2"; shift 2;;
     --no-tar) DO_TAR=0; shift;;
     *) echo "unknown arg: $1"; exit 1;;
   esac
 done
 [[ -z "$OUT" ]] && { echo "ERROR: --out <dir> required"; exit 1; }
+case "$TARGET_GLIBC" in
+  2.28|2.17) ;;
+  *) echo "ERROR: --target-glibc must be 2.28 or 2.17"; exit 1;;
+esac
+if [[ "$TARGET_GLIBC" == "2.17" && -z "$PYSLANG_WHEEL" ]]; then
+  echo "ERROR: --target-glibc 2.17 requires --pyslang-wheel (official pyslang"
+  echo "       wheels need glibc >= 2.27). Build one first:"
+  echo "       deploy/build_pyslang_manylinux2014.sh --out /tmp/pyslang-manylinux2014"
+  exit 1
+fi
+if [[ -n "$PYSLANG_WHEEL" && ! -f "$PYSLANG_WHEEL" ]]; then
+  echo "ERROR: --pyslang-wheel not found: $PYSLANG_WHEEL"; exit 1
+fi
 
 echo "[*] bundle output: $OUT"
 rm -rf "$OUT"; mkdir -p "$OUT"/{wheels,src,bin}
 
 # 1) offline wheelhouse: project wheel + all dependency wheels --------------
-echo "[*] building project wheel + downloading dependency wheels ..."
+echo "[*] building project wheel + downloading dependency wheels (target glibc >= $TARGET_GLIBC) ..."
 python3 -m pip wheel --no-deps -w "$OUT/wheels" "$REPO_ROOT" >/dev/null
 python3 -m pip download -r "$REPO_ROOT/requirements.txt" -d "$OUT/wheels" >/dev/null
 
-# mcp SDK v2 imports cryptography at module load (server/request_state.py),
-# so it MUST be present — but recent wheels (>=44) need manylinux_2_34
-# (glibc 2.34) which breaks older air-gapped targets (glibc 2.28). Swap in
-# the newest manylinux_2_28 build instead.
+# mcp SDK v2 imports cryptography at module load, so it must be present.
+# Ensure the bundled wheel matches the target glibc baseline.
 CRYPTO_WHL=$(ls "$OUT/wheels"/cryptography-*.whl 2>/dev/null || true)
-if [[ -n "$CRYPTO_WHL" && "$CRYPTO_WHL" == *manylinux_2_34* ]]; then
-  echo "[*] replacing high-glibc cryptography with manylinux_2_28 build ..."
-  rm -f "$CRYPTO_WHL"
-  python3 -m pip download "cryptography==43.0.3" --no-deps -d "$OUT/wheels" >/dev/null
+if [[ -n "$CRYPTO_WHL" ]]; then
+  if [[ "$TARGET_GLIBC" == "2.17" && "$CRYPTO_WHL" != *manylinux2014* && "$CRYPTO_WHL" != *manylinux_2_17* ]]; then
+    echo "[*] replacing cryptography with a manylinux2014 (glibc 2.17) build ..."
+    CRYPTO_VER=$(basename "$CRYPTO_WHL" | cut -d- -f2)
+    rm -f "$CRYPTO_WHL"
+    python3 -m pip download "cryptography==$CRYPTO_VER" --no-deps -d "$OUT/wheels" \
+        --only-binary=:all: --platform manylinux2014_x86_64 \
+        --python-version "$(python3 -c 'import sys;print("%d%d"%sys.version_info[:2])')" >/dev/null
+  elif [[ "$TARGET_GLIBC" == "2.28" && "$CRYPTO_WHL" == *manylinux_2_34* ]]; then
+    echo "[*] replacing high-glibc cryptography with manylinux_2_28 build ..."
+    rm -f "$CRYPTO_WHL"
+    python3 -m pip download "cryptography==43.0.3" --no-deps -d "$OUT/wheels" >/dev/null
+  fi
+fi
+
+# pyslang: official wheels are manylinux_2_27+; for 2.17 targets swap in the
+# self-built manylinux2014 wheel (deploy/build_pyslang_manylinux2014.sh).
+if [[ -n "$PYSLANG_WHEEL" ]]; then
+  echo "[*] using self-built pyslang wheel: $(basename "$PYSLANG_WHEEL")"
+  rm -f "$OUT/wheels"/pyslang-*.whl
+  cp "$PYSLANG_WHEEL" "$OUT/wheels/"
 fi
 echo "    wheels: $(ls "$OUT/wheels" | wc -l) files"
+
+# 1b) audit: fail loudly if ANY wheel needs a newer glibc than the target ----
+# (catches silent baseline bumps when deps are added or upgraded later)
+echo "[*] auditing wheel platform tags against target glibc $TARGET_GLIBC ..."
+python3 - "$OUT/wheels" "$TARGET_GLIBC" <<'PYEOF'
+import os, re, sys
+wheel_dir, target = sys.argv[1], tuple(map(int, sys.argv[2].split(".")))
+LEGACY = {"manylinux1": (2, 5), "manylinux2010": (2, 12), "manylinux2014": (2, 17)}
+bad = []
+for fn in sorted(os.listdir(wheel_dir)):
+    if not fn.endswith(".whl"):
+        continue
+    plat = fn[:-4].split("-")[-1]
+    if plat.startswith(("any", "py3")):
+        continue
+    reqs = []
+    for tag in plat.split("."):
+        m = re.match(r"manylinux_(\d+)_(\d+)", tag)
+        if m:
+            reqs.append((int(m.group(1)), int(m.group(2))))
+        elif tag.split("_")[0] in LEGACY:
+            reqs.append(LEGACY[tag.split("_")[0]])
+    if reqs and min(reqs) > target:
+        bad.append((fn, min(reqs)))
+if bad:
+    for fn, req in bad:
+        print(f"    FAIL {fn}: needs glibc >= {req[0]}.{req[1]}")
+    sys.exit(1)
+print("    all wheels compatible with glibc >=", ".".join(map(str, target)))
+PYEOF
 
 # 2) project source (for reference / editable use) --------------------------
 cp -r "$REPO_ROOT/wave_mcp" "$OUT/src/"

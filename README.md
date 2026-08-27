@@ -68,6 +68,11 @@ wave-mcp 用**纯开源技术栈**（pylibfst + pyslang）提供完整波形调�
 > 操作系统 **Linux x86_64 开箱即用**（以上 Python 依赖均有预编译 wheel）。
 > macOS / Windows / arm64 因 `pylibfst` 暂无预编译 wheel，需源码编译（cmake+gcc+zlib）。
 > 隔离网 / 离线环境见 [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md)。
+> **glibc < 2.28（如 CentOS 7 / RHEL 7，glibc 2.17）**：`pip install` 路径不可用（官方
+> `pyslang` wheel 要求 manylinux_2_28，pip 会退化为源码编译且几乎必然失败）。两个选择：
+> ① 在容器中运行（如 `python:3.11-slim`）或升级系统；② 用离线 bundle 的
+> `--target-glibc 2.17` 打包（自编 pyslang 兼容 wheel，支持 glibc ≥ 2.17），
+> 见 [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md) 第 1c 节（注意：pyslang 每次升级都需重编该 wheel）。
 
 ---
 
