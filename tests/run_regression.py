@@ -9,8 +9,8 @@ One command runs every suite that can run in the current environment:
 Suites (auto-skipped when their prerequisites are missing):
   unit       - smoke_test + test_definition_name (examples/sample session)
   fourstate  - 4-state X/Z suites; needs iverilog (rebuilds VCDs on the fly)
-  projects   - OpenTitan/XiangShan functional verify; needs /tmp/ot_build
-               or /tmp/xs_build artifacts (built by tests/projects/ scripts)
+  projects   - project-level functional verification over prebuilt assets
+               (auto-skipped when assets are not configured)
 
 Exit code: 0 if every executed suite passed, 1 otherwise.
 """
@@ -34,6 +34,23 @@ def run(name, cmd, cwd=ROOT):
     p = subprocess.run(cmd, cwd=cwd)
     return {"suite": name, "ok": p.returncode == 0,
             "elapsed": round(time.time() - t0, 1)}
+
+
+# Project-level verification needs prebuilt assets, located via the
+# WAVE_MCP_PROJECT_ASSETS env var (colon-separated) or an optional
+# tests/project_assets.txt file. Without either, the suite is skipped.
+ASSETS_ENV = "WAVE_MCP_PROJECT_ASSETS"
+ASSETS_FILE = os.path.join(HERE, "project_assets.txt")
+
+
+def project_assets_ready():
+    raw = os.environ.get(ASSETS_ENV, "")
+    if not raw and os.path.exists(ASSETS_FILE):
+        with open(ASSETS_FILE, encoding="utf-8") as f:
+            raw = f.read()
+    assets = [p.strip() for p in raw.replace("\n", os.pathsep).split(os.pathsep)
+              if p.strip()]
+    return any(os.path.exists(p) for p in assets)
 
 
 def main():
@@ -73,13 +90,15 @@ def main():
         skipped.append(("fourstate", "iverilog/vvp not in PATH"))
 
     # ---- project-level functional verification -----------------------------
+    harness = os.path.join(HERE, "functional_verify.py")
     if args.quick:
         skipped.append(("projects", "--quick"))
-    elif os.path.isdir("/tmp/ot_build") or os.path.exists("/tmp/xs_build/xiangshan_tb.fst"):
-        results.append(run("projects/functional_verify",
-                           [PY, os.path.join(HERE, "functional_verify.py")]))
+    elif not os.path.exists(harness):
+        skipped.append(("projects", "verification harness not present"))
+    elif project_assets_ready():
+        results.append(run("projects/functional_verify", [PY, harness]))
     else:
-        skipped.append(("projects", "no /tmp/ot_build or /tmp/xs_build artifacts"))
+        skipped.append(("projects", "project assets not configured"))
 
     # ---- summary ------------------------------------------------------------
     print(f"\n{'='*66}\n  REGRESSION SUMMARY\n{'='*66}")
