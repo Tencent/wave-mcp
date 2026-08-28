@@ -1,7 +1,7 @@
-# vcd2fst — third-party source provenance
+# vcd2fst third-party source provenance
 
 The offline bundle ships a small native `vcd2fst` converter (VCD → FST). It is
-built from **permissively-licensed** sources only — it is NOT the GPL GTKWave
+built from **permissively-licensed** sources only; it is NOT the GPL GTKWave
 GUI application. wave-mcp invokes it as a separate subprocess (aggregation), so
 it does not affect wave-mcp's MIT license.
 
@@ -9,7 +9,7 @@ it does not affect wave-mcp's MIT license.
 
 | File | Role | License | Upstream |
 | --- | --- | --- | --- |
-| `vcd2fst.c` | VCD parser + driver | MIT | github.com/gtkwave/gtkwave — `src/helpers` |
+| `vcd2fst.c` | VCD parser + driver | MIT | github.com/gtkwave/gtkwave (`src/helpers`) |
 | `fstapi.c` / `fstapi.h` | FST reader/writer (libfst) | MIT | github.com/gtkwave/libfst |
 | `lz4.c` / `lz4.h` | LZ4 compressor | BSD-2-Clause | github.com/lz4/lz4 |
 | `fastlz.c` / `fastlz.h` | FastLZ compressor | MIT | github.com/ariya/FastLZ |
@@ -24,14 +24,14 @@ Pinned upstream: **GTKWave `3.3.121`** (override with `--gtkwave <ver>`).
 
 ## Building
 
-Default — fetch the pinned source and build (needs Docker + network on the
+Default: fetch the pinned source and build (needs Docker + network on the
 build machine):
 
 ```bash
 deploy/build_vcd2fst.sh --out /tmp/vcd2fst-out
 ```
 
-Fully offline / reproducible — pre-download the source tarball once on a
+Fully offline / reproducible: pre-download the source tarball once on a
 connected machine, then build from it with no network:
 
 ```bash

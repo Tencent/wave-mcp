@@ -1,4 +1,4 @@
-# wave-mcp — 开源、免 License 的 RTL 波形调试 MCP Server
+# wave-mcp：开源、免 License 的 RTL 波形调试 MCP Server
 
 <img src="docs/images/penglai-logo.png" alt="蓬莱实验室" width="200"/>
 
@@ -13,14 +13,14 @@
 **MIT 开源，无需任何商用 License，支持任意并发。**
 
 > 只要你的仿真器能 dump **FST**（Verilator `--trace-fst`、Icarus，或把 VCD 转 FST），
-> wave-mcp 就能读它做调试。它**不跑仿真器**——你用自己的流程跑出波形，把结果交给它即可。
+> wave-mcp 就能读它做调试。它**不跑仿真器**，你用自己的流程跑出波形，把结果交给它即可。
 
 ---
 
 ## 为什么是 wave-mcp
 
 芯片验证占据开发周期 50% 以上的时间，波形调试是其中最高频的动作。而 LLM 时代，
-工程师希望让 AI Agent 直接读波形、查信号、追 X 态根因——但市面上的商用调试
+工程师希望让 AI Agent 直接读波形、查信号、追 X 态根因，但市面上的商用调试
 MCP 需要昂贵的 License，且并发受限。
 
 wave-mcp 用**纯开源技术栈**（pylibfst + pyslang）提供完整波形调试能力：
@@ -47,7 +47,7 @@ wave-mcp 用**纯开源技术栈**（pylibfst + pyslang）提供完整波形调�
 
 - **波形查询**：设计层次、实例、信号（位宽/方向/类型，含总线聚合）、信号值（点查询 / 区间，随机访问）。
 - **静态分析（pyslang 网表）**：连接、驱动、扇入/扇出、声明位置（文件:行号）。
-- **无波形静态分析**：`open_static_session` 只凭 RTL 源码建 session——**仿真前即可分析设计结构**。
+- **无波形静态分析**：`open_static_session` 只凭 RTL 源码建 session，**仿真前即可分析设计结构**。
 - **值追踪**：`trace_value` 沿驱动链反向遍历、可跨模块下钻，每个节点带真实 FST 值；`trace_x` 追 X 根因。
 - **网表自愈**：从 pyslang 诊断自动补 `+incdir+` / 包源并重编；失败时优雅降级，其余工具不受影响。
 - **一致性校验**：源码或波形变了但网表没更新会报警，绝不静默给错结果。
@@ -68,6 +68,8 @@ wave-mcp 用**纯开源技术栈**（pylibfst + pyslang）提供完整波形调�
 > 操作系统 **Linux x86_64 开箱即用**（以上 Python 依赖均有预编译 wheel）。
 > macOS / Windows / arm64 因 `pylibfst` 暂无预编译 wheel，需源码编译（cmake+gcc+zlib）。
 > 隔离网 / 离线环境见 [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md)。
+> **目标机 Python < 3.10（如 3.6–3.9）或无 Python**：无需升级目标机，打离线 bundle 时用
+> `--python` 捆绑独立 Python 3.11 即可，见 [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md) 第 7 节。
 > **glibc < 2.28（如 CentOS 7 / RHEL 7，glibc 2.17）**：`pip install` 路径不可用（官方
 > `pyslang` wheel 要求 manylinux_2_28，pip 会退化为源码编译且几乎必然失败）。两个选择：
 > ① 在容器中运行（如 `python:3.11-slim`）或升级系统；② 用离线 bundle 的
@@ -163,7 +165,7 @@ prepare_session({
 
 ### 无波形静态分析（仿真前即可用）
 
-`open_static_session` 只凭 RTL 源码建网表并打开 session——**不需要任何波形、不跑仿真**。
+`open_static_session` 只凭 RTL 源码建网表并打开 session，**不需要任何波形、不跑仿真**。
 适合仿真前理解代码：查接口、查驱动/扇入扇出、浏览层次、做 code review。
 
 ```jsonc
@@ -257,30 +259,48 @@ wave-session --vcd sim/dump.vcd --top top_tb --filelist rtl.f --out sessions/mod
 
 ## FAQ
 
-**Q1：需要商用 License 吗？**
+**Q1：为什么还不支持 FSDB 和 SHM？**
+FSDB 和 SHM 是闭源波形格式，读取详细数据绕不开商用工具，license 成本较高，
+难以支撑未来 AI Agent 深度融入工作流后产生的高并发、海量波形分析需求。
+wave-mcp 走 FST + VCD 开源路线，正是为成千上万条波形的并发分析场景提供高性能的开源替代方案。
+FSDB 和 SHM 的支持已在规划中，欢迎关注后续版本。
+
+**Q2：需要商用 License 吗？**
 不需要。MIT 开源，任意并发、不限机器数。这也是它区别于商用调试 MCP 的核心点。
 
-**Q2：支持哪些仿真器？**
+**Q3：支持哪些仿真器？**
 任何能产出 FST 或 VCD 的仿真器：Verilator（`--trace-fst`）、Icarus、xrun、VCS 等。
 wave-mcp 不跑仿真器，只消费你已产出的波形。
 
-**Q3：数据准不准？**
+**Q4：数据准不准？**
 准。在真实生产级芯片项目上做了 225 万信号级验证，值查询正确性 100%；
 层次与文件类工具（`scope_info` / `find_files` / `modules_in_file`）32/32 模块验证通过。
 
-**Q4：没有波形也能用吗？**
+**Q5：没有波形也能用吗？**
 能。`open_static_session` 只凭 RTL 源码做静态分析（仿真前可用），这是 wave-mcp 的独有能力。
 
-**Q5：支持 macOS / Windows 吗？**
+**Q6：支持 macOS / Windows 吗？**
 Linux x86_64 开箱即用。macOS / Windows / arm64 因 `pylibfst` 无预编译 wheel 需源码编译，
 见[系统要求](#系统要求)。
 
-**Q6：大波形性能如何？**
+**Q7：大波形性能如何？**
 FST + C 系读取库（pylibfst）+ 进程常驻 + 随机访问，契合 AI 点查询场景；
 实测百万级 scope 的超大模块稳定完成分析。
 
-**Q7：怎么接入我的 Code Agent？**
+**Q8：怎么接入我的 Code Agent？**
 见 [Code Agent 集成](#code-agent-集成)，一段 `mcpServers` JSON 即可。
+
+**Q9：目标机器只有 Python 3.8 / 3.9（隔离网 / 加密环境），能用吗？**
+能，不需要升级目标机。打离线 bundle 时用 `--python` 捆绑独立 Python 3.11
+（python-build-standalone），安装时优先使用捆绑解释器，与系统 Python 完全无关。
+原生支持 3.8/3.9 不可行：`mcp` SDK 硬性要求 ≥ 3.10，官方 `pyslang` wheel 不发 cp38，
+且两版本均已 EOL。详见 [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md) 第 7 节（旧环境 QA）。
+
+**Q10：CentOS 7 / glibc 2.17 上报 `GLIBC_2.27' not found` 怎么办？**
+官方 pyslang wheel 要求 glibc ≥ 2.28。先用 `deploy/build_pyslang_manylinux2014.sh`
+自编兼容 wheel，再以 `--target-glibc 2.17 --pyslang-wheel <wheel>` 打 bundle，
+整条链路（独立 Python + wheel + vcd2fst）在 glibc ≥ 2.17 均可运行。
+详见 [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md) 第 1c 节与第 7 节。
 
 ---
 

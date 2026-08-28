@@ -2,7 +2,7 @@
 
 面向场景：**多机器、多用户、Python 版本不一、无外网、无 GTKWave、共享存储部署、无感启停**（常见于芯片研发的隔离网 / air-gapped 环境）。
 
-核心思路：在**有网的开发机**生成一个**自包含 bundle**（自带独立 Python + 全部 wheel + 可选 vcd2fst + 源码），整体拷到**隔离网共享盘**，`install.sh` 一次安装；用户的 MCP 客户端用 **stdio** 起共享盘里的 `wave-mcp` 脚本即可——**无感启动、退出自动回收、多用户进程级隔离、零运维**。
+核心思路：在**有网的开发机**生成一个**自包含 bundle**（自带独立 Python + 全部 wheel + 可选 vcd2fst + 源码），整体拷到**隔离网共享盘**，`install.sh` 一次安装；用户的 MCP 客户端用 **stdio** 起共享盘里的 `wave-mcp` 脚本即可，**无感启动、退出自动回收、多用户进程级隔离、零运维**。
 
 ```
 [有网开发机]  build_offline_bundle.sh  ──tar──▶  [隔离网共享盘]  install.sh  ──▶  bin/wave-mcp
@@ -108,7 +108,7 @@ bundle 里的 Python 依赖都是 wheel，glibc 兼容性由打包时的 `--targ
    ```
    这样产出的二进制在任何 glibc≥2.14 的机器都能跑（含目标 2.28）。再 `--vcd2fst /tmp/vcd2fst-out/vcd2fst` 打进 bundle。
 2. **从一台 glibc 2.28 机器拷现成 vcd2fst** + `ldd` 出的 `libz` 等，用 `--vcd2fst` 打进 bundle（脚本会一并带 `bin/lib/`、设好 `LD_LIBRARY_PATH`）。
-> 不要直接用 glibc 2.38 机器编的 vcd2fst —— 会报 `GLIBC_2.3x not found`。
+> 不要直接用 glibc 2.38 机器编的 vcd2fst，会报 `GLIBC_2.3x not found`。
 3. **目标机装 GTKWave**：若隔离网有本地 yum 镜像，`dnf install gtkwave` 也行（很多隔离网装不了，故非首选）。
 
 > 校验：`ldd /shared/wave-mcp/bin/vcd2fst` 不应报 `not found`；`objdump -T vcd2fst | grep GLIBC | sort -V | tail -1` 应 ≤ 目标 glibc。
@@ -122,3 +122,57 @@ bundle 里的 Python 依赖都是 wheel，glibc 兼容性由打包时的 `--targ
 ## 6. 排错
 - `install.sh` 末尾 sanity check 会 import wave_mcp/pyslang/pylibfst；失败多为 Python 版本与 wheel(cp311) 不匹配 → 用 `--python` 带独立 3.11。
 - 启动后连接/驱动/trace 不可用：多为该模块 pyslang elaboration 失败（filelist 不全/语法）→ 看 `prepare_session` 返回的 `build_netlist` step 的 error；其余工具不受影响（优雅降级）。
+
+---
+
+## 7. 旧环境 QA（Python 3.8/3.9、glibc 2.17 高频问题）
+
+很多用户的目标机是长期不升级的隔离 / 加密环境（CentOS 7、老发行版、系统 Python 3.6–3.9）。
+一句话结论：**旧环境的差异全部在打包侧解决，目标机不需要（通常也不能）做任何升级。**
+
+按目标机情况选打包方式：
+
+| 目标机情况 | 打包方式 |
+| --- | --- |
+| glibc ≥ 2.28，系统 Python ≥ 3.10 | 默认打包即可（仍建议带 `--python`，不受目标机 Python 变动影响） |
+| glibc ≥ 2.28，系统 Python < 3.10 或没有 Python | 默认打包 + `--python`（standalone 3.11） |
+| glibc 2.17 – 2.27（CentOS 7 / RHEL 7 等） | `--target-glibc 2.17` + `--pyslang-wheel`（见 1c 节）+ `--python` |
+| glibc < 2.17 | 不支持（standalone Python 本身要求 ≥ 2.17） |
+
+**Q：目标机只有 Python 3.8 / 3.9（或根本没有 Python），wave-mcp 能跑吗？**
+能，且不需要动目标机。打包时用 `--python` 带上 standalone CPython 3.11
+（python-build-standalone，选 `install_only`、`x86_64-unknown-linux-gnu` 的 tarball），
+`install.sh` 检测到 `python/bin/python3` 会**优先用捆绑解释器**建 venv，
+完全不碰系统 Python。目标机装没装 Python、装的什么版本都无所谓。
+
+**Q：能不能让 wave-mcp 原生支持 Python 3.8 / 3.9？**
+不能，也不建议尝试。卡点不在 wave-mcp 自身代码，而在依赖链：
+- `mcp` SDK（v1 / v2）硬性要求 Python ≥ 3.10，旧解释器上直接装不上；
+- 官方 `pyslang` wheel 不发 cp38（cibuildwheel 明确 skip），cp39 也不保证长期跟进，
+  自编意味着每次升级都要重新编译整个 slang C++ 工程；
+- 3.8 / 3.9 均已 EOL（2024-10 / 2025-10）。
+
+正确姿势是"带运行时"（`--python`），不是"降级代码"。
+
+**Q：目标机 `import pyslang` 报 `GLIBC_2.27' not found`，怎么办？**
+官方 pyslang wheel 的 glibc 门槛（≥ 2.27/2.28）超过了目标机（典型 CentOS 7 = 2.17）。
+按 1c 节走：先用 `deploy/build_pyslang_manylinux2014.sh` 自编兼容 wheel，再用
+`--target-glibc 2.17 --pyslang-wheel <wheel>` 重新打 bundle。打包末尾的 wheel 审计会兜底：
+任何 wheel 的 glibc 要求超过 `--target-glibc` 都会报错点名，不会静默放行。
+
+**Q：怎么确认目标机的 glibc 版本？**
+```bash
+getconf GNU_LIBC_VERSION      # 或 ldd --version | head -1
+```
+≥ 2.28 走默认档；2.17 ≤ 版本 < 2.28 走 1c 兼容档；< 2.17 不支持。
+
+**Q：为什么不能在目标机直接 `pip install wave-mcp`？**
+旧环境下两个问题叠加：pip 判定官方 manylinux_2_28 wheel 与本机 glibc 不兼容后会退化为
+源码编译，而 pyslang 的 C++ 工程在无网、无新工具链（需 gcc ≥ 11）的目标机上几乎必然失败；
+系统 Python < 3.10 时 `mcp` 本身也装不上。隔离网 + 旧环境只有 bundle 一条路，
+这正是 bundle 存在的意义。
+
+**Q：standalone Python 自己对 glibc 有要求吗？**
+有，最低 **glibc 2.17**（与 CentOS 7 一致），所以 2.17 兼容档整条链路
+（独立 Python + 全部 wheel + vcd2fst）都能在 CentOS 7 上跑通。
+vcd2fst 用 `deploy/build_vcd2fst.sh` 的产物最高仅需 GLIBC_2.14，不构成额外门槛。

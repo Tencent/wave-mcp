@@ -13,9 +13,9 @@ Their notices are retained here as required.
 | pylibfst | MIT + BSD-2-Clause | https://github.com/mschlaegl/pylibfst |
 
 `pylibfst` bundles the FST library and its compressors:
-- libfst / fstapi — MIT (Tony Bybell), https://github.com/gtkwave/libfst
-- LZ4 — BSD-2-Clause (Yann Collet)
-- FastLZ — MIT (Ariya Hidayat)
+- libfst / fstapi: MIT (Tony Bybell), https://github.com/gtkwave/libfst
+- LZ4: BSD-2-Clause (Yann Collet)
+- FastLZ: MIT (Ariya Hidayat)
 
 ## Bundled binary (offline/self-contained release only)
 
@@ -37,7 +37,7 @@ Note on the LGPL-2.1 component (`jrb`): the offline bundle satisfies LGPL-2.1 by
 providing the corresponding build recipe (`deploy/build_vcd2fst.sh`, which
 records the exact GTKWave version/commit) so the binary can be rebuilt/relinked.
 The GTKWave GUI application is GPL-licensed, but wave-mcp does NOT use or ship
-it — only the MIT FST library plus the above converter sources are used.
+it; only the MIT FST library plus the above converter sources are used.
 
 ## Standalone Python runtime (offline bundle only)
 

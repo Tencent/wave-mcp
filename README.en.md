@@ -1,4 +1,4 @@
-# wave-mcp — Open-source, license-free MCP server for RTL waveform debug
+# wave-mcp: Open-source, license-free MCP server for RTL waveform debug
 
 <img src="docs/images/penglai-logo.png" alt="Penglai Lab" width="200"/>
 
@@ -9,12 +9,12 @@
 English | [简体中文](README.md)
 
 **wave-mcp is an open-source RTL waveform debug MCP server from the Penglai Lab verification team
-at Tencent** — a debugging toolkit for LLMs: it reads **FST waveforms + an RTL netlist** and
+at Tencent**, a debugging toolkit for LLMs: it reads **FST waveforms + an RTL netlist** and
 provides **27 MCP tools** for hierarchy exploration, signal queries, driver analysis, and
-value/X tracing. **MIT licensed — no commercial license required, unlimited concurrency.**
+value/X tracing. **MIT licensed, no commercial license required, unlimited concurrency.**
 
 > As long as your simulator can dump **FST** (Verilator `--trace-fst`, Icarus, or by converting
-> VCD to FST), wave-mcp can read it for debugging. It **does not run a simulator** — you produce
+> VCD to FST), wave-mcp can read it for debugging. It **does not run a simulator**: you produce
 > the waveform with your own flow and hand the result to it.
 
 ---
@@ -23,7 +23,7 @@ value/X tracing. **MIT licensed — no commercial license required, unlimited co
 
 Chip verification takes more than 50% of the development cycle, and waveform debugging is the
 highest-frequency activity in it. In the LLM era, engineers want AI agents to read waveforms,
-query signals, and trace X root causes — but commercial debug MCPs require expensive licenses
+query signals, and trace X root causes, but commercial debug MCPs require expensive licenses
 and are concurrency-limited.
 
 wave-mcp provides full waveform debugging capability with a **pure open-source stack**
@@ -53,13 +53,13 @@ XiangShan added to the test set:
   aggregation), signal values (point / range, random access).
 - **Static analysis (pyslang netlist)**: connectivity, drivers, fan-in/fan-out, declaration
   locations (file:line).
-- **Waveform-free static analysis**: `open_static_session` builds a session from RTL alone —
+- **Waveform-free static analysis**: `open_static_session` builds a session from RTL alone;
   **analyze the design structure before simulation**.
 - **Value tracing**: `trace_value` walks the driver chain backwards across module boundaries with
   a real FST value at every node; `trace_x` chases X root causes.
 - **Self-healing netlist**: auto-adds `+incdir+` / package sources from pyslang diagnostics and
   recompiles; degrades gracefully without affecting other tools.
-- **Consistency checks**: warns when the source or waveform changed but the netlist is stale —
+- **Consistency checks**: warns when the source or waveform changed but the netlist is stale;
   never silently returns wrong results.
 - **Deployment-friendly**: stdio (one process per user, zero ops) / HTTP multi-session /
   self-contained offline bundle (air-gapped networks).
@@ -80,11 +80,14 @@ XiangShan added to the test set:
 > macOS / Windows / arm64 currently lack a prebuilt `pylibfst` wheel and require building from
 > source (cmake+gcc+zlib). For air-gapped / offline environments, see
 > [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md).
+> **Target machine has Python < 3.10 (e.g. 3.6–3.9) or no Python at all**: no OS upgrade needed;
+> build the offline bundle with `--python` to embed a standalone Python 3.11; see section 7 of
+> [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md).
 > **glibc < 2.28 (e.g. CentOS 7 / RHEL 7, glibc 2.17)**: the `pip install` path does not work
 > (official `pyslang` wheels require manylinux_2_28, so pip falls back to a source build that
 > will almost certainly fail). Two options: (1) run inside a container (e.g. `python:3.11-slim`)
 > or upgrade the OS; (2) build an offline bundle with `--target-glibc 2.17` (self-built
-> pyslang-compatible wheel, supports glibc >= 2.17) — see section 1c of
+> pyslang-compatible wheel, supports glibc >= 2.17); see section 1c of
 > [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md) (note: the wheel must be rebuilt on every
 > pyslang upgrade).
 
@@ -121,7 +124,7 @@ wave-session --fst sim/dump.fst --top top_tb --filelist rtl.f --out sessions/my_
 python -m wave_mcp.server --session sessions/my_module
 ```
 
-Or call the `prepare_session` MCP tool directly from your Code Agent — see below.
+Or call the `prepare_session` MCP tool directly from your Code Agent (see below).
 
 ## CLI queries (`wave-mcp query`)
 
@@ -145,7 +148,7 @@ wave-mcp query signal_drivers --session sessions/my_module \
 ## Code Agent integration
 
 `prepare_session` is the unified MCP entry point. When your Code Agent wants to analyze a
-waveform, **call it first** — pass in the waveform your simulator produced, and in one shot it
+waveform, **call it first**: pass in the waveform your simulator produced, and in one shot it
 does "(convert →) build netlist → build session → open":
 
 ```jsonc
@@ -180,7 +183,7 @@ prepare_session({
 
 ### Waveform-free static analysis (usable before simulation)
 
-`open_static_session` builds a netlist and opens a session from RTL alone — **no waveform, no
+`open_static_session` builds a netlist and opens a session from RTL alone: **no waveform, no
 simulation**. Great for pre-simulation code understanding: interface queries, driver/fan-in
 exploration, hierarchy browsing, code review.
 
@@ -195,7 +198,7 @@ open_static_session({
 ```
 
 When the simulation later produces a waveform, call `prepare_session` with the **same out_dir**
-to upgrade to a full session — the built netlist is reused.
+to upgrade to a full session; the built netlist is reused.
 
 ### VCD → FST conversion (vcd2fst setup, optional)
 
@@ -282,33 +285,55 @@ wave-session --vcd sim/dump.vcd --top top_tb --filelist rtl.f --out sessions/mod
 
 ## FAQ
 
-**Q1: Do I need a commercial license?**
+**Q1: Why no FSDB / SHM support yet?**
+FSDB and SHM are closed, proprietary waveform formats: reading their full data requires
+commercial tooling, and the license cost makes it hard to sustain the high-concurrency,
+massive-volume waveform analysis that AI agents will generate once they are deeply embedded
+in the verification workflow. wave-mcp takes the open FST + VCD route precisely to serve
+thousands of concurrent waveform analyses with a high-performance open-source stack.
+FSDB and SHM support is on our roadmap, so stay tuned.
+
+**Q2: Do I need a commercial license?**
 No. MIT licensed, unlimited concurrency, unlimited machines. This is the core difference from
 commercial debug MCPs.
 
-**Q2: Which simulators are supported?**
+**Q3: Which simulators are supported?**
 Any simulator that produces FST or VCD: Verilator (`--trace-fst`), Icarus, xrun, VCS, etc.
-wave-mcp never runs a simulator — it consumes the waveform you already produced.
+wave-mcp never runs a simulator; it consumes the waveform you already produced.
 
-**Q3: Is the data accurate?**
+**Q4: Is the data accurate?**
 Yes. Fully validated on a real production chip project with 2.25M signals at 100% value
 correctness; hierarchy and file tools (`scope_info` / `find_files` / `modules_in_file`) pass
 on all 32/32 modules.
 
-**Q4: Can I use it without a waveform?**
-Yes. `open_static_session` does static analysis from RTL alone (before simulation) — a unique
+**Q5: Can I use it without a waveform?**
+Yes. `open_static_session` does static analysis from RTL alone (before simulation), a unique
 wave-mcp capability.
 
-**Q5: Does it support macOS / Windows?**
+**Q6: Does it support macOS / Windows?**
 Linux x86_64 works out of the box. macOS / Windows / arm64 require building `pylibfst` from
 source (see [System requirements](#system-requirements)).
 
-**Q6: How does it perform on large waveforms?**
+**Q7: How does it perform on large waveforms?**
 FST + a C-based reader (pylibfst) + a resident process + random access, matching the AI's
 point-query patterns; validated on million-scale-scope modules.
 
-**Q7: How do I hook it into my Code Agent?**
-See [Code Agent integration](#code-agent-integration) — one `mcpServers` JSON block.
+**Q8: How do I hook it into my Code Agent?**
+See [Code Agent integration](#code-agent-integration): one `mcpServers` JSON block.
+
+**Q9: My target machine only has Python 3.8 / 3.9 (air-gapped / hardened environment). Can I still use it?**
+Yes, with no upgrade needed on the target. Build the offline bundle with `--python` to embed a
+standalone Python 3.11 (python-build-standalone); the installer prefers the bundled interpreter
+and never touches the system Python. Native 3.8/3.9 support is not feasible: the `mcp` SDK
+requires >= 3.10, official `pyslang` wheels skip cp38, and both versions are EOL.
+See section 7 of [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md).
+
+**Q10: I get `GLIBC_2.27' not found` on CentOS 7 / glibc 2.17. What now?**
+Official pyslang wheels require glibc >= 2.28. Build a compatible wheel with
+`deploy/build_pyslang_manylinux2014.sh`, then bundle with
+`--target-glibc 2.17 --pyslang-wheel <wheel>`; the whole chain (standalone Python + wheels +
+vcd2fst) runs on glibc >= 2.17. See sections 1c and 7 of
+[`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md).
 
 ---
 

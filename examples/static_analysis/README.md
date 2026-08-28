@@ -1,7 +1,7 @@
 # Static-analysis example（无波形、无仿真器的静态分析示例）
 
 展示 wave-mcp 的**独有能力**：`open_static_session` 只凭 RTL 源码建网表并打开 session，
-**不需要波形、不跑仿真**——仿真前即可分析设计结构、驱动、扇入/扇出和声明位置。
+**不需要波形、不跑仿真**，仿真前即可分析设计结构、驱动、扇入/扇出和声明位置。
 
 ## 一键运行
 
@@ -29,10 +29,10 @@ python examples/static_analysis/run.py
 
 ## 文件
 
-- `uart_top.sv` — UART TX 设计（顶层 + TX 核 + 波特率分频，两级层次、完整驱动关系）
-- `run.py` — 一键演示脚本（生成的 session 在 `session/`，已 gitignore）
+- `uart_top.sv`：UART TX 设计（顶层 + TX 核 + 波特率分频，两级层次、完整驱动关系）
+- `run.py`：一键演示脚本（生成的 session 在 `session/`，已 gitignore）
 
 ## 下一步
 
-仿真产出波形后，用**同一个 out_dir** 调 `prepare_session` 即可升级为完整 session——
+仿真产出波形后，用**同一个 out_dir** 调 `prepare_session` 即可升级为完整 session，
 已建好的网表直接复用，值查询 / trace 类工具随即可用。
