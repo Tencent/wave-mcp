@@ -11,6 +11,7 @@
 #   wheels/      offline wheelhouse (this project + all deps)
 #   src/         project source (also built as a wheel in wheels/)
 #   bin/vcd2fst  glibc-compatible vcd2fst + libs              [--vcd2fst] (optional)
+#   licenses/    full license texts of all redistributed components
 #   install.sh, wave-mcp (launcher), mcp.json.example
 #
 # Usage:
@@ -206,6 +207,54 @@ date -u +"%Y-%m-%dT%H:%M:%SZ" > "$OUT/VERSION"
 # 5b) license + third-party notices (MIT project + bundled binary provenance)
 cp "$REPO_ROOT/LICENSE" "$OUT/LICENSE" 2>/dev/null || echo "[!] no top-level LICENSE found"
 cp "$REPO_ROOT/docs/THIRD_PARTY.md" "$OUT/THIRD_PARTY.md" 2>/dev/null || true
+
+# 5c) full license texts for redistributed third-party components -----------
+# MIT/BSD require retaining the license+copyright notice on redistribution;
+# LGPL-2.1 requires the license text; EUPL-1.2 likewise. THIRD_PARTY.md alone
+# does not satisfy this, so ship a licenses/ directory next to the binaries.
+mkdir -p "$OUT/licenses"
+LIC_SRC="$REPO_ROOT/docs/licenses"
+if [[ -n "$VCD2FST_SRC" && -x "$VCD2FST_SRC" ]]; then
+  cp "$LIC_SRC/LGPL-2.1.txt" "$OUT/licenses/" 2>/dev/null || \
+    echo "[!] missing $LIC_SRC/LGPL-2.1.txt (jrb component)"
+  # permissive components compiled into vcd2fst (MIT/BSD texts)
+  for f in vcd2fst.fstapi.LICENSE vcd2fst.fastlz.LICENSE vcd2fst.lz4.LICENSE; do
+    [[ -f "$LIC_SRC/$f" ]] && cp "$LIC_SRC/$f" "$OUT/licenses/"
+  done
+fi
+if [[ -n "$VIEWER_SRC" ]]; then
+  cp "$LIC_SRC/EUPL-1.2.txt" "$OUT/licenses/" 2>/dev/null || \
+    echo "[!] missing $LIC_SRC/EUPL-1.2.txt (surfer component)"
+fi
+# wheelhouse notices: copy every wheel's own license file (covers all pip
+# deps: pyslang, mcp, cryptography, pylibfst, ... and the viewer assets
+# wheel, which carries its embedded EUPL text).
+python3 - "$OUT/wheels" "$OUT/licenses" <<'PYEOF'
+import base64, os, sys
+wheel_dir, out_dir = sys.argv[1], sys.argv[2]
+import zipfile
+for fn in sorted(os.listdir(wheel_dir)):
+    if not fn.endswith(".whl"):
+        continue
+    try:
+        with zipfile.ZipFile(os.path.join(wheel_dir, fn)) as z:
+            for name in z.namelist():
+                base = name.rsplit("/", 1)[-1]
+                low = base.lower()
+                if low.startswith(("license", "licence", "copying", "notice")) and \
+                   low.endswith((".txt", ".md", ".rst", "")):
+                    stem = fn.split("-")[0]
+                    data = z.read(name)
+                    # skip huge vendored trees (e.g. cryptography's rust crates)
+                    if len(data) > 2_000_000:
+                        continue
+                    with open(os.path.join(out_dir, f"{stem}.{base or 'LICENSE'}"), "wb") as f:
+                        f.write(data)
+                    break
+    except Exception as e:
+        print(f"    [warn] {fn}: {e}")
+PYEOF
+echo "    licenses/: $(ls "$OUT/licenses" 2>/dev/null | wc -l) files"
 
 echo "[*] bundle assembled at $OUT"
 if [[ "$DO_TAR" == "1" ]]; then
