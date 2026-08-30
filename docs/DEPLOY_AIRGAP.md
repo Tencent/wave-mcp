@@ -22,6 +22,32 @@
 
 ## 1. 在有网开发机生成 bundle
 
+### 1.0 推荐：Docker 一键流水线（构建侧容器化，交付物仍是 tarball）
+
+打包机只需要 docker（首轮需联网），一条命令产出完整发布矩阵：
+
+```bash
+deploy/docker_build_all.sh \
+    --viewer /path/to/viewer-assets \      # 可选：Surfer WASM 资产目录
+    --python https://github.com/astral-sh/python-build-standalone/releases/download/20241016/cpython-3.11.10+20241016-x86_64-unknown-linux-gnu-install_only.tar.gz
+
+# 产物（dist/）：
+#   wave-mcp-bundle-glibc2.28.tar.gz   主流机器（CentOS 8+ / Ubuntu 18.10+）
+#   wave-mcp-bundle-glibc2.17.tar.gz   老机器（CentOS 7 / RHEL 7）
+```
+
+流水线内部四个 stage 全部在钉死版本的容器里执行，任何机器构建产物一致：
+rust:alpine 编 musl 静态 surver（老机器 viewer 必需，官方 surver 要 glibc≥2.34）、
+manylinux2014 编 pyslang wheel、manylinux_2_28 / manylinux2014 分别组装两档 bundle
+并跑 glibc 审计。surver 与 pyslang 产物有缓存（`deploy/.docker-build-cache/`），
+版本不变不重编；`--rebuild` 强制全量，`--skip-legacy` 只出 2.28 快速档。
+
+发布矩阵就是这两个包：glibc 向下兼容，2.17 包理论上覆盖所有机器；保留 2.28
+包是因为它全部使用官方 wheel。**用户侧完全不需要 docker**，拿到的仍是
+tarball + `install.sh`。
+
+以下 1a~1c 为分步手工路径（不便使用 docker 或需单独重编某组件时参考）。
+
 ```bash
 # 1a. download a relocatable Python (python-build-standalone, install_only,
 #     x86_64-gnu, 3.11.x) from github.com/astral-sh/python-build-standalone

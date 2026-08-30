@@ -15,4 +15,11 @@ if [[ -x "$BUNDLE/bin/vcd2fst" ]]; then
   [[ -d "$BUNDLE/bin/lib" ]] && export LD_LIBRARY_PATH="$BUNDLE/bin/lib:${LD_LIBRARY_PATH:-}"
 fi
 
-exec "$RUNTIME/bin/python" -m wave_mcp.server --transport stdio "$@"
+# dispatch through the CLI entry: `wave-mcp` (no args) starts the stdio
+# server; `wave-mcp query ...` runs the terminal tool surface; any other
+# args go to the server parser (e.g. --transport http).
+if [[ $# -eq 0 ]]; then
+  exec "$RUNTIME/bin/python" -m wave_mcp.cli.main --transport stdio
+else
+  exec "$RUNTIME/bin/python" -m wave_mcp.cli.main "$@"
+fi
