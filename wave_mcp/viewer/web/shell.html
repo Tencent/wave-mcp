@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>wave-mcp viewer</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden;
+               font-family: -apple-system, "Segoe UI", sans-serif; }
+  #wave-area { position: absolute; inset: 0; display: flex;
+               flex-direction: column; }
+  .pane { position: relative; flex: 1; min-height: 0; }
+  .pane iframe { position: absolute; inset: 0; width: 100%; height: 100%;
+                 border: none; }
+  #pane-b { border-top: 2px solid #4a4d55; }
+  .pane-label { position: absolute; top: 6px; left: 50%;
+                transform: translateX(-50%); z-index: 5;
+                background: rgba(40,42,50,.9); color: #cfd3da;
+                border: 1px solid #4a4d55; border-radius: 10px;
+                padding: 1px 12px; font-size: 11px; pointer-events: none; }
+
+  /* ---- log popup (collapsible to a floating capsule) ---- */
+  #log-panel {
+    position: absolute; right: 16px; bottom: 16px; width: 420px;
+    max-height: 55vh; display: flex; flex-direction: column;
+    background: rgba(30, 32, 38, 0.96); color: #e8e8e8;
+    border: 1px solid #4a4d55; border-radius: 10px;
+    box-shadow: 0 6px 24px rgba(0,0,0,.45); z-index: 10;
+  }
+  #log-panel.collapsed { display: none; }
+  #log-head { display: flex; align-items: center; padding: 8px 12px;
+              border-bottom: 1px solid #3a3d45; cursor: default;
+              user-select: none; }
+  #log-head b { flex: 1; font-size: 13px; font-weight: 600; }
+  #log-head button { background: none; border: none; color: #9aa;
+                     font-size: 14px; cursor: pointer; }
+  #log-body { overflow-y: auto; padding: 6px 12px 10px; }
+  .log-entry { border-bottom: 1px dashed #3a3d45; padding: 8px 0;
+               font-size: 13px; line-height: 1.55; }
+  .log-entry .meta { color: #8b93a1; font-size: 11px; margin-bottom: 4px; }
+  .log-entry .conf-high { color: #6fce87; }
+  .log-entry .conf-medium { color: #e5c07b; }
+  .log-entry .conf-low { color: #e06c75; }
+  .log-entry a.tlink { color: #61afef; text-decoration: none;
+                       border-bottom: 1px dotted #61afef; cursor: pointer; }
+  .log-entry .evidence { color: #7a8290; font-size: 11px; margin-top: 4px;
+                         white-space: pre-wrap; }
+  .log-entry code { background: #23252c; padding: 0 4px; border-radius: 3px; }
+  .log-entry h1, .log-entry h2, .log-entry h3 {
+    font-size: 14px; margin: 6px 0 4px; }
+
+  #log-capsule {
+    position: absolute; right: 16px; bottom: 16px; z-index: 10;
+    background: #2c2f36; color: #e8e8e8; border: 1px solid #4a4d55;
+    border-radius: 18px; padding: 8px 16px; font-size: 13px;
+    cursor: pointer; box-shadow: 0 4px 16px rgba(0,0,0,.4);
+    display: none; align-items: center; gap: 8px;
+  }
+  #log-capsule.visible { display: flex; }
+  #log-capsule .dot { width: 8px; height: 8px; border-radius: 50%;
+                      background: #e06c75; display: none; }
+  #log-capsule.unread .dot { display: block; }
+</style>
+</head>
+<body>
+<div id="wave-area">
+  <div class="pane" id="pane-a">
+    <div class="pane-label" id="label-a" style="display:none"></div>
+    <iframe id="surfer" allow="cross-origin-isolated"></iframe>
+  </div>
+  <div class="pane" id="pane-b" style="display:none">
+    <div class="pane-label" id="label-b"></div>
+    <iframe id="surfer-b" allow="cross-origin-isolated"></iframe>
+  </div>
+</div>
+
+<div id="log-panel" class="collapsed">
+  <div id="log-head">
+    <b>Analysis Log</b>
+    <button id="log-collapse" title="collapse">&#x2013;</button>
+  </div>
+  <div id="log-body"></div>
+</div>
+<div id="log-capsule"><span class="dot"></span>Analysis Log</div>
+
+<script src="shell.js"></script>
+</body>
+</html>

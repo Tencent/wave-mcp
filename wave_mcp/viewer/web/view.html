@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>wave-mcp viewer</title></head>
+<body>
+<p id="status" style="font-family: sans-serif; color: #666">Loading wave viewer...</p>
+<script>
+  // Entry page. Guarantees before entering the shell:
+  //   1. a service worker CONTROLS this page (restores `Server: Surfer`
+  //      header that reverse proxies rewrite),
+  //   2. the controlling worker matches EXPECTED_SW_VERSION (no hard
+  //      refresh ever needed after we ship SW changes).
+  // Validated: dev-docs/viewer-validation-2026-08-29.md
+  var EXPECTED_SW_VERSION = 1;   // keep in sync with sw.js SW_VERSION
+
+  function setStatus(m) { document.getElementById("status").textContent = m; }
+
+  function queryVersion(worker, timeoutMs) {
+    return new Promise(function (resolve) {
+      var mc = new MessageChannel();
+      var timer = setTimeout(function () { resolve(null); }, timeoutMs);
+      mc.port1.onmessage = function (e) {
+        clearTimeout(timer);
+        resolve(e.data && e.data.version);
+      };
+      try { worker.postMessage({ type: "GET_VERSION" }, [mc.port2]); }
+      catch (err) { clearTimeout(timer); resolve(null); }
+    });
+  }
+
+  function waitControllerChange(timeoutMs) {
+    return new Promise(function (resolve) {
+      var timer = setTimeout(resolve, timeoutMs);
+      navigator.serviceWorker.addEventListener("controllerchange", function () {
+        clearTimeout(timer); resolve();
+      }, { once: true });
+    });
+  }
+
+  async function ensureFreshWorker() {
+    var reg = await navigator.serviceWorker.register(
+      "sw.js", { updateViaCache: "none" });
+    await navigator.serviceWorker.ready;
+    if (!navigator.serviceWorker.controller) {
+      await waitControllerChange(3000);
+    }
+    for (var attempt = 0; attempt < 3; attempt++) {
+      var ctrl = navigator.serviceWorker.controller;
+      if (!ctrl) break;
+      var v = await queryVersion(ctrl, 1500);
+      if (v === EXPECTED_SW_VERSION) return true;
+      setStatus("Updating viewer components...");
+      try { await reg.update(); } catch (e) { /* offline */ }
+      await waitControllerChange(4000);
+    }
+    return false;
+  }
+
+  async function go() {
+    if ("serviceWorker" in navigator) {
+      try {
+        var ok = await ensureFreshWorker();
+        if (!ok) {
+          if (!sessionStorage.getItem("wv_reloaded")) {
+            sessionStorage.setItem("wv_reloaded", "1");
+            location.reload();
+            return;
+          }
+        } else {
+          sessionStorage.removeItem("wv_reloaded");
+        }
+      } catch (e) { console.warn("service worker setup failed:", e); }
+    }
+    location.replace("/shell.html" + location.search);
+  }
+  go();
+</script>
+</body>
+</html>
