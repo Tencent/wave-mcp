@@ -67,16 +67,18 @@ wave-mcp 用**纯开源技术栈**（pylibfst + pyslang）提供完整波形调�
 | vcd2fst（可选） | GTKWave | 仅 VCD→FST 转换需要（`apt install gtkwave` / `brew install gtkwave`） |
 | Verilator（示例） | ≥ 5 | 仅 `verilator_quickstart` 示例需要 |
 
-> 操作系统 **Linux x86_64 开箱即用**（以上 Python 依赖均有预编译 wheel）。
+> **Linux x86_64 开箱即用**（以上 Python 依赖均有预编译 wheel）；
 > macOS / Windows / arm64 因 `pylibfst` 暂无预编译 wheel，需源码编译（cmake+gcc+zlib）。
-> 隔离网 / 离线环境见 [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md)。
-> **目标机 Python < 3.10（如 3.6–3.9）或无 Python**：无需升级目标机，打离线 bundle 时用
-> `--python` 捆绑独立 Python 3.11 即可，见 [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md) 第 7 节。
-> **glibc < 2.28（如 CentOS 7 / RHEL 7，glibc 2.17）**：`pip install` 路径不可用（官方
-> `pyslang` wheel 要求 manylinux_2_28，pip 会退化为源码编译且几乎必然失败）。两个选择：
-> ① 在容器中运行（如 `python:3.11-slim`）或升级系统；② 用离线 bundle 的
-> `--target-glibc 2.17` 打包（自编 pyslang 兼容 wheel，支持 glibc ≥ 2.17），
-> 见 [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md) 第 1c 节（注意：pyslang 每次升级都需重编该 wheel）。
+
+标准环境直接 `pip install wave-mcp`。环境受限时按下表对号入座：
+
+| 你的环境 | 方案 | 参考 |
+| --- | --- | --- |
+| 无外网（隔离网 / 加密网） | 有网机器 `deploy/docker_build_all.sh` 一键打离线 bundle，拷入后 `install.sh` 安装 | [DEPLOY_AIRGAP.md](docs/DEPLOY_AIRGAP.md) 第 1.0 节 |
+| Python < 3.10 或无 Python | 无需升级目标机：bundle 自带独立 Python 3.11，与系统 Python 无关 | [DEPLOY_AIRGAP.md](docs/DEPLOY_AIRGAP.md) 第 7 节 |
+| glibc < 2.28（CentOS 7 / RHEL 7） | `pip install` 不可用（官方 pyslang wheel 要求 glibc ≥ 2.28）；用 glibc 2.17 档 bundle，全链路兼容老机器；或在容器（如 `python:3.11-slim`）中运行 | [DEPLOY_AIRGAP.md](docs/DEPLOY_AIRGAP.md) 第 1c 节 |
+
+> Docker 流水线默认产出 glibc 2.28 与 2.17 两档 bundle，覆盖以上全部受限场景；打包机只需 docker，目标机不需要。
 
 ---
 
@@ -304,17 +306,20 @@ wave-view pass.fst fail.fst --labels pass fail
 - **stdio（推荐）**：每人本地起一个 Server 子进程，只加载自己模块的 FST+网表，零运维。
 - **HTTP + 多 Session**：一个常驻服务，用 `session_id` 给每用户分隔离会话。
   `python -m wave_mcp.server --transport http --host 0.0.0.0 --port 8000`
-- **隔离网 / 离线自包含包**：有网机器一键打包，拷贝到隔离网离线安装，自带独立 Python + 全部 wheel + 可选 vcd2fst：
+- **隔离网 / 离线自包含包**：有 docker 的机器一键打包（产出 glibc 2.28 / 2.17 两档），拷贝到隔离网离线安装，自带独立 Python + 全部 wheel + 可选 vcd2fst 与 viewer 资产：
 
   ```bash
-  # ① 有网开发机：一键打包（可选 --python <独立Python包> --vcd2fst <二进制>）
-  deploy/build_offline_bundle.sh --out /tmp/wave-mcp-bundle
+  # ① 有网打包机（只需 docker）：一条命令产出两档 bundle
+  deploy/docker_build_all.sh --viewer <资产目录> --python <独立Python包或URL>
+  # 产物：dist/wave-mcp-bundle-glibc2.28.tar.gz（主流机器）
+  #       dist/wave-mcp-bundle-glibc2.17.tar.gz（CentOS 7 老机器）
 
-  # ② 隔离网共享盘：解压后离线安装（无需联网/编译）
-  tar -xzf wave-mcp-bundle.tar.gz -C /shared/ && cd /shared/wave-mcp-bundle
+  # ② 隔离网共享盘：解压后离线安装（无需联网/编译/docker）
+  tar -xzf wave-mcp-bundle-glibc2.28.tar.gz -C /shared/ && cd /shared/wave-mcp-bundle-glibc2.28
   ./install.sh --prefix /shared/wave-mcp      # 产出 bin/wave-mcp 启动器
   ```
 
+  不便使用 docker 时可用分步脚本 `deploy/build_offline_bundle.sh` 手工打包。
   详见 [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md)（含 vcd2fst 兼容性方案与排错）。
 
 ## FAQ
@@ -355,16 +360,17 @@ FST + C 系读取库（pylibfst）+ 进程常驻 + 随机访问，契合 AI 点�
 见 [Code Agent 集成](#code-agent-集成)，一段 `mcpServers` JSON 即可。
 
 **Q9：目标机器只有 Python 3.8 / 3.9（隔离网 / 加密环境），能用吗？**
-能，不需要升级目标机。打离线 bundle 时用 `--python` 捆绑独立 Python 3.11
+能，不需要升级目标机。Docker 流水线打出的离线 bundle 自带独立 Python 3.11
 （python-build-standalone），安装时优先使用捆绑解释器，与系统 Python 完全无关。
 原生支持 3.8/3.9 不可行：`mcp` SDK 硬性要求 ≥ 3.10，官方 `pyslang` wheel 不发 cp38，
 且两版本均已 EOL。详见 [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md) 第 7 节（旧环境 QA）。
 
 **Q10：CentOS 7 / glibc 2.17 上报 `GLIBC_2.27' not found` 怎么办？**
-官方 pyslang wheel 要求 glibc ≥ 2.28。先用 `deploy/build_pyslang_manylinux2014.sh`
-自编兼容 wheel，再以 `--target-glibc 2.17 --pyslang-wheel <wheel>` 打 bundle，
-整条链路（独立 Python + wheel + vcd2fst）在 glibc ≥ 2.17 均可运行。
-详见 [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md) 第 1c 节与第 7 节。
+官方 pyslang wheel 要求 glibc ≥ 2.28，老机器直接 pip 装不上。用 Docker 流水线的
+glibc 2.17 档产物即可：`deploy/docker_build_all.sh` 自动在容器内自编兼容 wheel
+并组装 `wave-mcp-bundle-glibc2.17.tar.gz`，整条链路（独立 Python + wheel + vcd2fst
++ musl 静态 surver）在 glibc ≥ 2.17 均可运行，已在 CentOS 7 容器实测验证。
+详见 [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md) 第 1.0 节与第 1c 节。
 
 ---
 

@@ -81,20 +81,20 @@ XiangShan added to the test set:
 | vcd2fst (optional) | GTKWave | Only needed for VCD→FST conversion (`apt install gtkwave` / `brew install gtkwave`) |
 | Verilator (examples) | >= 5 | Only needed by the `verilator_quickstart` example |
 
-> **Linux x86_64 works out of the box** (all Python deps above ship prebuilt wheels).
+> **Linux x86_64 works out of the box** (all Python deps above ship prebuilt wheels);
 > macOS / Windows / arm64 currently lack a prebuilt `pylibfst` wheel and require building from
-> source (cmake+gcc+zlib). For air-gapped / offline environments, see
-> [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md).
-> **Target machine has Python < 3.10 (e.g. 3.6–3.9) or no Python at all**: no OS upgrade needed;
-> build the offline bundle with `--python` to embed a standalone Python 3.11; see section 7 of
-> [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md).
-> **glibc < 2.28 (e.g. CentOS 7 / RHEL 7, glibc 2.17)**: the `pip install` path does not work
-> (official `pyslang` wheels require manylinux_2_28, so pip falls back to a source build that
-> will almost certainly fail). Two options: (1) run inside a container (e.g. `python:3.11-slim`)
-> or upgrade the OS; (2) build an offline bundle with `--target-glibc 2.17` (self-built
-> pyslang-compatible wheel, supports glibc >= 2.17); see section 1c of
-> [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md) (note: the wheel must be rebuilt on every
-> pyslang upgrade).
+> source (cmake+gcc+zlib).
+
+On a standard environment, just `pip install wave-mcp`. For constrained environments, find your case below:
+
+| Your environment | Solution | Reference |
+| --- | --- | --- |
+| No internet (air-gapped network) | build an offline bundle with `deploy/docker_build_all.sh` on a connected machine, copy it in, install with `install.sh` | [DEPLOY_AIRGAP.md](docs/DEPLOY_AIRGAP.md) section 1.0 |
+| Python < 3.10 or no Python | no target upgrade needed: the bundle embeds a standalone Python 3.11, independent of the system Python | [DEPLOY_AIRGAP.md](docs/DEPLOY_AIRGAP.md) section 7 |
+| glibc < 2.28 (CentOS 7 / RHEL 7) | `pip install` does not work (official pyslang wheels require glibc >= 2.28); use the glibc 2.17 bundle, whose whole chain runs on legacy hosts; or run inside a container (e.g. `python:3.11-slim`) | [DEPLOY_AIRGAP.md](docs/DEPLOY_AIRGAP.md) section 1c |
+
+> The Docker pipeline produces both glibc 2.28 and 2.17 bundles by default, covering all the
+> constrained cases above; only the build machine needs docker, target machines never do.
 
 ---
 
@@ -351,18 +351,22 @@ wave-view pass.fst fail.fst --labels pass fail
   module's FST + netlist. Zero ops.
 - **HTTP + multi-session**: one long-running service, per-user isolated sessions via `session_id`.
   `python -m wave_mcp.server --transport http --host 0.0.0.0 --port 8000`
-- **Air-gapped / offline bundle**: one-command packaging on a networked machine, then offline
-  install on the air-gapped side, with standalone Python + all wheels + optional vcd2fst:
+- **Air-gapped / offline bundle**: one command on a docker-equipped machine produces both
+  glibc tiers; copy to the air-gapped side and install offline, with standalone Python +
+  all wheels + optional vcd2fst and viewer assets:
 
   ```bash
-  # 1) networked dev machine: one-command packaging (optional --python <standalone py> --vcd2fst <binary>)
-  deploy/build_offline_bundle.sh --out /tmp/wave-mcp-bundle
+  # 1) networked build machine (docker only): one command, both bundles
+  deploy/docker_build_all.sh --viewer <asset_dir> --python <standalone-py-tarball-or-URL>
+  # outputs: dist/wave-mcp-bundle-glibc2.28.tar.gz  (mainstream hosts)
+  #          dist/wave-mcp-bundle-glibc2.17.tar.gz  (CentOS 7 legacy hosts)
 
-  # 2) air-gapped shared drive: extract and install offline (no internet, no compiler)
-  tar -xzf wave-mcp-bundle.tar.gz -C /shared/ && cd /shared/wave-mcp-bundle
+  # 2) air-gapped shared drive: extract and install offline (no internet, no compiler, no docker)
+  tar -xzf wave-mcp-bundle-glibc2.28.tar.gz -C /shared/ && cd /shared/wave-mcp-bundle-glibc2.28
   ./install.sh --prefix /shared/wave-mcp      # produces the bin/wave-mcp launcher
   ```
 
+  If docker is not an option, the step-by-step `deploy/build_offline_bundle.sh` still works.
   See [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md) (vcd2fst compatibility options + troubleshooting).
 
 ## FAQ
@@ -409,17 +413,18 @@ point-query patterns; validated on million-scale-scope modules.
 See [Code Agent integration](#code-agent-integration): one `mcpServers` JSON block.
 
 **Q9: My target machine only has Python 3.8 / 3.9 (air-gapped / hardened environment). Can I still use it?**
-Yes, with no upgrade needed on the target. Build the offline bundle with `--python` to embed a
+Yes, with no upgrade needed on the target. Offline bundles from the Docker pipeline embed a
 standalone Python 3.11 (python-build-standalone); the installer prefers the bundled interpreter
 and never touches the system Python. Native 3.8/3.9 support is not feasible: the `mcp` SDK
 requires >= 3.10, official `pyslang` wheels skip cp38, and both versions are EOL.
 See section 7 of [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md).
 
 **Q10: I get `GLIBC_2.27' not found` on CentOS 7 / glibc 2.17. What now?**
-Official pyslang wheels require glibc >= 2.28. Build a compatible wheel with
-`deploy/build_pyslang_manylinux2014.sh`, then bundle with
-`--target-glibc 2.17 --pyslang-wheel <wheel>`; the whole chain (standalone Python + wheels +
-vcd2fst) runs on glibc >= 2.17. See sections 1c and 7 of
+Official pyslang wheels require glibc >= 2.28, so pip cannot work on legacy hosts. Use the
+glibc 2.17 tier from the Docker pipeline: `deploy/docker_build_all.sh` builds the compatible
+wheel inside a container automatically and assembles `wave-mcp-bundle-glibc2.17.tar.gz`;
+the whole chain (standalone Python + wheels + vcd2fst + musl static surver) runs on
+glibc >= 2.17, verified in a CentOS 7 container. See sections 1.0 and 1c of
 [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md).
 
 ---
