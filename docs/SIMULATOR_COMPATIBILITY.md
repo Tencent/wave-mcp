@@ -15,20 +15,19 @@ wave-mcp **不跑仿真器**，只消费仿真产出的波形（FST）+ RTL 源�
 - 前两类是**格式无关的稳健核心**：只要有 FST（+ 正确 filelist），任何仿真器都能用。
 - 第三类叠加了"波形路径 ↔ 网表实例名"的对齐，是跨仿真器最脆弱处（见下）。
 
-## 注意点一：多数仿真器不直接产 FST
-
-只有部分仿真器能直接 dump FST；其余需要一步转换：
+## 注意点一：各仿真器怎么拿到 FST
 
 | 仿真器 | 直接产 FST | 获取 FST 的方式 |
 | --- | --- | --- |
 | Verilator | ✅ `--trace-fst` | 零转换（最省事） |
 | Icarus (iverilog) | ✅ `-fst` | 零转换 |
 | **VCS** | ❌ | VCD → `vcd2fst`；VPD/FSDB 需先 `vpd2vcd`/`fsdb2vcd` 转 VCD |
-| Xcelium (xrun) | ❌（只吐 VCD/私有格式） | VCD → `vcd2fst` |
+| Xcelium (xrun) | ✅ 加载 fstdumper VPI 插件 | **推荐**：[fstdumper 直出 FST](XCELIUM_FST_GUIDE.md)，零转换；备选：VCD → `vcd2fst` |
 | Questa/ModelSim | ❌ | VCD → `vcd2fst` |
 
 > `prepare_session` 传入 `.vcd` 会自动调 `vcd2fst` 转换；传入 `.fst` 则直读。
-> 功能不受影响，只是非 Verilator/Icarus 时多一步 VCD→FST。
+> 功能不受影响。Xcelium 用户建议用 fstdumper 直出 FST（见上表链接），
+> 免去 VCD 中间文件；其余非 Verilator/Icarus 场景多一步 VCD→FST。
 
 ## 注意点二：trace / 驱动的命门是"路径对齐"
 

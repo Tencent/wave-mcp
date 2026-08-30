@@ -112,6 +112,7 @@ def _parallel_supported() -> bool:
     if _PARALLEL_SUPPORTED is not None:
         return _PARALLEL_SUPPORTED
     _PARALLEL_SUPPORTED = False
+    d = None
     try:
         import tempfile
         d = tempfile.mkdtemp(prefix="vcd2fst_probe_")
@@ -130,6 +131,9 @@ def _parallel_supported() -> bool:
             _PARALLEL_SUPPORTED = True
     except (OSError, subprocess.SubprocessError):
         _PARALLEL_SUPPORTED = False  # probe failure -> assume no parallel (serial always works)
+    finally:
+        if d:
+            shutil.rmtree(d, ignore_errors=True)  # never leave probe files in /tmp
     return _PARALLEL_SUPPORTED
 
 
