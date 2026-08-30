@@ -61,6 +61,11 @@ XiangShan added to the test set:
   recompiles; degrades gracefully without affecting other tools.
 - **Consistency checks**: warns when the source or waveform changed but the netlist is stale;
   never silently returns wrong results.
+- **Waveform diff**: `diff_waveforms` pinpoints the first divergence between a pass and a fail
+  run, ranks diverging signals by time, and filters glitches with clock-aligned sampling.
+- **Wave viewer**: `open_wave_view` lets the agent pop a browser waveform right after its
+  analysis: suspect signals, cursor pinned at the failure time, and an analysis popup;
+  dual-waveform lockstep compare; `get_view_state` tells the agent what you are looking at.
 - **Deployment-friendly**: stdio (one process per user, zero ops) / HTTP multi-session /
   self-contained offline bundle (air-gapped networks).
 
@@ -325,6 +330,8 @@ wave-view pass.fst fail.fst --labels pass fail
 - The analysis log is a collapsible popup; time references inside it (e.g.
   `[85000ps](#t=85000ps)`) jump the cursor on click, and cursor/viewport/marker
   updates are flicker-free.
+- Full guide (MCP tool parameters, two-way debug workflow, architecture,
+  deployment and troubleshooting): [`docs/WAVE_VIEWER.md`](docs/WAVE_VIEWER.md).
 
 ---
 
@@ -463,11 +470,13 @@ wave_mcp/
   server.py              # MCP server, registers all 31 tools
   session.py             # Session / session.json / fingerprint check / definition_name
   pipeline.py            # prepare_session / prepare_static_session orchestration
+  diff.py                # diff_waveforms first-divergence localization (clock-aligned sampling)
   sources/               # fst_source + rtl_source
   netlist/               # slang_netlist / trace_engine / expr_eval / name_infer
-  cli/                   # wave-session / wave-vcd2fst
-deploy/                  # offline bundle build + install
+  viewer/                # wave viewer: manager / surver / translate / state / web frontend
+  cli/                   # wave-session / wave-vcd2fst / wave-view
+deploy/                  # offline bundle build + install (incl. Docker one-shot pipeline)
 examples/                # example library (see table above)
 tests/                   # regression entry run_regression.py
-docs/                    # DEPLOY_AIRGAP / SIMULATOR_COMPATIBILITY / XCELIUM_FST_GUIDE / THIRD_PARTY
+docs/                    # DEPLOY_AIRGAP / SIMULATOR_COMPATIBILITY / XCELIUM_FST_GUIDE / THIRD_PARTY / WAVE_VIEWER
 ```

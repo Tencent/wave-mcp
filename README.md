@@ -51,6 +51,8 @@ wave-mcp 用**纯开源技术栈**（pylibfst + pyslang）提供完整波形调�
 - **值追踪**：`trace_value` 沿驱动链反向遍历、可跨模块下钻，每个节点带真实 FST 值；`trace_x` 追 X 根因。
 - **网表自愈**：从 pyslang 诊断自动补 `+incdir+` / 包源并重编；失败时优雅降级，其余工具不受影响。
 - **一致性校验**：源码或波形变了但网表没更新会报警，绝不静默给错结果。
+- **波形对比**：`diff_waveforms` 对 pass/fail 两份波形定位首个分歧时刻，按分歧时间排序信号，时钟对齐采样过滤毛刺。
+- **波形查看器**：`open_wave_view` 让 agent 分析完直接弹浏览器波形，嫌疑信号 + 游标钉在出错时刻 + 分析说明弹窗；双波形 lockstep 对比；`get_view_state` 反向感知用户在看什么。
 - **部署友好**：stdio（一人一进程，零运维）/ HTTP 多会话 / 离线自包含包（隔离网）。
 
 ## 系统要求
@@ -283,6 +285,7 @@ wave-view pass.fst fail.fst --labels pass fail
 - 命令行打印 URL；桌面环境自动开浏览器，SSH/code agent 场景 IDE 终端自动转发端口点开即看。
 - agent 典型闭环：case 挂了 → `diff_waveforms(pass, fail)` 定位首分歧 → `signal_fanin` 回溯根因 → `open_wave_view` 双波形 + 分歧 marker + 分析说明弹窗一次呈现。
 - 分析说明是可收起的 log 弹窗，说明里的时刻引用（如 `[85000ps](#t=85000ps)`）点击即跳游标，游标/视口/marker 更新为无闪刷新。
+- 完整指南（MCP 工具参数、双向调试工作流、架构原理、部署与排障）见 [`docs/WAVE_VIEWER.md`](docs/WAVE_VIEWER.md)。
 
 ---
 
@@ -404,14 +407,16 @@ FST + C 系读取库（pylibfst）+ 进程常驻 + 随机访问，契合 AI 点�
 
 ```
 wave_mcp/
-  server.py              # MCP server，注册全部 27 工具
+  server.py              # MCP server，注册全部 31 工具
   session.py             # Session / session.json / 指纹校验 / 三层 definition_name
   pipeline.py            # prepare_session / prepare_static_session 编排
+  diff.py                # diff_waveforms 首分歧定位（时钟对齐采样）
   sources/               # fst_source + rtl_source
   netlist/               # slang_netlist / trace_engine / expr_eval / name_infer
-  cli/                   # wave-session / wave-vcd2fst
-deploy/                  # 离线 bundle 构建 + 安装
+  viewer/                # 波形查看器：manager / surver / translate / state / web 前端
+  cli/                   # wave-session / wave-vcd2fst / wave-view
+deploy/                  # 离线 bundle 构建 + 安装（含 Docker 一键流水线）
 examples/                # 示例库（见上表）
 tests/                   # 回归套件 run_regression.py
-docs/                    # DEPLOY_AIRGAP / SIMULATOR_COMPATIBILITY / XCELIUM_FST_GUIDE / THIRD_PARTY
+docs/                    # DEPLOY_AIRGAP / SIMULATOR_COMPATIBILITY / XCELIUM_FST_GUIDE / THIRD_PARTY / WAVE_VIEWER
 ```
