@@ -28,6 +28,9 @@ dependencies = [
     "pyslang>=11.0.0",
 ]
 
+[project.optional-dependencies]
+viewer = ["wave-mcp-viewer-assets"]
+
 [project.urls]
 Homepage = "https://github.com/Tencent/wave-mcp"
 Repository = "https://github.com/Tencent/wave-mcp"
@@ -37,6 +40,7 @@ Issues = "https://github.com/Tencent/wave-mcp/issues"
 wave-mcp = "wave_mcp.cli.main:main"
 wave-session = "wave_mcp.cli.build_session:main"
 wave-vcd2fst = "wave_mcp.cli.vcd2fst:main"
+wave-view = "wave_mcp.viewer.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

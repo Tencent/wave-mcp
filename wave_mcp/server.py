@@ -1,6 +1,7 @@
 """wave-mcp MCP server.
 
-Exposes 27 concise tools for waveform debug and static RTL analysis, backed
+Exposes 31 concise tools for waveform debug, static RTL analysis, waveform
+diff and the browser wave viewer, backed
 entirely by open-source sources (FST + RTL static analysis). No license
 required; any number of sessions can run concurrently. Static-only sessions
 (open_static_session) work from RTL sources alone — no waveform needed.
@@ -709,6 +710,123 @@ def modules_in_file(full_file_path: str, session_id: Optional[str] = None) -> di
     """Get all modules declared in a given file."""
     mods = _sess(session_id).rtl.modules_in_file(full_file_path)
     return {"count": len(mods), "modules": mods}
+
+
+# =============================================================================
+# 9. Waveform diff (pass/fail first-divergence localization)
+# =============================================================================
+@mcp.tool()
+def diff_waveforms(fst_a: str, fst_b: str,
+                   scope: Optional[str] = None,
+                   signals: Optional[List[str]] = None,
+                   clock: Optional[str] = None,
+                   after: Optional[str] = None) -> dict[str, Any]:
+    """Compare two FST waveforms (e.g. pass vs fail) and find the first divergence.
+
+    Turns "what changed between these runs" into one deterministic call:
+    returns the first divergence time, the earliest-diverging signals (prime
+    suspects; later ones are usually downstream contagion) and an honest
+    coverage flag. Follow up with signal_fanin/active_drivers on the earliest
+    diverger, then open_wave_view with both FSTs and a marker there.
+
+    Args:
+        fst_a: first FST path (conventionally the passing run).
+        fst_b: second FST path (conventionally the failing run).
+        scope: restrict comparison to signals under this instance path —
+            strongly recommended on full-chip waveforms.
+        signals: explicit signal paths to compare (overrides scope).
+        clock: sample on this clock's rising edges instead of raw events;
+            filters phase-jitter/glitch false divergences.
+        after: ignore differences before this time (e.g. "200ns" to skip
+            reset); default compares from time 0.
+    """
+    from . import diff as _diff
+    try:
+        return _diff.diff_waveforms(fst_a, fst_b, scope=scope,
+                                    signals=signals, clock=clock, after=after)
+    except (FileNotFoundError, ValueError, RuntimeError) as exc:
+        return {"status": "error", "error": str(exc)}
+
+
+# =============================================================================
+# 10. Wave viewer (browser-based, surver-streamed; assets optional)
+# =============================================================================
+def _viewer():
+    from .viewer.manager import ViewManager
+    return ViewManager.instance()
+
+
+@mcp.tool()
+def open_wave_view(fst_paths: List[str],
+                   signals: Optional[List[dict]] = None,
+                   cursor: Optional[dict] = None,
+                   viewport: Optional[dict] = None,
+                   markers: Optional[List[dict]] = None,
+                   diff: Optional[dict] = None,
+                   annotation: Optional[dict] = None,
+                   labels: Optional[List[str]] = None) -> dict[str, Any]:
+    """Open waveform(s) in the browser viewer and return the URL for the user.
+
+    Streams via a local surver process, so tens-of-GB FSTs open in
+    milliseconds. Give the returned URL to the user; IDE terminals
+    auto-forward localhost ports. Two fst_paths open a comparison view.
+
+    Args:
+        fst_paths: one FST (normal view) or two (diff view, e.g. [pass, fail]).
+        signals: initial signals, each {path, color?, group?, format?, source?}.
+        cursor: {time, unit} to pin the cursor (e.g. the failure time).
+        viewport: {from, to, unit} visible time window.
+        markers: [{time, unit, label?, color?}] annotations on the timeline.
+        diff: diff_waveforms result reference {source_a, source_b,
+            first_divergence} — auto-adds a red marker at the divergence.
+        annotation: {markdown, confidence?, evidence?} analysis note shown in
+            the log popup next to the waveform.
+        labels: display labels per waveform (e.g. ["pass", "fail"]).
+    """
+    try:
+        return _viewer().open_view(
+            fst_paths, signals=signals, cursor=cursor, viewport=viewport,
+            markers=markers, diff=diff,
+            annotations=[annotation] if annotation else None,
+            labels=labels)
+    except (FileNotFoundError, ValueError, RuntimeError) as exc:
+        return {"available": False, "error": str(exc)}
+
+
+@mcp.tool()
+def update_wave_view(view_id: str,
+                     signals: Optional[List[dict]] = None,
+                     cursor: Optional[dict] = None,
+                     viewport: Optional[dict] = None,
+                     markers: Optional[List[dict]] = None,
+                     annotation: Optional[dict] = None) -> dict[str, Any]:
+    """Update an open wave view in place (same URL, no reload for the user).
+
+    Omitted args keep their current value; lists replace entirely except
+    annotations, which append to the analysis log popup.
+    """
+    try:
+        return _viewer().update_view(
+            view_id, signals=signals, cursor=cursor, viewport=viewport,
+            markers=markers,
+            annotations=[annotation] if annotation else None)
+    except (ValueError, RuntimeError) as exc:
+        return {"available": False, "error": str(exc)}
+
+
+@mcp.tool()
+def get_view_state(view_id: str) -> dict[str, Any]:
+    """Read what the user currently sees in an open wave view.
+
+    Returns the actual state (cursor position, selected/displayed signals,
+    viewport, user_dirty) written back by the browser, plus a desired-state
+    summary. Use this to continue the conversation from where the user is
+    looking — e.g. analyze the signal at their cursor.
+    """
+    try:
+        return _viewer().get_state(view_id)
+    except (ValueError, RuntimeError) as exc:
+        return {"available": False, "error": str(exc)}
 
 
 # =============================================================================
