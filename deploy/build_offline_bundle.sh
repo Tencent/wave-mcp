@@ -33,6 +33,7 @@ VCD2FST_SRC=""
 DO_TAR=1
 TARGET_GLIBC="2.28"
 PYSLANG_WHEEL=""
+VIEWER_SRC=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -41,6 +42,7 @@ while [[ $# -gt 0 ]]; do
     --vcd2fst) VCD2FST_SRC="$2"; shift 2;;
     --target-glibc) TARGET_GLIBC="$2"; shift 2;;
     --pyslang-wheel) PYSLANG_WHEEL="$2"; shift 2;;
+    --viewer) VIEWER_SRC="$2"; shift 2;;
     --no-tar) DO_TAR=0; shift;;
     *) echo "unknown arg: $1"; exit 1;;
   esac
@@ -92,6 +94,28 @@ if [[ -n "$PYSLANG_WHEEL" ]]; then
   echo "[*] using self-built pyslang wheel: $(basename "$PYSLANG_WHEEL")"
   rm -f "$OUT/wheels"/pyslang-*.whl
   cp "$PYSLANG_WHEEL" "$OUT/wheels/"
+fi
+
+# viewer assets (optional): accept a prebuilt wave_mcp_viewer_assets wheel
+# or a raw asset dir (surver + wasm/), packed on the fly. For 2.17 targets
+# the surver inside MUST be the musl static build
+# (deploy/build_surver_static.sh) — the official binary needs glibc 2.34.
+if [[ -n "$VIEWER_SRC" ]]; then
+  if [[ -f "$VIEWER_SRC" && "$VIEWER_SRC" == *.whl ]]; then
+    echo "[*] bundling viewer assets wheel: $(basename "$VIEWER_SRC")"
+    cp "$VIEWER_SRC" "$OUT/wheels/"
+  elif [[ -d "$VIEWER_SRC" ]]; then
+    echo "[*] packing viewer assets from dir: $VIEWER_SRC"
+    "$REPO_ROOT/deploy/build_viewer_assets.sh" "$VIEWER_SRC" >/dev/null
+    cp "$REPO_ROOT"/deploy/viewer-assets-build/dist/wave_mcp_viewer_assets-*.whl \
+       "$OUT/wheels/"
+  else
+    echo "ERROR: --viewer must be a .whl or an asset dir"; exit 1
+  fi
+  if [[ "$TARGET_GLIBC" == "2.17" ]]; then
+    echo "    NOTE: verify the bundled surver is the musl static build;"
+    echo "          official surver binaries need glibc >= 2.34."
+  fi
 fi
 echo "    wheels: $(ls "$OUT/wheels" | wc -l) files"
 
