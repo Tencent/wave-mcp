@@ -10,7 +10,7 @@ English | [简体中文](README.md)
 
 **wave-mcp is an open-source RTL waveform debug MCP server from the Penglai Lab verification team
 at Tencent**, a debugging toolkit for LLMs: it reads **FST waveforms + an RTL netlist** and
-provides **27 MCP tools** for hierarchy exploration, signal queries, driver analysis, and
+provides **31 MCP tools** for hierarchy exploration, signal queries, driver analysis, waveform diff, a browser wave viewer, and
 value/X tracing. **MIT licensed, no commercial license required, unlimited concurrency.**
 
 > As long as your simulator can dump **FST** (Verilator `--trace-fst`, Icarus, or by converting
@@ -43,7 +43,7 @@ XiangShan added to the test set:
 | Tool calls | 3.1 million+ calls all passed |
 | Driver analysis | drivers / fan-in / connectivity / tracing fully validated on production projects |
 | Huge modules | **million-scale scopes analyzed stably** |
-| Tool coverage | All 27/27 tools exercised |
+| Tool coverage | all 27 analysis tools exercised; the 4 viewer/diff tools are covered by 113+ unit and browser e2e assertions |
 
 ![Tool call distribution](docs/images/tool-calls-distribution.png)
 
@@ -128,7 +128,7 @@ Or call the `prepare_session` MCP tool directly from your Code Agent (see below)
 
 ## CLI queries (`wave-mcp query`)
 
-All 27 tools are also callable from the terminal, without an agent:
+All 31 tools are also callable from the terminal, without an agent:
 
 ```bash
 wave-mcp query --list                            # list every tool
@@ -183,6 +183,13 @@ prepare_session({
 
 ### Waveform-free static analysis (usable before simulation)
 
+A waveform has values but no connectivity: it can tell you a signal is 0 at this cycle, but not
+who drives it or which conditions gate the driving statement. wave-mcp extracts that layer from
+the RTL source at session build time: pyslang fully elaborates the design (parameters, generate
+blocks, interfaces all expanded) and the result is persisted as a **static design database**.
+Driver, fan-in/fan-out, connectivity and declaration queries all run on this database, with no
+simulator and no commercial tooling involved.
+
 `open_static_session` builds a netlist and opens a session from RTL alone: **no waveform, no
 simulation**. Great for pre-simulation code understanding: interface queries, driver/fan-in
 exploration, hierarchy browsing, code review.
@@ -200,10 +207,53 @@ open_static_session({
 When the simulation later produces a waveform, call `prepare_session` with the **same out_dir**
 to upgrade to a full session; the built netlist is reused.
 
+Every driver record carries full context: driver kind, source location, statement snippet, RHS
+source, and **every gating condition stacked on that statement** (as a 4-state-evaluable
+expression tree). From the UART design in example B:
+
+```yaml
+# wave-mcp query signal_drivers --session ... --full_path uart_top.u_tx.tx_serial
+drivers:
+  - kind: nonblocking
+    file: examples/static_analysis/uart_top.sv
+    line: 91
+    snippet: tx_serial <= shift_reg[0];
+    rhs: uart_top.u_tx.shift_reg
+    control: uart_top.u_tx.state, uart_top.u_tx.tick, ...
+    guard:                          # every condition stacked on this statement
+      - {cond: !rst_n, expect: 0}
+      - {cond: tick, expect: 1}
+      - {cond: state == DATA, expect: 1}
+```
+
+Once a waveform is available, `active_drivers` evaluates the guards against FST values
+(4-state) and tells you **which driving statement is active at a given cycle**; `trace_value` /
+`trace_x` walk this graph backwards across module boundaries with a real waveform value at
+every node. Static connectivity and dynamic waveform values meet in the same toolset, which is
+something a purely static design database cannot offer.
+
+**Driver analysis and tracing are hardened to production-grade robustness**, not demo features:
+
+- **Fully validated on real projects**: drivers / fan-in / connectivity / tracing are fully
+  validated on a production chip project, plus OpenTitan (27 IPs) and XiangShan (38 IPs)
+  exhaustively tested per sub-module hierarchy; functional correctness cross-checked with
+  11M+ assertions (file/line actually exist, drivers↔loads symmetry, trace tree validity,
+  not just "non-empty output").
+- **Elaboration failures don't take the session down**: a broken top (e.g. a UVM top that
+  cannot resolve uvm_pkg) only affects that top, and a healthy DUT netlist is still extracted;
+  missing `+incdir+` / package sources are self-healed from pyslang diagnostics and recompiled;
+  if it still fails, the netlist degrades explicitly and value queries keep working. Never a
+  silently wrong answer.
+- **Partial netlists still serve**: when elaboration has errors but modules were extracted, the
+  netlist is served with a `partial` flag, and `session_info`'s netlist_health reports the
+  actual coverage so you know the confidence boundary of every answer.
+
 ### VCD → FST conversion (vcd2fst setup, optional)
 
-If your simulator only dumps VCD (e.g. xrun), convert it to FST first: **~1/50 the size, fast
-random access**. Conversion relies on the `vcd2fst` tool shipped with GTKWave:
+If your simulator only dumps VCD (e.g. Questa), convert it to FST first: **~1/50 the size, fast
+random access**. Xcelium (xrun) users can skip VCD entirely and dump FST directly via the
+fstdumper plugin, see the [Xcelium FST guide](docs/XCELIUM_FST_GUIDE.md).
+Conversion relies on the `vcd2fst` tool shipped with GTKWave:
 
 ```bash
 # Debian/Ubuntu
@@ -235,7 +285,7 @@ wave-session --vcd sim/dump.vcd --top top_tb --filelist rtl.f --out sessions/mod
 
 ---
 
-## Tools (27, in 8 categories)
+## Tools (31, in 10 categories)
 
 | Category | Tools | Notes |
 | --- | --- | --- |
@@ -246,10 +296,35 @@ wave-session --vcd sim/dump.vcd --top top_tb --filelist rtl.f --out sessions/mod
 | Values | `signal_values` / `signal_values_in_range` / `signal_value_at` | FST's strength, random access |
 | Driver analysis | `signal_connectivity` / `signal_drivers` / `signal_loads` / `signal_fanin` / `active_drivers` / `driver_contributors` | pyslang netlist (statically precise) + 4-value branch evaluation |
 | Value / X tracing | `trace_value` / `trace_x` | netlist × FST back-traversal, cross-module drill-down |
+| Waveform diff | `diff_waveforms` | first-divergence localization between a pass and a fail run: exact divergence time, ranked diverging signals, clock-aligned sampling to filter glitches; divergers feed straight into `signal_fanin`/`active_drivers` for causal backtracking |
+| Wave viewer | `open_wave_view` / `update_wave_view` / `get_view_state` | agent-driven browser waveform: suspect signals + cursor pinned at the failure time + an analysis-log popup; dual-waveform compare view with lockstep sync; `get_view_state` tells the agent what the user is looking at (conversational two-way debug) |
 | Files | `list_files` / `find_files` / `modules_in_file` | filelist + pyslang netlist |
 
 > The driver-analysis and tracing categories require the pyslang netlist (pass the right
 > filelist/incdirs/defines to `prepare_session`).
+> The viewer category needs the optional assets package: `pip install wave-mcp[viewer]`
+> (Surfer WASM + surver, distributed separately under EUPL-1.2; the core stays MIT).
+> Without it the viewer tools degrade gracefully with a hint; analysis tools are unaffected.
+
+### Wave viewer (wave-view)
+
+```bash
+# open one waveform (tens-of-GB FSTs open instantly: surver streams
+# server-side, the browser fetches only what's on screen)
+wave-view dump.fst --signals top.u_dma.req_valid --cursor 1523400ps
+
+# dual-waveform compare view (two panes, lockstep zoom/cursor sync)
+wave-view pass.fst fail.fst --labels pass fail
+```
+
+- The CLI prints a URL; desktops auto-open a browser, and in SSH / code-agent
+  sessions the IDE terminal auto-forwards the localhost port.
+- Typical agent loop: a case fails → `diff_waveforms(pass, fail)` pinpoints the
+  first divergence → `signal_fanin` backtracks the cause → `open_wave_view`
+  presents both waveforms, a divergence marker and the analysis popup at once.
+- The analysis log is a collapsible popup; time references inside it (e.g.
+  `[85000ps](#t=85000ps)`) jump the cursor on click, and cursor/viewport/marker
+  updates are flicker-free.
 
 ---
 
@@ -285,21 +360,26 @@ wave-session --vcd sim/dump.vcd --top top_tb --filelist rtl.f --out sessions/mod
 
 ## FAQ
 
-**Q1: Why no FSDB / SHM support yet?**
+**Q1: Why no FSDB / SHM support?**
 FSDB and SHM are closed, proprietary waveform formats: reading their full data requires
 commercial tooling, and the license cost makes it hard to sustain the high-concurrency,
 massive-volume waveform analysis that AI agents will generate once they are deeply embedded
 in the verification workflow. wave-mcp takes the open FST + VCD route precisely to serve
 thousands of concurrent waveform analyses with a high-performance open-source stack.
-FSDB and SHM support is on our roadmap, so stay tuned.
+FSDB support (conversion to FST) is on our roadmap. SHM is not planned: Cadence Xcelium
+users are encouraged to dump FST directly from the simulator (license-free, zero
+conversion), see the [Xcelium FST guide](docs/XCELIUM_FST_GUIDE.md).
 
 **Q2: Do I need a commercial license?**
 No. MIT licensed, unlimited concurrency, unlimited machines. This is the core difference from
 commercial debug MCPs.
 
 **Q3: Which simulators are supported?**
-Any simulator that produces FST or VCD: Verilator (`--trace-fst`), Icarus, xrun, VCS, etc.
+Any simulator that produces FST or VCD: Verilator (`--trace-fst`), Icarus (`-fst`),
+Xcelium ([FST via fstdumper](docs/XCELIUM_FST_GUIDE.md)), VCS (VCD conversion), etc.
 wave-mcp never runs a simulator; it consumes the waveform you already produced.
+See [simulator compatibility](docs/SIMULATOR_COMPATIBILITY.md) for per-simulator
+FST paths and validation status.
 
 **Q4: Is the data accurate?**
 Yes. Fully validated on a real production chip project with 2.25M signals at 100% value
@@ -357,8 +437,16 @@ A **session** = one isolated debug context, tied together by a `session.json` ma
 
 - **No naive parsing of large VCDs** (slow, easy to OOM); uses **FST + a C-based reader library +
   a resident process + random access**.
-- **The netlist is built once offline and persisted** (`maps.json`: DriverMap/FanInMap/LoadMap/
-  LocMap + instance_tree); loaded at startup, never rebuilt per query.
+- **The netlist is elaborated once and persisted for reuse**: the pyslang result is written to
+  `netlist/maps.json` (DriverMap/FanInMap/LoadMap/LocMap + instance_tree), a plain JSON file any
+  script can read. Loaded at startup, never rebuilt per query; unchanged sources skip
+  re-elaboration, and upgrading a static session to a waveform session reuses the same netlist
+  (freshness is checked against source file mtimes).
+- **All generated artifacts live in the session directory**: `prepare_session` writes only to
+  the `out_dir` you choose: `session.json` (manifest + fingerprints), `netlist/maps.json`
+  (the netlist), plus a converted `.fst` only when the input is a VCD. Queries run entirely
+  in memory with no on-disk index or cache, and nothing is written into your RTL sources or
+  the original waveform directory; deleting the session directory is a complete cleanup.
 - **MCP responses**: `structuredContent` (machine-readable) + `content[].text` human-readable text.
 
 ## License
@@ -372,7 +460,7 @@ See [`docs/THIRD_PARTY.md`](docs/THIRD_PARTY.md).
 
 ```
 wave_mcp/
-  server.py              # MCP server, registers all 27 tools
+  server.py              # MCP server, registers all 31 tools
   session.py             # Session / session.json / fingerprint check / definition_name
   pipeline.py            # prepare_session / prepare_static_session orchestration
   sources/               # fst_source + rtl_source
@@ -381,5 +469,5 @@ wave_mcp/
 deploy/                  # offline bundle build + install
 examples/                # example library (see table above)
 tests/                   # regression entry run_regression.py
-docs/                    # DEPLOY_AIRGAP / SIMULATOR_COMPATIBILITY / THIRD_PARTY
+docs/                    # DEPLOY_AIRGAP / SIMULATOR_COMPATIBILITY / XCELIUM_FST_GUIDE / THIRD_PARTY
 ```

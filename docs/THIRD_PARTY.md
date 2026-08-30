@@ -43,3 +43,22 @@ it; only the MIT FST library plus the above converter sources are used.
 
 If the offline bundle embeds a standalone CPython (python-build-standalone),
 CPython is distributed under the Python Software Foundation License (PSF).
+
+## Wave viewer assets (optional `wave-mcp-viewer-assets` package only)
+
+The optional viewer (`wave-view`, `open_wave_view`) consumes a SEPARATE
+assets package, `wave-mcp-viewer-assets`, containing:
+
+| Component | License | Project |
+| --- | --- | --- |
+| Surfer (WASM waveform viewer) | EUPL-1.2 | https://gitlab.com/surfer-project/surfer |
+| surver (Surfer remote server) | EUPL-1.2 | https://gitlab.com/surfer-project/surfer |
+
+These EUPL-1.2 components are NOT bundled into the MIT-licensed `wave-mcp`
+core package or repository. They are an aggregation: `surver` runs as a
+separate subprocess and the WASM bundle is served as static files to the
+user's browser; neither links into wave-mcp. The assets package is built by
+`deploy/build_viewer_assets.sh`, which records the Surfer version; a
+statically-linked `surver` for old-glibc hosts can be reproduced with
+`deploy/build_surver_static.sh`. wave-mcp's own shell assets
+(`wave_mcp/viewer/web/`) are original MIT-licensed code.
