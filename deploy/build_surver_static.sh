@@ -18,6 +18,26 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 OUT=${2:-"$HERE/surver-static"}
 mkdir -p "$OUT"
 
+# cargo-about template: one heading per crate with its license text.
+# Mirrors surfer's own about.hbs approach (upstream has about.toml).
+cat > "$OUT/crates-about.hbs" <<'EOF'
+# Crate licenses for surver
+
+This file lists every crate statically linked into the surver binary
+and its license text, generated with cargo-about. The surver binary is
+an unmodified build of the Surfer project (EUPL-1.2); the crates below
+carry their own permissive licenses.
+
+{{#each licenses}}
+## {{{name}}}
+
+Used by: {{#each used_by}}{{{crate.name}}} {{/each}}
+
+{{{text}}}
+
+{{/each}}
+EOF
+
 # rust:alpine ships a musl toolchain natively; build only the surver crate.
 docker run --rm -v "$OUT":/out rust:alpine sh -exc "
   apk add --no-cache git musl-dev openssl-dev openssl-libs-static pkgconfig
@@ -35,10 +55,26 @@ docker run --rm -v "$OUT":/out rust:alpine sh -exc "
     echo 'WARNING: binary may not be fully static:'
     ldd /out/surver || true
   fi
+  # license report for every crate statically linked into surver
+  # (MIT/Apache-2.0 dual etc.); ship it next to the binary so the
+  # viewer assets package can redistribute the notices.
+  cargo install --locked --quiet cargo-about || cargo install cargo-about
+  cargo about generate --fail /out/crates-about.hbs \
+      > /out/surver-crate-licenses.html 2>/dev/null \
+    || echo 'WARNING: cargo-about generate failed; license report missing'
+  cargo about generate --fail /out/crates-about.hbs \
+      | python3 -c 'import html,re,sys;t=sys.stdin.read();t=re.sub(r\"<[^>]+>\",\" \",t);print(re.sub(r\"\\n{3,}\",\"\\n\\n\",html.unescape(t)))' \
+      > /out/surver-crate-licenses.txt 2>/dev/null \
+    || true
 "
 
 echo "built: $OUT/surver"
 file "$OUT/surver" || true
+if [[ -f "$OUT/surver-crate-licenses.txt" ]]; then
+  echo "crate license report: $OUT/surver-crate-licenses.txt (+ .html)"
+  echo "  -> build_viewer_assets.sh picks it up automatically when the"
+  echo "     surver binary is placed as <asset_dir>/surver next to it."
+fi
 echo
 echo "verify on the oldest target machine:  $OUT/surver --help"
 echo "then place it into the viewer asset dir as <asset_dir>/surver and"
