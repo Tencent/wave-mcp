@@ -67,6 +67,14 @@ def main():
                        [PY, os.path.join(HERE, "unit", "smoke_test.py")]))
     results.append(run("unit/definition_name",
                        [PY, os.path.join(HERE, "unit", "test_definition_name.py")]))
+    results.append(run("unit/diff",
+                       [PY, os.path.join(HERE, "unit", "test_diff.py")]))
+    results.append(run("unit/viewer",
+                       [PY, os.path.join(HERE, "unit", "test_viewer.py")]))
+
+    # ---- viewer browser e2e (self-skips without assets/playwright) ---------
+    results.append(run("viewer/e2e",
+                       [PY, os.path.join(HERE, "viewer_e2e.py")]))
 
     # ---- 4-state suites (need iverilog; regenerate waves for a fresh run) --
     if shutil.which("iverilog") and shutil.which("vvp"):
