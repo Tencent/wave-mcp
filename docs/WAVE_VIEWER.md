@@ -1,5 +1,7 @@
 # 波形查看器（wave-view）完全指南
 
+[English version](WAVE_VIEWER.en.md)
+
 wave-mcp 的分析工具回答"为什么错"，波形查看器负责"让你亲眼看到"。agent 定位到出错时刻后，一条 `open_wave_view` 就能在你的浏览器里弹出波形：嫌疑信号已经加好，游标钉在出错时刻，旁边的弹窗里是它的分析说明。你拖动游标继续看，agent 还能通过 `get_view_state` 知道你正看到哪里，接着往下聊。
 
 本文覆盖查看器的安装、CLI、三个 MCP 工具、agent 工作流、架构与原理、部署场景和故障排查。快速上手看 [README](../README.md) 的"波形查看器"一节即可，这里是全量细节。

@@ -331,7 +331,7 @@ wave-view pass.fst fail.fst --labels pass fail
   `[85000ps](#t=85000ps)`) jump the cursor on click, and cursor/viewport/marker
   updates are flicker-free.
 - Full guide (MCP tool parameters, two-way debug workflow, architecture,
-  deployment and troubleshooting): [`docs/WAVE_VIEWER.md`](docs/WAVE_VIEWER.md).
+  deployment and troubleshooting): [`docs/WAVE_VIEWER.en.md`](docs/WAVE_VIEWER.en.md).
 
 ---
 
