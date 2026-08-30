@@ -93,6 +93,10 @@ CRATE_REPORT="$ASSET_DIR/surver-crate-licenses.txt"
 if [[ -f "$CRATE_REPORT" ]]; then
   cp "$CRATE_REPORT" "$PKG/surver-crate-licenses.txt"
 fi
+if [[ -d "$ASSET_DIR/crates-license-files" ]]; then
+  mkdir -p "$PKG/crates-license-files"
+  cp "$ASSET_DIR"/crates-license-files/*.txt "$PKG/crates-license-files/" 2>/dev/null || true
+fi
 
 cat > "$OUT/pyproject.toml" <<EOF
 [build-system]
@@ -117,6 +121,7 @@ wave_mcp_viewer_assets = [
     "LICENSE-EUPL-1.2.txt",
     "NOTICE",
     "surver-crate-licenses.txt",
+    "crates-license-files/**",
 ]
 EOF
 

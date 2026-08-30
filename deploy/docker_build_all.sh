@@ -105,6 +105,16 @@ stage_viewer() {  # $1 = surver binary to embed
   rm -rf "$staged"; mkdir -p "$staged"
   cp -r "$VIEWER_SRC/wasm" "$staged/wasm"
   cp "$surver_bin" "$staged/surver"; chmod +x "$staged/surver"
+  # carry the crate license report + license-file texts through staging so
+  # build_viewer_assets.sh embeds them into the assets package
+  [[ -f "$VIEWER_SRC/surver-crate-licenses.txt" ]] && \
+    cp "$VIEWER_SRC/surver-crate-licenses.txt" "$staged/"
+  [[ -f "$CACHE/surver-static/surver-crate-licenses.txt" ]] && \
+    cp "$CACHE/surver-static/surver-crate-licenses.txt" "$staged/" 2>/dev/null || true
+  [[ -d "$VIEWER_SRC/crates-license-files" ]] && \
+    cp -r "$VIEWER_SRC/crates-license-files" "$staged/"
+  [[ -d "$CACHE/surver-static/crates-license-files" ]] && \
+    cp -r "$CACHE/surver-static/crates-license-files" "$staged/" 2>/dev/null || true
   echo "/cache/viewer-staged"
 }
 
