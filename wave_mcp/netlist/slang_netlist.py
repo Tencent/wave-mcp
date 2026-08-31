@@ -704,19 +704,39 @@ def _summarize_diagnostics(diags, sm, max_items: int = 40) -> dict:
     Groups by diagnostic code, counts errors vs warnings, samples a few
     human-readable messages, and surfaces which classes of missing inputs
     (include dirs / defines / package sources) likely caused a failed build.
+
+    Severity re-classification: slang ships style-lint diagnostics (EmptyBody,
+    SignCompare, ...) flagged as Error severity, but they are purely stylistic
+    and elaboration continues normally with them present. Counting them as
+    errors made ``netlist_health.trust`` sink to ``partial`` on clean real
+    designs (measured 2026-08-31: 29 of 33 "errors" on a healthy filelist were
+    these two codes alone). They are counted in ``lints`` and kept in
+    ``by_code``/``samples`` unchanged, but excluded from ``errors``/``partial``.
     """
     try:
         de = ps.DiagnosticEngine(sm)
     except Exception:
         de = None
+    # style-lint diagnostics that carry Error severity in slang but are not
+    # real build blockers. Matched as substrings of the code string, e.g.
+    # "DiagCode(Error, EmptyBody)". Keep this list to codes verified on real
+    # designs; unknown codes keep their native severity.
+    _LINT_CODES = ("EmptyBody", "SignCompare", "WidthCompare",
+                   "IntBoolConv", "ImplicitConv")
     by_code: Dict[str, int] = {}
     samples: List[dict] = []
     n_err = 0
+    n_lint = 0
+    lint_by_code: Dict[str, int] = {}
     for dg in diags:
         code = str(getattr(dg, "code", "")).replace("DiagCode(", "").rstrip(")")
         by_code[code] = by_code.get(code, 0) + 1
         is_err = bool(getattr(dg, "isError", False))
-        if is_err:
+        if is_err and any(c in code for c in _LINT_CODES):
+            # reclassified: stylistic slang lint, not a build blocker
+            n_lint += 1
+            lint_by_code[code] = lint_by_code.get(code, 0) + 1
+        elif is_err:
             n_err += 1
         if len(samples) < max_items:
             text = ""
@@ -736,6 +756,8 @@ def _summarize_diagnostics(diags, sm, max_items: int = 40) -> dict:
     return {
         "total": len(diags),
         "errors": n_err,
+        "lints": n_lint,
+        "lint_by_code": dict(sorted(lint_by_code.items(), key=lambda x: -x[1])),
         "by_code": dict(sorted(by_code.items(), key=lambda x: -x[1])),
         "samples": samples,
         "actionable_hints": hints,

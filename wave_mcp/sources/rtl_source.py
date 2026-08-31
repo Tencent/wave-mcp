@@ -117,6 +117,7 @@ class RtlSource:
         # that must not be mistaken for a broken netlist.
         errors = int(dsum.get("errors", 0) or 0)
         warnings = max(diagnostics - errors, 0)
+        n_lints = int(dsum.get("lints", 0) or 0)
         if errors == 0 and not is_partial:
             status = "ok" if skipped == 0 else "ok_with_warnings"
             trust = "full"
@@ -132,12 +133,17 @@ class RtlSource:
             "diagnostics": diagnostics,
             "diagnostic_errors": errors,
             "diagnostic_warnings": warnings,
+            # slang style-lint diagnostics reclassified out of the error count
+            # (EmptyBody/SignCompare/...): informational, never affect trust.
+            "diagnostic_lints": n_lints,
             "skipped_members": skipped,
             "source_files": len(self.files),
             "note": ("clean elaboration" if trust == "full" else
-                     f"{errors} error(s), {warnings} warning(s); warnings are "
-                     "usually harmless UVM lint. Some connectivity/trace paths "
-                     "may be incomplete only if errors > 0."),
+                     f"{errors} error(s), {warnings} warning(s)"
+                     + (f", {n_lints} style lint(s)" if n_lints else "")
+                     + "; warnings are usually harmless UVM lint. Some "
+                     "connectivity/trace paths may be incomplete only if "
+                     "errors > 0."),
         }
         # surface actionable guidance (missing include/define/package) so the
         # user knows exactly what to add to make the netlist complete.

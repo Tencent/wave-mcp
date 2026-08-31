@@ -30,9 +30,17 @@ import os
 import re
 from typing import Callable, Dict, Iterable, Optional, Set
 
-# module / macromodule / primitive declarations (interfaces/packages excluded on
-# purpose: those are not instantiated as design "modules" in the hierarchy view).
-_MODULE_RE = re.compile(r"^\s*(?:module|macromodule)\s+([A-Za-z_]\w*)", re.MULTILINE)
+# module / macromodule / primitive / interface declarations.
+# Interfaces ARE included (2026-08-31): UVM tb filelists (e.g. a DUT-only
+# rtl.f) declare them and their instances show up in the FST scope tree, so
+# without them the exact-match tiers can never resolve e.g. ``u_clk_rst_if``
+# -> ``clk_rst_if``. ``interface class`` is excluded from the capture via the
+# lookahead (it is a class definition, not a scope-producing declaration).
+# packages / programs stay excluded: packages are never instantiated as
+# hierarchy scopes, and program instances are rare enough to decide later.
+_MODULE_RE = re.compile(
+    r"^\s*(?:module|macromodule|interface)(?!_)\s+(?!class\b)([A-Za-z_]\w*)",
+    re.MULTILINE)
 
 # instance-name prefixes commonly used in RTL/TB coding styles. Stripped before
 # matching so ``U_DECODE`` / ``u_decode`` both resolve to ``decode``.
@@ -104,6 +112,20 @@ def infer_definition(instance_name: str, known: Dict[str, str],
         return None
     if stripped in known:
         return known[stripped]
+    # Xcelium concatenated scope names: ``u_eci2apb__apb_slave_if`` is the
+    # instance ``u_eci2apb`` bound to interface ``apb_slave_if``. The segment
+    # after the last ``__`` is a real declared name, so exact match on it is
+    # declaration-backed (same confidence as tiers 1-2). Measured gap
+    # 2026-08-31: interface scopes like ``top_tb.u_eci2apb__apb_slave_if``
+    # stayed ``definition_name = null`` without this.
+    if "__" in instance_name:
+        tail = instance_name.rsplit("__", 1)[-1]
+        tl = tail.lower()
+        if tl in known:
+            return known[tl]
+        tl = _strip_prefix(tail).lower()
+        if tl and tl in known:
+            return known[tl]
     if not allow_prefix:
         return None
     # interface instances (``*_if`` / ``*_vif`` / ...) are not module instances:
