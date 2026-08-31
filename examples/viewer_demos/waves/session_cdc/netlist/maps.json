@@ -1,0 +1,666 @@
+{
+  "tool": "pyslang",
+  "version": "11.0.0",
+  "top": "cdc_tb",
+  "diagnostics": 0,
+  "diagnostics_summary": {
+    "total": 0,
+    "errors": 0,
+    "lints": 0,
+    "lint_by_code": {},
+    "by_code": {},
+    "samples": [],
+    "actionable_hints": []
+  },
+  "partial": false,
+  "parse_errors": [],
+  "auto_resolved": {
+    "rounds": 0,
+    "added_incdirs": [],
+    "added_files": [],
+    "uvm_incdirs": []
+  },
+  "failed_tops": [],
+  "modules": {
+    "cdc_tb": {
+      "name": "cdc_tb",
+      "file": "rtl/cdc/cdc_top.sv",
+      "line": 48,
+      "ports": {},
+      "signals": {
+        "clk_fast": {
+          "kind": "variable",
+          "width": 1,
+          "line": 49,
+          "file": "rtl/cdc/cdc_top.sv"
+        },
+        "clk_slow": {
+          "kind": "variable",
+          "width": 1,
+          "line": 49,
+          "file": "rtl/cdc/cdc_top.sv"
+        },
+        "rst_n": {
+          "kind": "variable",
+          "width": 1,
+          "line": 49,
+          "file": "rtl/cdc/cdc_top.sv"
+        },
+        "trigger": {
+          "kind": "variable",
+          "width": 1,
+          "line": 49,
+          "file": "rtl/cdc/cdc_top.sv"
+        },
+        "pulse_seen": {
+          "kind": "net",
+          "width": 1,
+          "line": 50,
+          "file": "rtl/cdc/cdc_top.sv"
+        },
+        "pulse_count": {
+          "kind": "net",
+          "width": 8,
+          "line": 51,
+          "file": "rtl/cdc/cdc_top.sv"
+        },
+        "k": {
+          "kind": "variable",
+          "width": 32,
+          "line": 66,
+          "file": "rtl/cdc/cdc_top.sv"
+        }
+      },
+      "drivers": {
+        "pulse_seen": [
+          {
+            "kind": "instance_port",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/cdc/cdc_top.sv",
+            "line": 53,
+            "snippet": "cdc_top dut (.clk_fast(clk_fast), .rst_n(rst_n), .trigger(trigger),",
+            "port_ref": {
+              "instance": "dut",
+              "def": "cdc_top",
+              "port": "pulse_seen",
+              "direction": "output"
+            }
+          }
+        ],
+        "pulse_count": [
+          {
+            "kind": "instance_port",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/cdc/cdc_top.sv",
+            "line": 53,
+            "snippet": "cdc_top dut (.clk_fast(clk_fast), .rst_n(rst_n), .trigger(trigger),",
+            "port_ref": {
+              "instance": "dut",
+              "def": "cdc_top",
+              "port": "pulse_count",
+              "direction": "output"
+            }
+          }
+        ],
+        "clk_fast": [
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/cdc/cdc_top.sv",
+            "line": 61,
+            "snippet": "initial clk_fast = 0;"
+          },
+          {
+            "kind": "blocking",
+            "rhs": [
+              "clk_fast"
+            ],
+            "control": [],
+            "guard": [],
+            "file": "rtl/cdc/cdc_top.sv",
+            "line": 62,
+            "snippet": "always #10 clk_fast = ~clk_fast;"
+          }
+        ],
+        "clk_slow": [
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/cdc/cdc_top.sv",
+            "line": 63,
+            "snippet": "initial begin clk_slow = 0; #13; end"
+          },
+          {
+            "kind": "blocking",
+            "rhs": [
+              "clk_slow"
+            ],
+            "control": [],
+            "guard": [],
+            "file": "rtl/cdc/cdc_top.sv",
+            "line": 64,
+            "snippet": "always #25 clk_slow = ~clk_slow;"
+          }
+        ],
+        "rst_n": [
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/cdc/cdc_top.sv",
+            "line": 68,
+            "snippet": "rst_n = 0; trigger = 0;"
+          },
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/cdc/cdc_top.sv",
+            "line": 69,
+            "snippet": "#15 rst_n = 1;"
+          }
+        ],
+        "trigger": [
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/cdc/cdc_top.sv",
+            "line": 68,
+            "snippet": "rst_n = 0; trigger = 0;"
+          },
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/cdc/cdc_top.sv",
+            "line": 71,
+            "snippet": "@(posedge clk_fast); trigger = 1;"
+          },
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/cdc/cdc_top.sv",
+            "line": 72,
+            "snippet": "@(posedge clk_fast); trigger = 0;"
+          }
+        ]
+      },
+      "fanin": {
+        "pulse_seen": [
+          "dut.pulse_seen"
+        ],
+        "pulse_count": [
+          "dut.pulse_count"
+        ],
+        "clk_fast": [
+          "clk_fast"
+        ],
+        "clk_slow": [
+          "clk_slow"
+        ],
+        "rst_n": [],
+        "trigger": [],
+        "dut.clk_fast": [
+          "clk_fast"
+        ],
+        "dut.rst_n": [
+          "rst_n"
+        ],
+        "dut.trigger": [
+          "trigger"
+        ],
+        "dut.clk_slow": [
+          "clk_slow"
+        ]
+      },
+      "loads": {
+        "dut.pulse_seen": [
+          "pulse_seen"
+        ],
+        "dut.pulse_count": [
+          "pulse_count"
+        ],
+        "clk_fast": [
+          "clk_fast",
+          "dut.clk_fast"
+        ],
+        "clk_slow": [
+          "clk_slow",
+          "dut.clk_slow"
+        ],
+        "rst_n": [
+          "dut.rst_n"
+        ],
+        "trigger": [
+          "dut.trigger"
+        ]
+      },
+      "loc": {
+        "clk_fast": {
+          "file": "rtl/cdc/cdc_top.sv",
+          "line": 49
+        },
+        "clk_slow": {
+          "file": "rtl/cdc/cdc_top.sv",
+          "line": 49
+        },
+        "rst_n": {
+          "file": "rtl/cdc/cdc_top.sv",
+          "line": 49
+        },
+        "trigger": {
+          "file": "rtl/cdc/cdc_top.sv",
+          "line": 49
+        },
+        "pulse_seen": {
+          "file": "rtl/cdc/cdc_top.sv",
+          "line": 50
+        },
+        "pulse_count": {
+          "file": "rtl/cdc/cdc_top.sv",
+          "line": 51
+        },
+        "k": {
+          "file": "rtl/cdc/cdc_top.sv",
+          "line": 66
+        }
+      },
+      "instances": [
+        {
+          "def": "cdc_top",
+          "name": "dut",
+          "conns": {
+            "clk_fast": "clk_fast",
+            "rst_n": "rst_n",
+            "trigger": "trigger",
+            "clk_slow": "clk_slow",
+            "pulse_seen": "pulse_seen",
+            "pulse_count": "pulse_count"
+          },
+          "conn_dirs": {
+            "clk_fast": "input",
+            "rst_n": "input",
+            "trigger": "input",
+            "clk_slow": "input",
+            "pulse_seen": "output",
+            "pulse_count": "output"
+          },
+          "line": 53
+        }
+      ],
+      "skipped_members": 0
+    },
+    "cdc_top": {
+      "name": "cdc_top",
+      "file": "rtl/cdc/cdc_top.sv",
+      "line": 15,
+      "ports": {
+        "clk_fast": {
+          "direction": "input",
+          "width": 1,
+          "type": "port",
+          "line": 16,
+          "file": "rtl/cdc/cdc_top.sv"
+        },
+        "rst_n": {
+          "direction": "input",
+          "width": 1,
+          "type": "port",
+          "line": 17,
+          "file": "rtl/cdc/cdc_top.sv"
+        },
+        "trigger": {
+          "direction": "input",
+          "width": 1,
+          "type": "port",
+          "line": 18,
+          "file": "rtl/cdc/cdc_top.sv"
+        },
+        "clk_slow": {
+          "direction": "input",
+          "width": 1,
+          "type": "port",
+          "line": 19,
+          "file": "rtl/cdc/cdc_top.sv"
+        },
+        "pulse_seen": {
+          "direction": "output",
+          "width": 1,
+          "type": "port",
+          "line": 20,
+          "file": "rtl/cdc/cdc_top.sv"
+        },
+        "pulse_count": {
+          "direction": "output",
+          "width": 8,
+          "type": "port",
+          "line": 21,
+          "file": "rtl/cdc/cdc_top.sv"
+        }
+      },
+      "signals": {
+        "clk_fast": {
+          "kind": "net",
+          "width": 1,
+          "line": 16,
+          "file": "rtl/cdc/cdc_top.sv"
+        },
+        "rst_n": {
+          "kind": "net",
+          "width": 1,
+          "line": 17,
+          "file": "rtl/cdc/cdc_top.sv"
+        },
+        "trigger": {
+          "kind": "net",
+          "width": 1,
+          "line": 18,
+          "file": "rtl/cdc/cdc_top.sv"
+        },
+        "clk_slow": {
+          "kind": "net",
+          "width": 1,
+          "line": 19,
+          "file": "rtl/cdc/cdc_top.sv"
+        },
+        "pulse_seen": {
+          "kind": "variable",
+          "width": 1,
+          "line": 20,
+          "file": "rtl/cdc/cdc_top.sv"
+        },
+        "pulse_count": {
+          "kind": "variable",
+          "width": 8,
+          "line": 21,
+          "file": "rtl/cdc/cdc_top.sv"
+        },
+        "pulse_fast": {
+          "kind": "variable",
+          "width": 1,
+          "line": 24,
+          "file": "rtl/cdc/cdc_top.sv"
+        }
+      },
+      "drivers": {
+        "pulse_fast": [
+          {
+            "kind": "nonblocking",
+            "rhs": [],
+            "control": [
+              "clk_fast",
+              "rst_n"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/cdc/cdc_top.sv",
+            "line": 30,
+            "snippet": "pulse_fast <= 1'b0;"
+          },
+          {
+            "kind": "nonblocking",
+            "rhs": [
+              "pulse_fast",
+              "trigger"
+            ],
+            "control": [
+              "clk_fast",
+              "rst_n"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 0
+              }
+            ],
+            "file": "rtl/cdc/cdc_top.sv",
+            "line": 32,
+            "snippet": "pulse_fast <= trigger && !pulse_fast;"
+          }
+        ],
+        "pulse_seen": [
+          {
+            "kind": "nonblocking",
+            "rhs": [],
+            "control": [
+              "clk_slow",
+              "rst_n"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/cdc/cdc_top.sv",
+            "line": 38,
+            "snippet": "pulse_seen  <= 1'b0;"
+          },
+          {
+            "kind": "nonblocking",
+            "rhs": [
+              "pulse_fast"
+            ],
+            "control": [
+              "clk_slow",
+              "rst_n"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 0
+              }
+            ],
+            "file": "rtl/cdc/cdc_top.sv",
+            "line": 41,
+            "snippet": "pulse_seen <= pulse_fast;           // crossing with no sync"
+          }
+        ],
+        "pulse_count": [
+          {
+            "kind": "nonblocking",
+            "rhs": [],
+            "control": [
+              "clk_slow",
+              "rst_n"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/cdc/cdc_top.sv",
+            "line": 39,
+            "snippet": "pulse_count <= 8'h00;"
+          },
+          {
+            "kind": "nonblocking",
+            "rhs": [
+              "pulse_count"
+            ],
+            "control": [
+              "clk_slow",
+              "pulse_fast",
+              "pulse_seen",
+              "rst_n"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "bin",
+                  "op": "LogicalAnd",
+                  "l": {
+                    "k": "sig",
+                    "name": "pulse_fast"
+                  },
+                  "r": {
+                    "k": "un",
+                    "op": "LogicalNot",
+                    "a": {
+                      "k": "sig",
+                      "name": "pulse_seen"
+                    }
+                  }
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/cdc/cdc_top.sv",
+            "line": 43,
+            "snippet": "pulse_count <= pulse_count + 1'b1;"
+          }
+        ]
+      },
+      "fanin": {
+        "pulse_fast": [
+          "clk_fast",
+          "pulse_fast",
+          "rst_n",
+          "trigger"
+        ],
+        "pulse_seen": [
+          "clk_slow",
+          "pulse_fast",
+          "rst_n"
+        ],
+        "pulse_count": [
+          "clk_slow",
+          "pulse_count",
+          "pulse_fast",
+          "pulse_seen",
+          "rst_n"
+        ]
+      },
+      "loads": {
+        "clk_fast": [
+          "pulse_fast"
+        ],
+        "trigger": [
+          "pulse_fast"
+        ],
+        "pulse_fast": [
+          "pulse_fast",
+          "pulse_seen",
+          "pulse_count"
+        ],
+        "rst_n": [
+          "pulse_fast",
+          "pulse_seen",
+          "pulse_count"
+        ],
+        "clk_slow": [
+          "pulse_seen",
+          "pulse_count"
+        ],
+        "pulse_seen": [
+          "pulse_count"
+        ],
+        "pulse_count": [
+          "pulse_count"
+        ]
+      },
+      "loc": {
+        "clk_fast": {
+          "file": "rtl/cdc/cdc_top.sv",
+          "line": 16
+        },
+        "rst_n": {
+          "file": "rtl/cdc/cdc_top.sv",
+          "line": 17
+        },
+        "trigger": {
+          "file": "rtl/cdc/cdc_top.sv",
+          "line": 18
+        },
+        "clk_slow": {
+          "file": "rtl/cdc/cdc_top.sv",
+          "line": 19
+        },
+        "pulse_seen": {
+          "file": "rtl/cdc/cdc_top.sv",
+          "line": 20
+        },
+        "pulse_count": {
+          "file": "rtl/cdc/cdc_top.sv",
+          "line": 21
+        },
+        "pulse_fast": {
+          "file": "rtl/cdc/cdc_top.sv",
+          "line": 24
+        }
+      },
+      "instances": [],
+      "skipped_members": 0
+    }
+  },
+  "instance_tree": {
+    "cdc_tb": "cdc_tb",
+    "cdc_tb.dut": "cdc_top"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "top": "fsm_stuck_tb",
+  "fst_path": "/data/home/wukongxin/workspace/wave_mcp/examples/viewer_demos/waves/fsm_stuck.fst",
+  "maps_path": "/data/home/wukongxin/workspace/wave_mcp/examples/viewer_demos/waves/session_fsm_stuck/netlist/maps.json",
+  "filelist": [
+    "/data/home/wukongxin/workspace/wave_mcp/examples/viewer_demos/rtl/fsm_stuck/fsm_stuck_top.sv"
+  ],
+  "fst_hash": "ab1a2fe3f0129a5aa25b077f1415ffdeb2f62019",
+  "filelist_hash": "22febfd6c28a79d4645c88aff5825362ce8e80aa"
+}

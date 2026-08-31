@@ -1,0 +1,10 @@
+{
+  "top": "xprop_tb",
+  "fst_path": "/data/home/wukongxin/workspace/wave_mcp/examples/viewer_demos/waves/xprop.fst",
+  "maps_path": "/data/home/wukongxin/workspace/wave_mcp/examples/viewer_demos/waves/session_xprop/netlist/maps.json",
+  "filelist": [
+    "/data/home/wukongxin/workspace/wave_mcp/examples/viewer_demos/rtl/xprop/xprop_top.sv"
+  ],
+  "fst_hash": "be87f2c40f2f96050983edda3f5111a8ab6e0899",
+  "filelist_hash": "66cc9fb64f27d740a97eaf859ca0e5e8eb651077"
+}

@@ -58,5 +58,6 @@ knot-uploads/
 # local dev docs (not published)
 dev-docs/
 deploy/viewer-assets-build/
+deploy/viewer-assets/
 deploy/.docker-build-cache/
 dist/

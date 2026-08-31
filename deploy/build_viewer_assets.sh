@@ -19,13 +19,54 @@
 set -euo pipefail
 
 ASSET_DIR=${1:?usage: build_viewer_assets.sh <asset_dir> [version]}
-VERSION=${2:-0.7.0}
+VERSION=${2:-0.25.6}
 HERE=$(cd "$(dirname "$0")" && pwd)
 REPO_ROOT=$(cd "$HERE/.." && pwd)
 OUT="$HERE/viewer-assets-build"
 
+# Pinned Surfer provenance: the wellen-0.25.6 pair this repo has been
+# tested against (main commit 86eedfd0, wasm = unmodified official CI
+# pages_build snapshot). Bumping requires rebuilding BOTH sides and
+# passing the wellen gate below.
+SURFER_REF=${SURFER_REF:-86eedfd0cda70fc0a61ab200ebf37aabf97c5cde}
+
 [[ -f "$ASSET_DIR/surver" ]] || { echo "missing $ASSET_DIR/surver"; exit 1; }
 [[ -f "$ASSET_DIR/wasm/index.html" ]] || { echo "missing $ASSET_DIR/wasm/index.html"; exit 1; }
+
+# -- wellen version gate -------------------------------------------------
+# Surfer rejects a client/server wellen mismatch at connect time with
+# "Version incompatibility!", which surfaces to the user as a waveform
+# that silently never loads. Both artifacts embed the wellen version as a
+# plain "wellen-X.Y.Z" string, so compare them here and refuse to ship a
+# broken pair (the rule the header already promised, now enforced).
+extract_wellen() {                       # $1 = binary, echoes "X.Y.Z"
+  local v
+  v=$(grep -ao 'wellen-0\.[0-9][0-9.]*' "$1" 2>/dev/null |
+      head -1 | sed 's/^wellen-//')
+  if [[ -z "$v" ]]; then
+    v=$(grep -ao 'wellen-[0-9][0-9.]*' "$1" 2>/dev/null |
+        head -1 | sed 's/^wellen-//')
+  fi
+  echo "$v"
+}
+
+WELLEN_BIN=$(extract_wellen "$ASSET_DIR/surver")
+WELLEN_WASM=$(extract_wellen "$ASSET_DIR/wasm/surfer_bg.wasm")
+if [[ -z "$WELLEN_BIN" || -z "$WELLEN_WASM" ]]; then
+  echo "ERROR: could not detect the wellen version of both artifacts"
+  echo "       surver: '${WELLEN_BIN:-<none>}'  wasm: '${WELLEN_WASM:-<none>}'"
+  echo "       refusing to build an unverifiable asset pair."
+  exit 1
+fi
+if [[ "$WELLEN_BIN" != "$WELLEN_WASM" ]]; then
+  echo "ERROR: wellen version mismatch (refusing to build):"
+  echo "       surver binary : $WELLEN_BIN"
+  echo "       wasm client   : $WELLEN_WASM"
+  echo "       Surfer rejects mixed versions at connect time, so the"
+  echo "       waveform would never load. Rebuild both from the same ref."
+  exit 1
+fi
+echo "wellen version match: $WELLEN_BIN (surver + wasm)"
 
 # surfer's own service worker must not be shipped: wave-mcp serves its own
 # sw.js (header restore + version handshake) from the shell directory.
@@ -62,7 +103,7 @@ fi
 # NOTICE: record the exact upstream provenance as EUPL art. 5 requires
 # (source availability; sources are unmodified, so pointing at the pinned
 # upstream ref is sufficient).
-SURFER_REF=${SURFER_REF:-v0.7.0}
+SURFER_REF=${SURFER_REF:-86eedfd0cda70fc0a61ab200ebf37aabf97c5cde}
 cat > "$OUT/NOTICE" <<EOF
 wave-mcp-viewer-assets
 ======================
@@ -71,9 +112,11 @@ This package redistributes unmodified build artifacts of the Surfer
 project (https://gitlab.com/surfer-project/surfer), licensed under the
 European Union Public Licence v1.2 (EUPL-1.2):
 
-  - surver binary: built from Surfer git ref ${SURFER_REF}
+  - surver binary: built from Surfer main commit ${SURFER_REF}
     (deploy/build_surver_static.sh records the build recipe)
-  - wasm/ bundle: Surfer WASM build matching the same ref
+  - wasm/ bundle: unmodified Surfer CI pages_build snapshot built from
+    the same commit (sha256 of surfer_bg.wasm:
+    $(sha256sum "$ASSET_DIR/wasm/surfer_bg.wasm" | cut -d' ' -f1))
 
 The Surfer sources are NOT modified by wave-mcp; the exact upstream
 source for this ref is available at:

@@ -11,9 +11,14 @@
 #
 # Usage:
 #   deploy/build_surver_static.sh [surfer_git_ref] [out_dir]
+#
+# Default ref is PINNED to the wellen-0.25.6 main commit that our bundled
+# wasm (Surfer CI pages_build snapshot, 2026-08-29) was built from. Do not
+# bump it without rebuilding/re-pairing the wasm side and re-running the
+# wellen gate in build_viewer_assets.sh.
 set -euo pipefail
 
-REF=${1:-v0.7.0}
+REF=${1:-86eedfd0cda70fc0a61ab200ebf37aabf97c5cde}
 HERE=$(cd "$(dirname "$0")" && pwd)
 OUT=${2:-"$HERE/surver-static"}
 mkdir -p "$OUT"
@@ -139,10 +144,17 @@ PYEOF
 # rust:alpine ships a musl toolchain natively; build only the surver crate.
 docker run --rm -e SURFER_REF="$REF" -v "$OUT":/out rust:alpine sh -exc "
   apk add --no-cache git musl-dev openssl-dev openssl-libs-static pkgconfig python3
-  git clone --depth 1 --branch $REF \
-      https://gitlab.com/surfer-project/surfer.git /src
+  git clone https://gitlab.com/surfer-project/surfer.git /src
   cd /src
+  git checkout --detach $REF
   git submodule update --init --recursive --depth 1
+  # build fingerprint: exact upstream provenance for the NOTICE
+  {
+    echo \"surfer_ref=$REF\"
+    echo \"surfer_version=\$(grep -m1 '^version = ' surver/Cargo.toml | sed 's/^version = \"//;s/\"$//')\"
+    echo \"build_date=\$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
+    echo \"cargo_lock_wellen=\$(grep -A1 'name = .wellen.' Cargo.lock | grep version | head -1 | sed 's/^version = \"//;s/\"$//')\"
+  } > /out/build-fingerprint.txt
   # static openssl for reqwest/native-tls if the ref pulls it in
   export OPENSSL_STATIC=1
   cargo build --release -p surver

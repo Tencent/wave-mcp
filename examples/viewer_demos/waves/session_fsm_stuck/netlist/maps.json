@@ -1,0 +1,1250 @@
+{
+  "tool": "pyslang",
+  "version": "11.0.0",
+  "top": "fsm_stuck_tb",
+  "diagnostics": 0,
+  "diagnostics_summary": {
+    "total": 0,
+    "errors": 0,
+    "lints": 0,
+    "lint_by_code": {},
+    "by_code": {},
+    "samples": [],
+    "actionable_hints": []
+  },
+  "partial": false,
+  "parse_errors": [],
+  "auto_resolved": {
+    "rounds": 0,
+    "added_incdirs": [],
+    "added_files": [],
+    "uvm_incdirs": []
+  },
+  "failed_tops": [],
+  "modules": {
+    "fsm_stuck_tb": {
+      "name": "fsm_stuck_tb",
+      "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+      "line": 64,
+      "ports": {},
+      "signals": {
+        "clk": {
+          "kind": "variable",
+          "width": 1,
+          "line": 65,
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
+        },
+        "rst_n": {
+          "kind": "variable",
+          "width": 1,
+          "line": 65,
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
+        },
+        "rd_en": {
+          "kind": "variable",
+          "width": 1,
+          "line": 65,
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
+        },
+        "ack": {
+          "kind": "variable",
+          "width": 1,
+          "line": 65,
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
+        },
+        "req": {
+          "kind": "net",
+          "width": 1,
+          "line": 66,
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
+        },
+        "ack_unused": {
+          "kind": "net",
+          "width": 1,
+          "line": 66,
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
+        },
+        "rd_count": {
+          "kind": "net",
+          "width": 8,
+          "line": 67,
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
+        },
+        "rd_data": {
+          "kind": "net",
+          "width": 8,
+          "line": 67,
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
+        },
+        "ack_wanted": {
+          "kind": "variable",
+          "width": 1,
+          "line": 70,
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
+        }
+      },
+      "drivers": {
+        "req": [
+          {
+            "kind": "instance_port",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+            "line": 72,
+            "snippet": "fsm_stuck_top dut (.clk(clk), .rst_n(rst_n), .rd_en(rd_en), .ack(ack),",
+            "port_ref": {
+              "instance": "dut",
+              "def": "fsm_stuck_top",
+              "port": "req",
+              "direction": "output"
+            }
+          }
+        ],
+        "rd_count": [
+          {
+            "kind": "instance_port",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+            "line": 72,
+            "snippet": "fsm_stuck_top dut (.clk(clk), .rst_n(rst_n), .rd_en(rd_en), .ack(ack),",
+            "port_ref": {
+              "instance": "dut",
+              "def": "fsm_stuck_top",
+              "port": "rd_count",
+              "direction": "output"
+            }
+          }
+        ],
+        "rd_data": [
+          {
+            "kind": "instance_port",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+            "line": 72,
+            "snippet": "fsm_stuck_top dut (.clk(clk), .rst_n(rst_n), .rd_en(rd_en), .ack(ack),",
+            "port_ref": {
+              "instance": "dut",
+              "def": "fsm_stuck_top",
+              "port": "rd_data",
+              "direction": "output"
+            }
+          }
+        ],
+        "clk": [
+          {
+            "kind": "blocking",
+            "rhs": [
+              "clk"
+            ],
+            "control": [],
+            "guard": [],
+            "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+            "line": 75,
+            "snippet": "always #5 clk = ~clk;"
+          },
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+            "line": 78,
+            "snippet": "clk = 0; rst_n = 0; rd_en = 0; ack = 0; ack_wanted = 1;"
+          }
+        ],
+        "rst_n": [
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+            "line": 78,
+            "snippet": "clk = 0; rst_n = 0; rd_en = 0; ack = 0; ack_wanted = 1;"
+          },
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+            "line": 79,
+            "snippet": "#12 rst_n = 1;"
+          }
+        ],
+        "rd_en": [
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+            "line": 78,
+            "snippet": "clk = 0; rst_n = 0; rd_en = 0; ack = 0; ack_wanted = 1;"
+          },
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+            "line": 83,
+            "snippet": "@(negedge clk); rd_en = 1;"
+          },
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+            "line": 84,
+            "snippet": "@(negedge clk); rd_en = 0;"
+          },
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+            "line": 91,
+            "snippet": "@(negedge clk); rd_en = 1;"
+          },
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+            "line": 92,
+            "snippet": "@(negedge clk); rd_en = 0;"
+          }
+        ],
+        "ack": [
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+            "line": 78,
+            "snippet": "clk = 0; rst_n = 0; rd_en = 0; ack = 0; ack_wanted = 1;"
+          },
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+            "line": 85,
+            "snippet": "wait (req); @(negedge clk); ack = 1;   // slave acks"
+          },
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+            "line": 86,
+            "snippet": "@(negedge clk); ack = 0;"
+          },
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [
+              "ack_wanted"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "sig",
+                  "name": "ack_wanted"
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+            "line": 93,
+            "snippet": "@(negedge clk); if (ack_wanted) ack = 1;"
+          },
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [
+              "ack_wanted",
+              "clk"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "ack_wanted"
+                  }
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+            "line": 100,
+            "snippet": "always @(negedge clk) if (!ack_wanted) ack = 0;"
+          }
+        ],
+        "ack_wanted": [
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+            "line": 78,
+            "snippet": "clk = 0; rst_n = 0; rd_en = 0; ack = 0; ack_wanted = 1;"
+          },
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+            "line": 90,
+            "snippet": "#10 ack_wanted = 0;"
+          }
+        ]
+      },
+      "fanin": {
+        "req": [
+          "dut.req"
+        ],
+        "rd_count": [
+          "dut.rd_count"
+        ],
+        "rd_data": [
+          "dut.rd_data"
+        ],
+        "clk": [
+          "clk"
+        ],
+        "rst_n": [],
+        "rd_en": [],
+        "ack": [
+          "ack_wanted",
+          "clk"
+        ],
+        "ack_wanted": [],
+        "dut.clk": [
+          "clk"
+        ],
+        "dut.rst_n": [
+          "rst_n"
+        ],
+        "dut.rd_en": [
+          "rd_en"
+        ],
+        "dut.ack": [
+          "ack"
+        ]
+      },
+      "loads": {
+        "dut.req": [
+          "req"
+        ],
+        "dut.rd_count": [
+          "rd_count"
+        ],
+        "dut.rd_data": [
+          "rd_data"
+        ],
+        "clk": [
+          "clk",
+          "ack",
+          "dut.clk"
+        ],
+        "ack_wanted": [
+          "ack"
+        ],
+        "rst_n": [
+          "dut.rst_n"
+        ],
+        "rd_en": [
+          "dut.rd_en"
+        ],
+        "ack": [
+          "dut.ack"
+        ]
+      },
+      "loc": {
+        "clk": {
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+          "line": 65
+        },
+        "rst_n": {
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+          "line": 65
+        },
+        "rd_en": {
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+          "line": 65
+        },
+        "ack": {
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+          "line": 65
+        },
+        "req": {
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+          "line": 66
+        },
+        "ack_unused": {
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+          "line": 66
+        },
+        "rd_count": {
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+          "line": 67
+        },
+        "rd_data": {
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+          "line": 67
+        },
+        "ack_wanted": {
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+          "line": 70
+        }
+      },
+      "instances": [
+        {
+          "def": "fsm_stuck_top",
+          "name": "dut",
+          "conns": {
+            "clk": "clk",
+            "rst_n": "rst_n",
+            "rd_en": "rd_en",
+            "ack": "ack",
+            "req": "req",
+            "rd_count": "rd_count",
+            "rd_data": "rd_data"
+          },
+          "conn_dirs": {
+            "clk": "input",
+            "rst_n": "input",
+            "rd_en": "input",
+            "ack": "input",
+            "req": "output",
+            "rd_count": "output",
+            "rd_data": "output"
+          },
+          "line": 72
+        }
+      ],
+      "skipped_members": 0
+    },
+    "fsm_stuck_top": {
+      "name": "fsm_stuck_top",
+      "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+      "line": 14,
+      "ports": {
+        "clk": {
+          "direction": "input",
+          "width": 1,
+          "type": "port",
+          "line": 15,
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
+        },
+        "rst_n": {
+          "direction": "input",
+          "width": 1,
+          "type": "port",
+          "line": 16,
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
+        },
+        "rd_en": {
+          "direction": "input",
+          "width": 1,
+          "type": "port",
+          "line": 17,
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
+        },
+        "ack": {
+          "direction": "input",
+          "width": 1,
+          "type": "port",
+          "line": 18,
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
+        },
+        "req": {
+          "direction": "output",
+          "width": 1,
+          "type": "port",
+          "line": 19,
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
+        },
+        "rd_count": {
+          "direction": "output",
+          "width": 8,
+          "type": "port",
+          "line": 20,
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
+        },
+        "rd_data": {
+          "direction": "output",
+          "width": 8,
+          "type": "port",
+          "line": 21,
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
+        }
+      },
+      "signals": {
+        "clk": {
+          "kind": "net",
+          "width": 1,
+          "line": 15,
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
+        },
+        "rst_n": {
+          "kind": "net",
+          "width": 1,
+          "line": 16,
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
+        },
+        "rd_en": {
+          "kind": "net",
+          "width": 1,
+          "line": 17,
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
+        },
+        "ack": {
+          "kind": "net",
+          "width": 1,
+          "line": 18,
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
+        },
+        "req": {
+          "kind": "variable",
+          "width": 1,
+          "line": 19,
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
+        },
+        "rd_count": {
+          "kind": "variable",
+          "width": 8,
+          "line": 20,
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
+        },
+        "rd_data": {
+          "kind": "variable",
+          "width": 8,
+          "line": 21,
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
+        },
+        "state": {
+          "kind": "variable",
+          "width": 2,
+          "line": 26,
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
+        },
+        "fake_data": {
+          "kind": "variable",
+          "width": 8,
+          "line": 27,
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
+        }
+      },
+      "drivers": {
+        "state": [
+          {
+            "kind": "nonblocking",
+            "rhs": [
+              "IDLE"
+            ],
+            "control": [
+              "clk",
+              "rst_n"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+            "line": 31,
+            "snippet": "state    <= IDLE;"
+          },
+          {
+            "kind": "nonblocking",
+            "rhs": [
+              "WAIT_ACK"
+            ],
+            "control": [
+              "CAPTURE",
+              "IDLE",
+              "WAIT_ACK",
+              "clk",
+              "rd_en",
+              "rst_n",
+              "state"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "bin",
+                  "op": "Equality",
+                  "l": {
+                    "k": "sig",
+                    "name": "state"
+                  },
+                  "r": {
+                    "k": "sig",
+                    "name": "IDLE"
+                  }
+                },
+                "expect": 1
+              },
+              {
+                "cond": {
+                  "k": "sig",
+                  "name": "rd_en"
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+            "line": 40,
+            "snippet": "state <= WAIT_ACK;"
+          },
+          {
+            "kind": "nonblocking",
+            "rhs": [
+              "CAPTURE"
+            ],
+            "control": [
+              "CAPTURE",
+              "IDLE",
+              "WAIT_ACK",
+              "ack",
+              "clk",
+              "rst_n",
+              "state"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "bin",
+                  "op": "Equality",
+                  "l": {
+                    "k": "sig",
+                    "name": "state"
+                  },
+                  "r": {
+                    "k": "sig",
+                    "name": "WAIT_ACK"
+                  }
+                },
+                "expect": 1
+              },
+              {
+                "cond": {
+                  "k": "sig",
+                  "name": "ack"
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+            "line": 48,
+            "snippet": "state    <= CAPTURE;"
+          },
+          {
+            "kind": "nonblocking",
+            "rhs": [
+              "IDLE"
+            ],
+            "control": [
+              "CAPTURE",
+              "IDLE",
+              "WAIT_ACK",
+              "clk",
+              "rst_n",
+              "state"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "bin",
+                  "op": "Equality",
+                  "l": {
+                    "k": "sig",
+                    "name": "state"
+                  },
+                  "r": {
+                    "k": "sig",
+                    "name": "CAPTURE"
+                  }
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+            "line": 52,
+            "snippet": "state <= IDLE;"
+          },
+          {
+            "kind": "nonblocking",
+            "rhs": [
+              "IDLE"
+            ],
+            "control": [
+              "CAPTURE",
+              "IDLE",
+              "WAIT_ACK",
+              "clk",
+              "rst_n",
+              "state"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 0
+              }
+            ],
+            "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+            "line": 54,
+            "snippet": "default: state <= IDLE;"
+          }
+        ],
+        "req": [
+          {
+            "kind": "nonblocking",
+            "rhs": [],
+            "control": [
+              "clk",
+              "rst_n"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+            "line": 32,
+            "snippet": "req      <= 1'b0;"
+          },
+          {
+            "kind": "nonblocking",
+            "rhs": [],
+            "control": [
+              "CAPTURE",
+              "IDLE",
+              "WAIT_ACK",
+              "clk",
+              "rd_en",
+              "rst_n",
+              "state"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "bin",
+                  "op": "Equality",
+                  "l": {
+                    "k": "sig",
+                    "name": "state"
+                  },
+                  "r": {
+                    "k": "sig",
+                    "name": "IDLE"
+                  }
+                },
+                "expect": 1
+              },
+              {
+                "cond": {
+                  "k": "sig",
+                  "name": "rd_en"
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+            "line": 39,
+            "snippet": "req   <= 1'b1;"
+          },
+          {
+            "kind": "nonblocking",
+            "rhs": [],
+            "control": [
+              "CAPTURE",
+              "IDLE",
+              "WAIT_ACK",
+              "ack",
+              "clk",
+              "rst_n",
+              "state"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "bin",
+                  "op": "Equality",
+                  "l": {
+                    "k": "sig",
+                    "name": "state"
+                  },
+                  "r": {
+                    "k": "sig",
+                    "name": "WAIT_ACK"
+                  }
+                },
+                "expect": 1
+              },
+              {
+                "cond": {
+                  "k": "sig",
+                  "name": "ack"
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+            "line": 45,
+            "snippet": "req      <= 1'b0;"
+          }
+        ],
+        "rd_count": [
+          {
+            "kind": "nonblocking",
+            "rhs": [],
+            "control": [
+              "clk",
+              "rst_n"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+            "line": 33,
+            "snippet": "rd_count <= 8'h00;"
+          },
+          {
+            "kind": "nonblocking",
+            "rhs": [
+              "rd_count"
+            ],
+            "control": [
+              "CAPTURE",
+              "IDLE",
+              "WAIT_ACK",
+              "ack",
+              "clk",
+              "rst_n",
+              "state"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "bin",
+                  "op": "Equality",
+                  "l": {
+                    "k": "sig",
+                    "name": "state"
+                  },
+                  "r": {
+                    "k": "sig",
+                    "name": "WAIT_ACK"
+                  }
+                },
+                "expect": 1
+              },
+              {
+                "cond": {
+                  "k": "sig",
+                  "name": "ack"
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+            "line": 46,
+            "snippet": "rd_count <= rd_count + 1'b1;"
+          }
+        ],
+        "rd_data": [
+          {
+            "kind": "nonblocking",
+            "rhs": [],
+            "control": [
+              "clk",
+              "rst_n"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+            "line": 34,
+            "snippet": "rd_data  <= 8'h00;"
+          },
+          {
+            "kind": "nonblocking",
+            "rhs": [
+              "fake_data"
+            ],
+            "control": [
+              "CAPTURE",
+              "IDLE",
+              "WAIT_ACK",
+              "ack",
+              "clk",
+              "rst_n",
+              "state"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "bin",
+                  "op": "Equality",
+                  "l": {
+                    "k": "sig",
+                    "name": "state"
+                  },
+                  "r": {
+                    "k": "sig",
+                    "name": "WAIT_ACK"
+                  }
+                },
+                "expect": 1
+              },
+              {
+                "cond": {
+                  "k": "sig",
+                  "name": "ack"
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+            "line": 47,
+            "snippet": "rd_data  <= fake_data;"
+          }
+        ],
+        "fake_data": [
+          {
+            "kind": "nonblocking",
+            "rhs": [
+              "fake_data"
+            ],
+            "control": [
+              "IDLE",
+              "clk",
+              "rd_en",
+              "state"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "bin",
+                  "op": "LogicalAnd",
+                  "l": {
+                    "k": "bin",
+                    "op": "Equality",
+                    "l": {
+                      "k": "sig",
+                      "name": "state"
+                    },
+                    "r": {
+                      "k": "sig",
+                      "name": "IDLE"
+                    }
+                  },
+                  "r": {
+                    "k": "sig",
+                    "name": "rd_en"
+                  }
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+            "line": 61,
+            "snippet": "if (state == IDLE && rd_en) fake_data <= fake_data + 1'b1;"
+          }
+        ]
+      },
+      "fanin": {
+        "state": [
+          "CAPTURE",
+          "IDLE",
+          "WAIT_ACK",
+          "ack",
+          "clk",
+          "rd_en",
+          "rst_n",
+          "state"
+        ],
+        "req": [
+          "CAPTURE",
+          "IDLE",
+          "WAIT_ACK",
+          "ack",
+          "clk",
+          "rd_en",
+          "rst_n",
+          "state"
+        ],
+        "rd_count": [
+          "CAPTURE",
+          "IDLE",
+          "WAIT_ACK",
+          "ack",
+          "clk",
+          "rd_count",
+          "rst_n",
+          "state"
+        ],
+        "rd_data": [
+          "CAPTURE",
+          "IDLE",
+          "WAIT_ACK",
+          "ack",
+          "clk",
+          "fake_data",
+          "rst_n",
+          "state"
+        ],
+        "fake_data": [
+          "IDLE",
+          "clk",
+          "fake_data",
+          "rd_en",
+          "state"
+        ]
+      },
+      "loads": {
+        "state": [
+          "state",
+          "req",
+          "rd_count",
+          "rd_data",
+          "fake_data"
+        ],
+        "rst_n": [
+          "state",
+          "req",
+          "rd_count",
+          "rd_data"
+        ],
+        "WAIT_ACK": [
+          "state",
+          "req",
+          "rd_count",
+          "rd_data"
+        ],
+        "CAPTURE": [
+          "state",
+          "req",
+          "rd_count",
+          "rd_data"
+        ],
+        "clk": [
+          "state",
+          "req",
+          "rd_count",
+          "rd_data",
+          "fake_data"
+        ],
+        "IDLE": [
+          "state",
+          "req",
+          "rd_count",
+          "rd_data",
+          "fake_data"
+        ],
+        "rd_en": [
+          "state",
+          "req",
+          "fake_data"
+        ],
+        "ack": [
+          "state",
+          "req",
+          "rd_count",
+          "rd_data"
+        ],
+        "rd_count": [
+          "rd_count"
+        ],
+        "fake_data": [
+          "rd_data",
+          "fake_data"
+        ]
+      },
+      "loc": {
+        "clk": {
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+          "line": 15
+        },
+        "rst_n": {
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+          "line": 16
+        },
+        "rd_en": {
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+          "line": 17
+        },
+        "ack": {
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+          "line": 18
+        },
+        "req": {
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+          "line": 19
+        },
+        "rd_count": {
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+          "line": 20
+        },
+        "rd_data": {
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+          "line": 21
+        },
+        "state": {
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+          "line": 26
+        },
+        "fake_data": {
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
+          "line": 27
+        }
+      },
+      "instances": [],
+      "skipped_members": 0
+    }
+  },
+  "instance_tree": {
+    "fsm_stuck_tb": "fsm_stuck_tb",
+    "fsm_stuck_tb.dut": "fsm_stuck_top"
+  }
+}

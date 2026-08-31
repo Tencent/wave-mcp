@@ -1,0 +1,10 @@
+{
+  "top": "crc_diff_tb",
+  "fst_path": "/data/home/wukongxin/workspace/wave_mcp/examples/viewer_demos/waves/crc_pass.fst",
+  "maps_path": "/data/home/wukongxin/workspace/wave_mcp/examples/viewer_demos/waves/session_crc_diff/netlist/maps.json",
+  "filelist": [
+    "/data/home/wukongxin/workspace/wave_mcp/examples/viewer_demos/rtl/crc_diff/crc_diff_top.sv"
+  ],
+  "fst_hash": "6ebe90cf5c08faae2b702cc7c93c954beae5f756",
+  "filelist_hash": "bca521b5e580a6a760ef160eca2e06db27b6ee1a"
+}

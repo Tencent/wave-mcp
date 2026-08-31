@@ -1,0 +1,1211 @@
+{
+  "tool": "pyslang",
+  "version": "11.0.0",
+  "top": "xprop_tb",
+  "diagnostics": 1,
+  "diagnostics_summary": {
+    "total": 1,
+    "errors": 1,
+    "lints": 0,
+    "lint_by_code": {},
+    "by_code": {
+      "WidthExpand": 1
+    },
+    "samples": [
+      {
+        "code": "WidthExpand",
+        "is_error": true,
+        "text": "rtl/xprop/xprop_top.sv:50:34: warning: implicit conversion expands from 6 to 8 bits [-Wwidth-expand]"
+      }
+    ],
+    "actionable_hints": []
+  },
+  "partial": true,
+  "parse_errors": [],
+  "auto_resolved": {
+    "rounds": 0,
+    "added_incdirs": [],
+    "added_files": [],
+    "uvm_incdirs": []
+  },
+  "failed_tops": [],
+  "modules": {
+    "xprop_tb": {
+      "name": "xprop_tb",
+      "file": "rtl/xprop/xprop_top.sv",
+      "line": 60,
+      "ports": {},
+      "signals": {
+        "clk": {
+          "kind": "variable",
+          "width": 1,
+          "line": 61,
+          "file": "rtl/xprop/xprop_top.sv"
+        },
+        "rst_n": {
+          "kind": "variable",
+          "width": 1,
+          "line": 61,
+          "file": "rtl/xprop/xprop_top.sv"
+        },
+        "start": {
+          "kind": "variable",
+          "width": 1,
+          "line": 61,
+          "file": "rtl/xprop/xprop_top.sv"
+        },
+        "din": {
+          "kind": "variable",
+          "width": 8,
+          "line": 62,
+          "file": "rtl/xprop/xprop_top.sv"
+        },
+        "data_out": {
+          "kind": "net",
+          "width": 8,
+          "line": 63,
+          "file": "rtl/xprop/xprop_top.sv"
+        },
+        "done": {
+          "kind": "net",
+          "width": 1,
+          "line": 64,
+          "file": "rtl/xprop/xprop_top.sv"
+        }
+      },
+      "drivers": {
+        "data_out": [
+          {
+            "kind": "instance_port",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/xprop/xprop_top.sv",
+            "line": 66,
+            "snippet": "xprop_top dut (.clk(clk), .rst_n(rst_n), .start(start),",
+            "port_ref": {
+              "instance": "dut",
+              "def": "xprop_top",
+              "port": "data_out",
+              "direction": "output"
+            }
+          }
+        ],
+        "done": [
+          {
+            "kind": "instance_port",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/xprop/xprop_top.sv",
+            "line": 66,
+            "snippet": "xprop_top dut (.clk(clk), .rst_n(rst_n), .start(start),",
+            "port_ref": {
+              "instance": "dut",
+              "def": "xprop_top",
+              "port": "done",
+              "direction": "output"
+            }
+          }
+        ],
+        "clk": [
+          {
+            "kind": "blocking",
+            "rhs": [
+              "clk"
+            ],
+            "control": [],
+            "guard": [],
+            "file": "rtl/xprop/xprop_top.sv",
+            "line": 69,
+            "snippet": "always #5 clk = ~clk;"
+          },
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/xprop/xprop_top.sv",
+            "line": 81,
+            "snippet": "clk = 0; rst_n = 0; start = 0; din = 8'h00;"
+          }
+        ],
+        "rst_n": [
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/xprop/xprop_top.sv",
+            "line": 81,
+            "snippet": "clk = 0; rst_n = 0; start = 0; din = 8'h00;"
+          },
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/xprop/xprop_top.sv",
+            "line": 82,
+            "snippet": "#12 rst_n = 1;"
+          },
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/xprop/xprop_top.sv",
+            "line": 85,
+            "snippet": "#20 rst_n = 0;            // mid-run reset pulse"
+          },
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/xprop/xprop_top.sv",
+            "line": 86,
+            "snippet": "#8  rst_n = 1;            // byte_cnt survives as stale value"
+          }
+        ],
+        "start": [
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/xprop/xprop_top.sv",
+            "line": 81,
+            "snippet": "clk = 0; rst_n = 0; start = 0; din = 8'h00;"
+          }
+        ],
+        "din": [
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/xprop/xprop_top.sv",
+            "line": 81,
+            "snippet": "clk = 0; rst_n = 0; start = 0; din = 8'h00;"
+          }
+        ]
+      },
+      "fanin": {
+        "data_out": [
+          "dut.data_out"
+        ],
+        "done": [
+          "dut.done"
+        ],
+        "clk": [
+          "clk"
+        ],
+        "rst_n": [],
+        "start": [],
+        "din": [],
+        "dut.clk": [
+          "clk"
+        ],
+        "dut.rst_n": [
+          "rst_n"
+        ],
+        "dut.start": [
+          "start"
+        ],
+        "dut.din": [
+          "din"
+        ]
+      },
+      "loads": {
+        "dut.data_out": [
+          "data_out"
+        ],
+        "dut.done": [
+          "done"
+        ],
+        "clk": [
+          "clk",
+          "dut.clk"
+        ],
+        "rst_n": [
+          "dut.rst_n"
+        ],
+        "start": [
+          "dut.start"
+        ],
+        "din": [
+          "dut.din"
+        ]
+      },
+      "loc": {
+        "clk": {
+          "file": "rtl/xprop/xprop_top.sv",
+          "line": 61
+        },
+        "rst_n": {
+          "file": "rtl/xprop/xprop_top.sv",
+          "line": 61
+        },
+        "start": {
+          "file": "rtl/xprop/xprop_top.sv",
+          "line": 61
+        },
+        "din": {
+          "file": "rtl/xprop/xprop_top.sv",
+          "line": 62
+        },
+        "data_out": {
+          "file": "rtl/xprop/xprop_top.sv",
+          "line": 63
+        },
+        "done": {
+          "file": "rtl/xprop/xprop_top.sv",
+          "line": 64
+        }
+      },
+      "instances": [
+        {
+          "def": "xprop_top",
+          "name": "dut",
+          "conns": {
+            "clk": "clk",
+            "rst_n": "rst_n",
+            "start": "start",
+            "din": "din",
+            "data_out": "data_out",
+            "done": "done"
+          },
+          "conn_dirs": {
+            "clk": "input",
+            "rst_n": "input",
+            "start": "input",
+            "din": "input",
+            "data_out": "output",
+            "done": "output"
+          },
+          "line": 66
+        }
+      ],
+      "skipped_members": 0
+    },
+    "xprop_top": {
+      "name": "xprop_top",
+      "file": "rtl/xprop/xprop_top.sv",
+      "line": 13,
+      "ports": {
+        "clk": {
+          "direction": "input",
+          "width": 1,
+          "type": "port",
+          "line": 14,
+          "file": "rtl/xprop/xprop_top.sv"
+        },
+        "rst_n": {
+          "direction": "input",
+          "width": 1,
+          "type": "port",
+          "line": 15,
+          "file": "rtl/xprop/xprop_top.sv"
+        },
+        "start": {
+          "direction": "input",
+          "width": 1,
+          "type": "port",
+          "line": 16,
+          "file": "rtl/xprop/xprop_top.sv"
+        },
+        "din": {
+          "direction": "input",
+          "width": 8,
+          "type": "port",
+          "line": 17,
+          "file": "rtl/xprop/xprop_top.sv"
+        },
+        "data_out": {
+          "direction": "output",
+          "width": 8,
+          "type": "port",
+          "line": 18,
+          "file": "rtl/xprop/xprop_top.sv"
+        },
+        "done": {
+          "direction": "output",
+          "width": 1,
+          "type": "port",
+          "line": 19,
+          "file": "rtl/xprop/xprop_top.sv"
+        }
+      },
+      "signals": {
+        "clk": {
+          "kind": "net",
+          "width": 1,
+          "line": 14,
+          "file": "rtl/xprop/xprop_top.sv"
+        },
+        "rst_n": {
+          "kind": "net",
+          "width": 1,
+          "line": 15,
+          "file": "rtl/xprop/xprop_top.sv"
+        },
+        "start": {
+          "kind": "net",
+          "width": 1,
+          "line": 16,
+          "file": "rtl/xprop/xprop_top.sv"
+        },
+        "din": {
+          "kind": "net",
+          "width": 8,
+          "line": 17,
+          "file": "rtl/xprop/xprop_top.sv"
+        },
+        "data_out": {
+          "kind": "variable",
+          "width": 8,
+          "line": 18,
+          "file": "rtl/xprop/xprop_top.sv"
+        },
+        "done": {
+          "kind": "variable",
+          "width": 1,
+          "line": 19,
+          "file": "rtl/xprop/xprop_top.sv"
+        },
+        "fsm_state": {
+          "kind": "variable",
+          "width": 2,
+          "line": 24,
+          "file": "rtl/xprop/xprop_top.sv"
+        },
+        "shift_ticks": {
+          "kind": "variable",
+          "width": 3,
+          "line": 25,
+          "file": "rtl/xprop/xprop_top.sv"
+        },
+        "byte_cnt": {
+          "kind": "variable",
+          "width": 3,
+          "line": 26,
+          "file": "rtl/xprop/xprop_top.sv"
+        },
+        "shreg": {
+          "kind": "variable",
+          "width": 8,
+          "line": 27,
+          "file": "rtl/xprop/xprop_top.sv"
+        }
+      },
+      "drivers": {
+        "fsm_state": [
+          {
+            "kind": "nonblocking",
+            "rhs": [
+              "IDLE"
+            ],
+            "control": [
+              "clk",
+              "rst_n"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/xprop/xprop_top.sv",
+            "line": 31,
+            "snippet": "fsm_state   <= IDLE;"
+          },
+          {
+            "kind": "nonblocking",
+            "rhs": [
+              "SHIFT"
+            ],
+            "control": [
+              "FLUSH",
+              "IDLE",
+              "SHIFT",
+              "clk",
+              "fsm_state",
+              "rst_n",
+              "start"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "bin",
+                  "op": "Equality",
+                  "l": {
+                    "k": "sig",
+                    "name": "fsm_state"
+                  },
+                  "r": {
+                    "k": "sig",
+                    "name": "IDLE"
+                  }
+                },
+                "expect": 1
+              },
+              {
+                "cond": {
+                  "k": "sig",
+                  "name": "start"
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/xprop/xprop_top.sv",
+            "line": 38,
+            "snippet": "fsm_state   <= SHIFT;"
+          },
+          {
+            "kind": "nonblocking",
+            "rhs": [
+              "FLUSH"
+            ],
+            "control": [
+              "FLUSH",
+              "IDLE",
+              "SHIFT",
+              "clk",
+              "fsm_state",
+              "rst_n",
+              "shift_ticks"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "bin",
+                  "op": "Equality",
+                  "l": {
+                    "k": "sig",
+                    "name": "fsm_state"
+                  },
+                  "r": {
+                    "k": "sig",
+                    "name": "SHIFT"
+                  }
+                },
+                "expect": 1
+              },
+              {
+                "cond": {
+                  "k": "bin",
+                  "op": "Equality",
+                  "l": {
+                    "k": "sig",
+                    "name": "shift_ticks"
+                  },
+                  "r": {
+                    "k": "const",
+                    "lit": "3'b101"
+                  }
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/xprop/xprop_top.sv",
+            "line": 47,
+            "snippet": "fsm_state <= FLUSH;"
+          },
+          {
+            "kind": "nonblocking",
+            "rhs": [
+              "IDLE"
+            ],
+            "control": [
+              "FLUSH",
+              "IDLE",
+              "SHIFT",
+              "clk",
+              "fsm_state",
+              "rst_n"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "bin",
+                  "op": "Equality",
+                  "l": {
+                    "k": "sig",
+                    "name": "fsm_state"
+                  },
+                  "r": {
+                    "k": "sig",
+                    "name": "FLUSH"
+                  }
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/xprop/xprop_top.sv",
+            "line": 52,
+            "snippet": "fsm_state <= IDLE;"
+          },
+          {
+            "kind": "nonblocking",
+            "rhs": [
+              "IDLE"
+            ],
+            "control": [
+              "FLUSH",
+              "IDLE",
+              "SHIFT",
+              "clk",
+              "fsm_state",
+              "rst_n"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 0
+              }
+            ],
+            "file": "rtl/xprop/xprop_top.sv",
+            "line": 54,
+            "snippet": "default: fsm_state <= IDLE;"
+          }
+        ],
+        "shift_ticks": [
+          {
+            "kind": "nonblocking",
+            "rhs": [],
+            "control": [
+              "clk",
+              "rst_n"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/xprop/xprop_top.sv",
+            "line": 32,
+            "snippet": "shift_ticks <= 3'd0;"
+          },
+          {
+            "kind": "nonblocking",
+            "rhs": [],
+            "control": [
+              "FLUSH",
+              "IDLE",
+              "SHIFT",
+              "clk",
+              "fsm_state",
+              "rst_n",
+              "start"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "bin",
+                  "op": "Equality",
+                  "l": {
+                    "k": "sig",
+                    "name": "fsm_state"
+                  },
+                  "r": {
+                    "k": "sig",
+                    "name": "IDLE"
+                  }
+                },
+                "expect": 1
+              },
+              {
+                "cond": {
+                  "k": "sig",
+                  "name": "start"
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/xprop/xprop_top.sv",
+            "line": 39,
+            "snippet": "shift_ticks <= 3'd0;"
+          },
+          {
+            "kind": "nonblocking",
+            "rhs": [
+              "shift_ticks"
+            ],
+            "control": [
+              "FLUSH",
+              "IDLE",
+              "SHIFT",
+              "clk",
+              "fsm_state",
+              "rst_n"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "bin",
+                  "op": "Equality",
+                  "l": {
+                    "k": "sig",
+                    "name": "fsm_state"
+                  },
+                  "r": {
+                    "k": "sig",
+                    "name": "SHIFT"
+                  }
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/xprop/xprop_top.sv",
+            "line": 44,
+            "snippet": "shift_ticks <= shift_ticks + 1'b1;"
+          }
+        ],
+        "done": [
+          {
+            "kind": "nonblocking",
+            "rhs": [],
+            "control": [
+              "clk",
+              "rst_n"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/xprop/xprop_top.sv",
+            "line": 33,
+            "snippet": "done        <= 1'b0;"
+          },
+          {
+            "kind": "nonblocking",
+            "rhs": [],
+            "control": [
+              "clk",
+              "rst_n"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 0
+              }
+            ],
+            "file": "rtl/xprop/xprop_top.sv",
+            "line": 35,
+            "snippet": "done <= 1'b0;"
+          },
+          {
+            "kind": "nonblocking",
+            "rhs": [],
+            "control": [
+              "FLUSH",
+              "IDLE",
+              "SHIFT",
+              "clk",
+              "fsm_state",
+              "rst_n"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "bin",
+                  "op": "Equality",
+                  "l": {
+                    "k": "sig",
+                    "name": "fsm_state"
+                  },
+                  "r": {
+                    "k": "sig",
+                    "name": "FLUSH"
+                  }
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/xprop/xprop_top.sv",
+            "line": 51,
+            "snippet": "done      <= 1'b1;"
+          }
+        ],
+        "shreg": [
+          {
+            "kind": "nonblocking",
+            "rhs": [
+              "din"
+            ],
+            "control": [
+              "FLUSH",
+              "IDLE",
+              "SHIFT",
+              "clk",
+              "fsm_state",
+              "rst_n",
+              "start"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "bin",
+                  "op": "Equality",
+                  "l": {
+                    "k": "sig",
+                    "name": "fsm_state"
+                  },
+                  "r": {
+                    "k": "sig",
+                    "name": "IDLE"
+                  }
+                },
+                "expect": 1
+              },
+              {
+                "cond": {
+                  "k": "sig",
+                  "name": "start"
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/xprop/xprop_top.sv",
+            "line": 40,
+            "snippet": "shreg       <= din;"
+          },
+          {
+            "kind": "nonblocking",
+            "rhs": [
+              "shreg"
+            ],
+            "control": [
+              "FLUSH",
+              "IDLE",
+              "SHIFT",
+              "clk",
+              "fsm_state",
+              "rst_n"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "bin",
+                  "op": "Equality",
+                  "l": {
+                    "k": "sig",
+                    "name": "fsm_state"
+                  },
+                  "r": {
+                    "k": "sig",
+                    "name": "SHIFT"
+                  }
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/xprop/xprop_top.sv",
+            "line": 43,
+            "snippet": "shreg       <= {shreg[6:0], 1'b0};"
+          }
+        ],
+        "byte_cnt": [
+          {
+            "kind": "nonblocking",
+            "rhs": [
+              "byte_cnt"
+            ],
+            "control": [
+              "FLUSH",
+              "IDLE",
+              "SHIFT",
+              "clk",
+              "fsm_state",
+              "rst_n"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "bin",
+                  "op": "Equality",
+                  "l": {
+                    "k": "sig",
+                    "name": "fsm_state"
+                  },
+                  "r": {
+                    "k": "sig",
+                    "name": "SHIFT"
+                  }
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/xprop/xprop_top.sv",
+            "line": 45,
+            "snippet": "byte_cnt    <= byte_cnt + 1'b1;   // X+1 = X"
+          }
+        ],
+        "data_out": [
+          {
+            "kind": "nonblocking",
+            "rhs": [
+              "byte_cnt",
+              "shreg"
+            ],
+            "control": [
+              "FLUSH",
+              "IDLE",
+              "SHIFT",
+              "clk",
+              "fsm_state",
+              "rst_n"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "bin",
+                  "op": "Equality",
+                  "l": {
+                    "k": "sig",
+                    "name": "fsm_state"
+                  },
+                  "r": {
+                    "k": "sig",
+                    "name": "FLUSH"
+                  }
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/xprop/xprop_top.sv",
+            "line": 50,
+            "snippet": "data_out  <= {byte_cnt, shreg[7:5]}; // X bits in [7:5]"
+          }
+        ]
+      },
+      "fanin": {
+        "fsm_state": [
+          "FLUSH",
+          "IDLE",
+          "SHIFT",
+          "clk",
+          "fsm_state",
+          "rst_n",
+          "shift_ticks",
+          "start"
+        ],
+        "shift_ticks": [
+          "FLUSH",
+          "IDLE",
+          "SHIFT",
+          "clk",
+          "fsm_state",
+          "rst_n",
+          "shift_ticks",
+          "start"
+        ],
+        "done": [
+          "FLUSH",
+          "IDLE",
+          "SHIFT",
+          "clk",
+          "fsm_state",
+          "rst_n"
+        ],
+        "shreg": [
+          "FLUSH",
+          "IDLE",
+          "SHIFT",
+          "clk",
+          "din",
+          "fsm_state",
+          "rst_n",
+          "shreg",
+          "start"
+        ],
+        "byte_cnt": [
+          "FLUSH",
+          "IDLE",
+          "SHIFT",
+          "byte_cnt",
+          "clk",
+          "fsm_state",
+          "rst_n"
+        ],
+        "data_out": [
+          "FLUSH",
+          "IDLE",
+          "SHIFT",
+          "byte_cnt",
+          "clk",
+          "fsm_state",
+          "rst_n",
+          "shreg"
+        ]
+      },
+      "loads": {
+        "fsm_state": [
+          "fsm_state",
+          "shift_ticks",
+          "done",
+          "shreg",
+          "byte_cnt",
+          "data_out"
+        ],
+        "FLUSH": [
+          "fsm_state",
+          "shift_ticks",
+          "done",
+          "shreg",
+          "byte_cnt",
+          "data_out"
+        ],
+        "rst_n": [
+          "fsm_state",
+          "shift_ticks",
+          "done",
+          "shreg",
+          "byte_cnt",
+          "data_out"
+        ],
+        "SHIFT": [
+          "fsm_state",
+          "shift_ticks",
+          "done",
+          "shreg",
+          "byte_cnt",
+          "data_out"
+        ],
+        "IDLE": [
+          "fsm_state",
+          "shift_ticks",
+          "done",
+          "shreg",
+          "byte_cnt",
+          "data_out"
+        ],
+        "start": [
+          "fsm_state",
+          "shift_ticks",
+          "shreg"
+        ],
+        "clk": [
+          "fsm_state",
+          "shift_ticks",
+          "done",
+          "shreg",
+          "byte_cnt",
+          "data_out"
+        ],
+        "shift_ticks": [
+          "fsm_state",
+          "shift_ticks"
+        ],
+        "din": [
+          "shreg"
+        ],
+        "shreg": [
+          "shreg",
+          "data_out"
+        ],
+        "byte_cnt": [
+          "byte_cnt",
+          "data_out"
+        ]
+      },
+      "loc": {
+        "clk": {
+          "file": "rtl/xprop/xprop_top.sv",
+          "line": 14
+        },
+        "rst_n": {
+          "file": "rtl/xprop/xprop_top.sv",
+          "line": 15
+        },
+        "start": {
+          "file": "rtl/xprop/xprop_top.sv",
+          "line": 16
+        },
+        "din": {
+          "file": "rtl/xprop/xprop_top.sv",
+          "line": 17
+        },
+        "data_out": {
+          "file": "rtl/xprop/xprop_top.sv",
+          "line": 18
+        },
+        "done": {
+          "file": "rtl/xprop/xprop_top.sv",
+          "line": 19
+        },
+        "fsm_state": {
+          "file": "rtl/xprop/xprop_top.sv",
+          "line": 24
+        },
+        "shift_ticks": {
+          "file": "rtl/xprop/xprop_top.sv",
+          "line": 25
+        },
+        "byte_cnt": {
+          "file": "rtl/xprop/xprop_top.sv",
+          "line": 26
+        },
+        "shreg": {
+          "file": "rtl/xprop/xprop_top.sv",
+          "line": 27
+        }
+      },
+      "instances": [],
+      "skipped_members": 0
+    }
+  },
+  "instance_tree": {
+    "xprop_tb": "xprop_tb",
+    "xprop_tb.dut": "xprop_top"
+  }
+}

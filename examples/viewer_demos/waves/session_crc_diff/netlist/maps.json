@@ -1,0 +1,1090 @@
+{
+  "tool": "pyslang",
+  "version": "11.0.0",
+  "top": "crc_diff_tb",
+  "diagnostics": 0,
+  "diagnostics_summary": {
+    "total": 0,
+    "errors": 0,
+    "lints": 0,
+    "lint_by_code": {},
+    "by_code": {},
+    "samples": [],
+    "actionable_hints": []
+  },
+  "partial": false,
+  "parse_errors": [],
+  "auto_resolved": {
+    "rounds": 0,
+    "added_incdirs": [],
+    "added_files": [],
+    "uvm_incdirs": []
+  },
+  "failed_tops": [],
+  "modules": {
+    "crc_diff_tb": {
+      "name": "crc_diff_tb",
+      "file": "rtl/crc_diff/crc_diff_top.sv",
+      "line": 72,
+      "ports": {},
+      "signals": {
+        "clk": {
+          "kind": "variable",
+          "width": 1,
+          "line": 73,
+          "file": "rtl/crc_diff/crc_diff_top.sv"
+        },
+        "rst_n": {
+          "kind": "variable",
+          "width": 1,
+          "line": 73,
+          "file": "rtl/crc_diff/crc_diff_top.sv"
+        },
+        "valid": {
+          "kind": "variable",
+          "width": 1,
+          "line": 73,
+          "file": "rtl/crc_diff/crc_diff_top.sv"
+        },
+        "sop": {
+          "kind": "variable",
+          "width": 1,
+          "line": 73,
+          "file": "rtl/crc_diff/crc_diff_top.sv"
+        },
+        "eop": {
+          "kind": "variable",
+          "width": 1,
+          "line": 73,
+          "file": "rtl/crc_diff/crc_diff_top.sv"
+        },
+        "data": {
+          "kind": "variable",
+          "width": 2,
+          "line": 74,
+          "file": "rtl/crc_diff/crc_diff_top.sv"
+        },
+        "crc_residue": {
+          "kind": "net",
+          "width": 4,
+          "line": 75,
+          "file": "rtl/crc_diff/crc_diff_top.sv"
+        },
+        "crc_err": {
+          "kind": "net",
+          "width": 1,
+          "line": 76,
+          "file": "rtl/crc_diff/crc_diff_top.sv"
+        }
+      },
+      "drivers": {
+        "crc_residue": [
+          {
+            "kind": "instance_port",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/crc_diff/crc_diff_top.sv",
+            "line": 78,
+            "snippet": "crc_diff_top dut (.clk(clk), .rst_n(rst_n), .valid(valid), .data(data),",
+            "port_ref": {
+              "instance": "dut",
+              "def": "crc_diff_top",
+              "port": "crc_residue",
+              "direction": "output"
+            }
+          }
+        ],
+        "crc_err": [
+          {
+            "kind": "instance_port",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/crc_diff/crc_diff_top.sv",
+            "line": 78,
+            "snippet": "crc_diff_top dut (.clk(clk), .rst_n(rst_n), .valid(valid), .data(data),",
+            "port_ref": {
+              "instance": "dut",
+              "def": "crc_diff_top",
+              "port": "crc_err",
+              "direction": "output"
+            }
+          }
+        ],
+        "clk": [
+          {
+            "kind": "blocking",
+            "rhs": [
+              "clk"
+            ],
+            "control": [],
+            "guard": [],
+            "file": "rtl/crc_diff/crc_diff_top.sv",
+            "line": 82,
+            "snippet": "always #5 clk = ~clk;"
+          },
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/crc_diff/crc_diff_top.sv",
+            "line": 100,
+            "snippet": "clk = 0; rst_n = 0; valid = 0; sop = 0; eop = 0; data = 2'b00;"
+          }
+        ],
+        "rst_n": [
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/crc_diff/crc_diff_top.sv",
+            "line": 100,
+            "snippet": "clk = 0; rst_n = 0; valid = 0; sop = 0; eop = 0; data = 2'b00;"
+          },
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/crc_diff/crc_diff_top.sv",
+            "line": 101,
+            "snippet": "#12 rst_n = 1;"
+          }
+        ],
+        "valid": [
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/crc_diff/crc_diff_top.sv",
+            "line": 100,
+            "snippet": "clk = 0; rst_n = 0; valid = 0; sop = 0; eop = 0; data = 2'b00;"
+          }
+        ],
+        "sop": [
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/crc_diff/crc_diff_top.sv",
+            "line": 100,
+            "snippet": "clk = 0; rst_n = 0; valid = 0; sop = 0; eop = 0; data = 2'b00;"
+          }
+        ],
+        "eop": [
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/crc_diff/crc_diff_top.sv",
+            "line": 100,
+            "snippet": "clk = 0; rst_n = 0; valid = 0; sop = 0; eop = 0; data = 2'b00;"
+          }
+        ],
+        "data": [
+          {
+            "kind": "blocking",
+            "rhs": [],
+            "control": [],
+            "guard": [],
+            "file": "rtl/crc_diff/crc_diff_top.sv",
+            "line": 100,
+            "snippet": "clk = 0; rst_n = 0; valid = 0; sop = 0; eop = 0; data = 2'b00;"
+          }
+        ]
+      },
+      "fanin": {
+        "crc_residue": [
+          "dut.crc_residue"
+        ],
+        "crc_err": [
+          "dut.crc_err"
+        ],
+        "clk": [
+          "clk"
+        ],
+        "rst_n": [],
+        "valid": [],
+        "sop": [],
+        "eop": [],
+        "data": [],
+        "dut.clk": [
+          "clk"
+        ],
+        "dut.rst_n": [
+          "rst_n"
+        ],
+        "dut.valid": [
+          "valid"
+        ],
+        "dut.data": [
+          "data"
+        ],
+        "dut.sop": [
+          "sop"
+        ],
+        "dut.eop": [
+          "eop"
+        ]
+      },
+      "loads": {
+        "dut.crc_residue": [
+          "crc_residue"
+        ],
+        "dut.crc_err": [
+          "crc_err"
+        ],
+        "clk": [
+          "clk",
+          "dut.clk"
+        ],
+        "rst_n": [
+          "dut.rst_n"
+        ],
+        "valid": [
+          "dut.valid"
+        ],
+        "data": [
+          "dut.data"
+        ],
+        "sop": [
+          "dut.sop"
+        ],
+        "eop": [
+          "dut.eop"
+        ]
+      },
+      "loc": {
+        "clk": {
+          "file": "rtl/crc_diff/crc_diff_top.sv",
+          "line": 73
+        },
+        "rst_n": {
+          "file": "rtl/crc_diff/crc_diff_top.sv",
+          "line": 73
+        },
+        "valid": {
+          "file": "rtl/crc_diff/crc_diff_top.sv",
+          "line": 73
+        },
+        "sop": {
+          "file": "rtl/crc_diff/crc_diff_top.sv",
+          "line": 73
+        },
+        "eop": {
+          "file": "rtl/crc_diff/crc_diff_top.sv",
+          "line": 73
+        },
+        "data": {
+          "file": "rtl/crc_diff/crc_diff_top.sv",
+          "line": 74
+        },
+        "crc_residue": {
+          "file": "rtl/crc_diff/crc_diff_top.sv",
+          "line": 75
+        },
+        "crc_err": {
+          "file": "rtl/crc_diff/crc_diff_top.sv",
+          "line": 76
+        }
+      },
+      "instances": [
+        {
+          "def": "crc_diff_top",
+          "name": "dut",
+          "conns": {
+            "clk": "clk",
+            "rst_n": "rst_n",
+            "valid": "valid",
+            "data": "data",
+            "sop": "sop",
+            "eop": "eop",
+            "crc_residue": "crc_residue",
+            "crc_err": "crc_err"
+          },
+          "conn_dirs": {
+            "clk": "input",
+            "rst_n": "input",
+            "valid": "input",
+            "data": "input",
+            "sop": "input",
+            "eop": "input",
+            "crc_residue": "output",
+            "crc_err": "output"
+          },
+          "line": 78
+        }
+      ],
+      "skipped_members": 0
+    },
+    "crc_diff_top": {
+      "name": "crc_diff_top",
+      "file": "rtl/crc_diff/crc_diff_top.sv",
+      "line": 18,
+      "ports": {
+        "clk": {
+          "direction": "input",
+          "width": 1,
+          "type": "port",
+          "line": 19,
+          "file": "rtl/crc_diff/crc_diff_top.sv"
+        },
+        "rst_n": {
+          "direction": "input",
+          "width": 1,
+          "type": "port",
+          "line": 20,
+          "file": "rtl/crc_diff/crc_diff_top.sv"
+        },
+        "valid": {
+          "direction": "input",
+          "width": 1,
+          "type": "port",
+          "line": 21,
+          "file": "rtl/crc_diff/crc_diff_top.sv"
+        },
+        "data": {
+          "direction": "input",
+          "width": 2,
+          "type": "port",
+          "line": 22,
+          "file": "rtl/crc_diff/crc_diff_top.sv"
+        },
+        "sop": {
+          "direction": "input",
+          "width": 1,
+          "type": "port",
+          "line": 23,
+          "file": "rtl/crc_diff/crc_diff_top.sv"
+        },
+        "eop": {
+          "direction": "input",
+          "width": 1,
+          "type": "port",
+          "line": 24,
+          "file": "rtl/crc_diff/crc_diff_top.sv"
+        },
+        "crc_residue": {
+          "direction": "output",
+          "width": 4,
+          "type": "port",
+          "line": 25,
+          "file": "rtl/crc_diff/crc_diff_top.sv"
+        },
+        "crc_err": {
+          "direction": "output",
+          "width": 1,
+          "type": "port",
+          "line": 26,
+          "file": "rtl/crc_diff/crc_diff_top.sv"
+        }
+      },
+      "signals": {
+        "clk": {
+          "kind": "net",
+          "width": 1,
+          "line": 19,
+          "file": "rtl/crc_diff/crc_diff_top.sv"
+        },
+        "rst_n": {
+          "kind": "net",
+          "width": 1,
+          "line": 20,
+          "file": "rtl/crc_diff/crc_diff_top.sv"
+        },
+        "valid": {
+          "kind": "net",
+          "width": 1,
+          "line": 21,
+          "file": "rtl/crc_diff/crc_diff_top.sv"
+        },
+        "data": {
+          "kind": "net",
+          "width": 2,
+          "line": 22,
+          "file": "rtl/crc_diff/crc_diff_top.sv"
+        },
+        "sop": {
+          "kind": "net",
+          "width": 1,
+          "line": 23,
+          "file": "rtl/crc_diff/crc_diff_top.sv"
+        },
+        "eop": {
+          "kind": "net",
+          "width": 1,
+          "line": 24,
+          "file": "rtl/crc_diff/crc_diff_top.sv"
+        },
+        "crc_residue": {
+          "kind": "variable",
+          "width": 4,
+          "line": 25,
+          "file": "rtl/crc_diff/crc_diff_top.sv"
+        },
+        "crc_err": {
+          "kind": "variable",
+          "width": 1,
+          "line": 26,
+          "file": "rtl/crc_diff/crc_diff_top.sv"
+        },
+        "crc": {
+          "kind": "variable",
+          "width": 4,
+          "line": 29,
+          "file": "rtl/crc_diff/crc_diff_top.sv"
+        },
+        "capturing": {
+          "kind": "variable",
+          "width": 1,
+          "line": 30,
+          "file": "rtl/crc_diff/crc_diff_top.sv"
+        }
+      },
+      "drivers": {
+        "crc": [
+          {
+            "kind": "nonblocking",
+            "rhs": [],
+            "control": [
+              "clk",
+              "rst_n"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/crc_diff/crc_diff_top.sv",
+            "line": 38,
+            "snippet": "crc       <= 4'h0;"
+          },
+          {
+            "kind": "nonblocking",
+            "rhs": [],
+            "control": [
+              "clk",
+              "rst_n",
+              "sop"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "sig",
+                  "name": "sop"
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/crc_diff/crc_diff_top.sv",
+            "line": 42,
+            "snippet": "crc       <= 4'h0;"
+          },
+          {
+            "kind": "nonblocking",
+            "rhs": [
+              "crc",
+              "data"
+            ],
+            "control": [
+              "capturing",
+              "clk",
+              "eop",
+              "rst_n",
+              "sop",
+              "valid"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "sig",
+                  "name": "sop"
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "sig",
+                  "name": "eop"
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "bin",
+                  "op": "LogicalAnd",
+                  "l": {
+                    "k": "sig",
+                    "name": "valid"
+                  },
+                  "r": {
+                    "k": "sig",
+                    "name": "capturing"
+                  }
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/crc_diff/crc_diff_top.sv",
+            "line": 50,
+            "snippet": "crc[0] <= crc[3] ^ data[1] ^ data[0];"
+          },
+          {
+            "kind": "nonblocking",
+            "rhs": [
+              "crc",
+              "data"
+            ],
+            "control": [
+              "capturing",
+              "clk",
+              "eop",
+              "rst_n",
+              "sop",
+              "valid"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "sig",
+                  "name": "sop"
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "sig",
+                  "name": "eop"
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "bin",
+                  "op": "LogicalAnd",
+                  "l": {
+                    "k": "sig",
+                    "name": "valid"
+                  },
+                  "r": {
+                    "k": "sig",
+                    "name": "capturing"
+                  }
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/crc_diff/crc_diff_top.sv",
+            "line": 52,
+            "snippet": "crc[1] <= crc[0] ^ data[1];"
+          },
+          {
+            "kind": "nonblocking",
+            "rhs": [
+              "crc",
+              "data"
+            ],
+            "control": [
+              "capturing",
+              "clk",
+              "eop",
+              "rst_n",
+              "sop",
+              "valid"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "sig",
+                  "name": "sop"
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "sig",
+                  "name": "eop"
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "bin",
+                  "op": "LogicalAnd",
+                  "l": {
+                    "k": "sig",
+                    "name": "valid"
+                  },
+                  "r": {
+                    "k": "sig",
+                    "name": "capturing"
+                  }
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/crc_diff/crc_diff_top.sv",
+            "line": 53,
+            "snippet": "crc[2] <= crc[1] ^ data[0];"
+          },
+          {
+            "kind": "nonblocking",
+            "rhs": [
+              "crc"
+            ],
+            "control": [
+              "capturing",
+              "clk",
+              "eop",
+              "rst_n",
+              "sop",
+              "valid"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "sig",
+                  "name": "sop"
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "sig",
+                  "name": "eop"
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "bin",
+                  "op": "LogicalAnd",
+                  "l": {
+                    "k": "sig",
+                    "name": "valid"
+                  },
+                  "r": {
+                    "k": "sig",
+                    "name": "capturing"
+                  }
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/crc_diff/crc_diff_top.sv",
+            "line": 54,
+            "snippet": "crc[3] <= crc[2];"
+          }
+        ],
+        "capturing": [
+          {
+            "kind": "nonblocking",
+            "rhs": [],
+            "control": [
+              "clk",
+              "rst_n"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/crc_diff/crc_diff_top.sv",
+            "line": 39,
+            "snippet": "capturing <= 1'b0;"
+          },
+          {
+            "kind": "nonblocking",
+            "rhs": [],
+            "control": [
+              "clk",
+              "rst_n",
+              "sop"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "sig",
+                  "name": "sop"
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/crc_diff/crc_diff_top.sv",
+            "line": 43,
+            "snippet": "capturing <= 1'b1;"
+          },
+          {
+            "kind": "nonblocking",
+            "rhs": [],
+            "control": [
+              "clk",
+              "eop",
+              "rst_n",
+              "sop"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "sig",
+                  "name": "sop"
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "sig",
+                  "name": "eop"
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/crc_diff/crc_diff_top.sv",
+            "line": 45,
+            "snippet": "capturing <= 1'b0;"
+          }
+        ],
+        "crc_residue": [
+          {
+            "kind": "nonblocking",
+            "rhs": [],
+            "control": [
+              "clk",
+              "rst_n"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/crc_diff/crc_diff_top.sv",
+            "line": 63,
+            "snippet": "crc_residue <= 4'h0;"
+          },
+          {
+            "kind": "nonblocking",
+            "rhs": [
+              "crc"
+            ],
+            "control": [
+              "clk",
+              "eop",
+              "rst_n"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "sig",
+                  "name": "eop"
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/crc_diff/crc_diff_top.sv",
+            "line": 66,
+            "snippet": "crc_residue <= crc;"
+          }
+        ],
+        "crc_err": [
+          {
+            "kind": "nonblocking",
+            "rhs": [],
+            "control": [
+              "clk",
+              "rst_n"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/crc_diff/crc_diff_top.sv",
+            "line": 64,
+            "snippet": "crc_err     <= 1'b0;"
+          },
+          {
+            "kind": "nonblocking",
+            "rhs": [
+              "GOLDEN",
+              "crc"
+            ],
+            "control": [
+              "clk",
+              "eop",
+              "rst_n"
+            ],
+            "guard": [
+              {
+                "cond": {
+                  "k": "un",
+                  "op": "LogicalNot",
+                  "a": {
+                    "k": "sig",
+                    "name": "rst_n"
+                  }
+                },
+                "expect": 0
+              },
+              {
+                "cond": {
+                  "k": "sig",
+                  "name": "eop"
+                },
+                "expect": 1
+              }
+            ],
+            "file": "rtl/crc_diff/crc_diff_top.sv",
+            "line": 67,
+            "snippet": "crc_err     <= (crc != GOLDEN);"
+          }
+        ]
+      },
+      "fanin": {
+        "crc": [
+          "capturing",
+          "clk",
+          "crc",
+          "data",
+          "eop",
+          "rst_n",
+          "sop",
+          "valid"
+        ],
+        "capturing": [
+          "clk",
+          "eop",
+          "rst_n",
+          "sop"
+        ],
+        "crc_residue": [
+          "clk",
+          "crc",
+          "eop",
+          "rst_n"
+        ],
+        "crc_err": [
+          "GOLDEN",
+          "clk",
+          "crc",
+          "eop",
+          "rst_n"
+        ]
+      },
+      "loads": {
+        "eop": [
+          "crc",
+          "capturing",
+          "crc_residue",
+          "crc_err"
+        ],
+        "valid": [
+          "crc"
+        ],
+        "clk": [
+          "crc",
+          "capturing",
+          "crc_residue",
+          "crc_err"
+        ],
+        "sop": [
+          "crc",
+          "capturing"
+        ],
+        "crc": [
+          "crc",
+          "crc_residue",
+          "crc_err"
+        ],
+        "rst_n": [
+          "crc",
+          "capturing",
+          "crc_residue",
+          "crc_err"
+        ],
+        "data": [
+          "crc"
+        ],
+        "capturing": [
+          "crc"
+        ],
+        "GOLDEN": [
+          "crc_err"
+        ]
+      },
+      "loc": {
+        "clk": {
+          "file": "rtl/crc_diff/crc_diff_top.sv",
+          "line": 19
+        },
+        "rst_n": {
+          "file": "rtl/crc_diff/crc_diff_top.sv",
+          "line": 20
+        },
+        "valid": {
+          "file": "rtl/crc_diff/crc_diff_top.sv",
+          "line": 21
+        },
+        "data": {
+          "file": "rtl/crc_diff/crc_diff_top.sv",
+          "line": 22
+        },
+        "sop": {
+          "file": "rtl/crc_diff/crc_diff_top.sv",
+          "line": 23
+        },
+        "eop": {
+          "file": "rtl/crc_diff/crc_diff_top.sv",
+          "line": 24
+        },
+        "crc_residue": {
+          "file": "rtl/crc_diff/crc_diff_top.sv",
+          "line": 25
+        },
+        "crc_err": {
+          "file": "rtl/crc_diff/crc_diff_top.sv",
+          "line": 26
+        },
+        "crc": {
+          "file": "rtl/crc_diff/crc_diff_top.sv",
+          "line": 29
+        },
+        "capturing": {
+          "file": "rtl/crc_diff/crc_diff_top.sv",
+          "line": 30
+        }
+      },
+      "instances": [],
+      "skipped_members": 0
+    }
+  },
+  "instance_tree": {
+    "crc_diff_tb": "crc_diff_tb",
+    "crc_diff_tb.dut": "crc_diff_top"
+  }
+}
