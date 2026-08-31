@@ -86,8 +86,11 @@ Licensing notes:
   license.
 - Compiled `.so` artifacts must never be committed or shipped with wave-mcp,
   its PyPI package, or its release assets.
-- Contributing the fixes upstream is planned; once merged, the local patches
-  can be dropped.
+- The fixes were also contributed upstream (semify-eda/fstdumper#6, fork
+  xxin0816/fstdumper). Upstream has been inactive since 2023-09, so the
+  local patches are maintained here on a long-term basis and are NOT gated
+  on upstream acceptance; if upstream ever merges them, the local patches
+  can be dropped at that point.
 
 ## Standalone Python runtime (offline bundle only)
 
