@@ -56,9 +56,12 @@ enum fsdbBytesPerBit {
 
 enum fsdbTreeCBType {
     FSDB_TREE_CBT_UNKNOWN = 0,
-    FSDB_TREE_CBT_SCOPE   = 1,
-    FSDB_TREE_CBT_UPSCOPE = 2,
-    FSDB_TREE_CBT_VAR     = 3
+    FSDB_TREE_CBT_BEGIN_TREE = 1,
+    FSDB_TREE_CBT_END_TREE = 2,
+    FSDB_TREE_CBT_SCOPE   = 3,
+    FSDB_TREE_CBT_UPSCOPE = 4,
+    FSDB_TREE_CBT_VAR     = 5,
+    FSDB_TREE_CBT_END_ALL_TREE = 6
 };
 
 typedef struct {
@@ -105,6 +108,7 @@ class ffrObject {
 public:
     static bool_T   ffrIsFSDB(str_T fname);
     static ffrObject *ffrOpen3(str_T fname);
+    static str_T    stub_path;      /* when set, ffrIsFSDB/ffrOpen3 serve a stub script */
 
     str_T     ffrGetScaleUnit(void);
     void      ffrSetTreeCBFunc(fsdbTreeCBFuncT cb, void *client_data);
