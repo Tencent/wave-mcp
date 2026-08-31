@@ -2,10 +2,11 @@
 # Install the wave-mcp offline bundle on the air-gapped target (no internet).
 #
 # Run from inside the unpacked bundle directory (e.g. on the shared drive):
-#   ./install.sh [--prefix <install_dir>]
+#   ./install.sh [--prefix <install_dir>] [--python <interpreter|prefix>]
 #
-# Creates a venv (using the bundled standalone python if present, else the
-# target's python3) and installs wave-mcp + deps from the offline wheelhouse.
+# Creates a venv (interpreter picked by: --python > bundled standalone python
+# > VIRTUAL_ENV/$PYTHON > python3 > python3.X cascade; gated on the wheel
+# cp version) and installs wave-mcp + deps from the offline wheelhouse.
 # Then emits a ready-to-use launcher and an MCP client config snippet.
 set -euo pipefail
 
@@ -15,21 +16,86 @@ PREFIX="$HERE"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --prefix) PREFIX="$2"; shift 2;;
+    --python) PY_OVERRIDE="$2"; shift 2;;
     *) echo "unknown arg: $1"; exit 1;;
   esac
 done
 
 # 1) pick a python interpreter ---------------------------------------------
-if [[ -x "$HERE/python/bin/python3" ]]; then
+# Priority: --python arg > bundled standalone python > user-selected env
+# (VIRTUAL_ENV / PYTHON) > python3 on PATH > versioned python3.X cascade.
+# Every candidate is gated on the wheelhouse cpXX tag; a mismatched candidate
+# is skipped (with a note) so install keeps trying the next one.
+# cp version gate: the project wheel itself is py3-none-any (pure python),
+# so anchor on the BINARY dependency wheels (cffi/pyslang/pylibfst/...) which
+# carry the cpXX tag of the python the wheelhouse was built for.
+WANT_CP="$(ls "$HERE"/wheels/*.whl 2>/dev/null | xargs -n1 basename 2>/dev/null \
+  | grep -oE 'cp[0-9]+' | sort | uniq -c | sort -rn | head -1 | awk '{print $2}' || true)"
+if [[ "$WANT_CP" == cp* ]]; then WANT_CP="${WANT_CP#cp}"; fi
+BASE_PY=""
+BASE_PY_WHY=""
+
+pyver() { "$1" -c 'import sys;print("%d%d"%sys.version_info[:2])' 2>/dev/null || true; }
+
+try_py() {  # try_py <path> <why>: set BASE_PY if executable and cp-matched
+  local cand="$1" why="$2" got
+  [[ -n "$cand" && -x "$cand" ]] || return 1
+  if [[ -n "$WANT_CP" ]]; then
+    got="$(pyver "$cand")"
+    if [[ "$got" != "$WANT_CP" ]]; then
+      echo "[!] skip $why: $cand is cp$got, wheels are cp$WANT_CP"
+      return 1
+    fi
+  fi
+  BASE_PY="$cand"; BASE_PY_WHY="$why"
+  return 0
+}
+
+# 1a) explicit override: --python <interpreter or prefix>
+if [[ -n "${PY_OVERRIDE:-}" ]]; then
+  if [[ -d "$PY_OVERRIDE" ]]; then
+    BASE_PY=""
+    for cand in "$PY_OVERRIDE/bin/python3" "$PY_OVERRIDE/bin/python"; do
+      [[ -x "$cand" ]] && { BASE_PY="$cand"; break; }
+    done
+    [[ -z "$BASE_PY" ]] && { echo "ERROR: no python executable under $PY_OVERRIDE/bin/"; exit 1; }
+  else
+    [[ -x "$PY_OVERRIDE" ]] || { echo "ERROR: --python not executable: $PY_OVERRIDE"; exit 1; }
+    BASE_PY="$PY_OVERRIDE"
+  fi
+  BASE_PY_WHY="--python override"
+  if [[ -n "$WANT_CP" && "$(pyver "$BASE_PY")" != "$WANT_CP" ]]; then
+    echo "ERROR: --python is cp$(pyver "$BASE_PY"), wheels are cp$WANT_CP."
+    exit 1
+  fi
+elif [[ -x "$HERE/python/bin/python3" ]]; then
   BASE_PY="$HERE/python/bin/python3"
-  echo "[*] using bundled standalone python: $BASE_PY"
-else
-  BASE_PY="$(command -v python3 || true)"
-  [[ -z "$BASE_PY" ]] && { echo "ERROR: no python3 found and no bundled python/. "; exit 1; }
-  echo "[*] using target python3: $BASE_PY ($($BASE_PY -V 2>&1))"
-  echo "    (note: the offline wheels match the build machine's Python version; if this"
-  echo "     python's version differs, bundle a matching standalone python via --python instead)"
+  BASE_PY_WHY="bundled standalone python"
 fi
+
+# 1b) still nothing: user-selected env, then PATH, then versioned cascade.
+if [[ -z "$BASE_PY" ]]; then
+  VE_PY="${VIRTUAL_ENV:-/nonexistent}/bin/python"
+  [[ -x "$VE_PY" && "${VIRTUAL_ENV:-}" != "/" && -n "${VIRTUAL_ENV:-}" ]] \
+    && try_py "$VE_PY" "VIRTUAL_ENV" || true
+  PY_ENV="${PYTHON:-}"; PY_ENV="${PY_ENV/#\~/$HOME}"
+  [[ -n "${PYTHON:-}" && -x "$PY_ENV" ]] && try_py "$PY_ENV" '$PYTHON' || true
+  try_py "$(command -v python3 2>/dev/null || true)" "PATH python3" || true
+  if [[ -z "$BASE_PY" ]]; then
+    for v in 3.13 3.12 3.11 3.10 3.9 3.8; do
+      try_py "$(command -v "python$v" 2>/dev/null || true)" "python$v" && break
+    done
+  fi
+fi
+
+if [[ -z "$BASE_PY" ]]; then
+  echo "ERROR: no usable python found and no bundled python."
+  [[ -n "$WANT_CP" ]] && echo "       wheels need a cp$WANT_CP interpreter (python 3.$(echo "$WANT_CP" | sed 's/^3//').x)."
+  echo "       fix: install python, or rebuild the bundle with"
+  echo "       --python <standalone tarball> for version independence."
+  exit 1
+fi
+echo "[*] using python: $BASE_PY ($("$BASE_PY" -V 2>&1)) [$BASE_PY_WHY]"
 
 # 2) create venv + offline install -----------------------------------------
 RUNTIME="$PREFIX/runtime"
