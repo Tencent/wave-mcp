@@ -225,7 +225,8 @@ drivers:
 
 如果你的仿真器只吐 VCD（如 Questa），建议先转 FST：**体积约 VCD 的 1/50，随机访问快**。
 Xcelium (xrun) 用户推荐跳过 VCD，用 fstdumper 插件直接 dump FST，见
-[Xcelium 直出 FST 指南](docs/XCELIUM_FST_GUIDE.md)。
+[Xcelium 直出 FST 指南](docs/XCELIUM_FST_GUIDE.md)（含一套经 Xcelium 25.09 实测的
+Xcelium 修复补丁，见指南与仓库 `third_party/fstdumper/`）。
 转换依赖 GTKWave 附带的 `vcd2fst` 工具：
 
 ```bash

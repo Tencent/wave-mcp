@@ -1,0 +1,319 @@
+--- a/src/sys_fst.c
++++ b/src/sys_fst.c
+@@ -46,6 +46,15 @@
+       struct vcd_info *dmp_next;
+       fstHandle handle;
+       int scheduled;
++	/* Last value actually written to the FST.  Some simulators (Xcelium
++	 * among them) fire cbValueChange even when the value did not change,
++	 * which would pad the dump with redundant transitions; keeping the
++	 * last emitted value lets show_this_item() skip those no-ops.
++	 * `last_real` is used for vpiRealVar, `last_str` for everything else;
++	 * `last_valid` is 0 until the first value has been dumped. */
++      int last_valid;
++      double last_real;
++      char *last_str;
+ };
+ 
+ 
+@@ -84,13 +93,35 @@
+       if (type == vpiRealVar) {
+ 	    value.format = vpiRealVal;
+ 	    vpi_get_value(info->item, &value);
++	      /* Skip no-op transitions (value unchanged since the last dump). */
++	    if (info->last_valid && info->last_real == value.value.real) {
++		  debug_print("show_this_item skipped (unchanged real)\n");
++		  return;
++	    }
++	    info->last_real  = value.value.real;
++	    info->last_valid = 1;
+ 	    fstWriterEmitValueChange(dump_file, info->handle, &value.value.real);
++      } else if (type == vpiNamedEvent) {
++	      /* A named event carries no value: every trigger is meaningful,
++	       * so it is never suppressed.  Do NOT call vpi_get_value() here --
++	       * Xcelium aborts with "VPI NOVALOB: Object of type vpiNamedEvent
++	       * does not have a value". */
++	    fstWriterEmitValueChange(dump_file, info->handle, "1");
+       } else {
+ 	    value.format = vpiBinStrVal;
+ 	    vpi_get_value(info->item, &value);
+-	    fstWriterEmitValueChange(dump_file, info->handle, (type != vpiNamedEvent) ? value.value.str : "1");
++	      /* Skip no-op transitions (value unchanged since the last dump). */
++	    if (info->last_valid && info->last_str &&
++	        strcmp(info->last_str, value.value.str) == 0) {
++		  debug_print("show_this_item skipped (unchanged str)\n");
++		  return;
++	    }
++	    free(info->last_str);
++	    info->last_str   = strdup(value.value.str);
++	    info->last_valid = 1;
++	    fstWriterEmitValueChange(dump_file, info->handle, value.value.str);
+       }
+-      
++
+       debug_print("show_this_item done\n");
+ }
+ 
+@@ -105,13 +136,23 @@
+ 	      /* Some tools dump nothing here...? */
+             double mynan = strtod("NaN", NULL);
+ 	    fstWriterEmitValueChange(dump_file, info->handle, &mynan);
++	      /* NaN compares unequal to everything, so just forget the cached
++	       * value: the next real dump must go through unconditionally. */
++	    info->last_valid = 0;
+       } else if (type == vpiNamedEvent) {
+ 	    /* Do nothing for named events. */
+       } else {
+ 	    int siz = vpi_get(vpiSize, info->item);
+-	    char *xmem = malloc(siz);
++	      /* NOTE: +1 for the NUL terminator -- fstWriterEmitValueChange()
++	       * treats the buffer as a C string.  The original code allocated
++	       * only `siz` bytes and wrote one past the end. */
++	    char *xmem = malloc(siz + 1);
+ 	    memset(xmem, 'x', siz);
++	    xmem[siz] = '\0';
+ 	    fstWriterEmitValueChange(dump_file, info->handle, xmem);
++	    free(info->last_str);
++	    info->last_str   = strdup(xmem);
++	    info->last_valid = 1;
+ 	    free(xmem);
+       }
+       
+@@ -163,15 +204,17 @@
+       debug_print("vcd_checkpoint_x done\n");
+ }
+ 
+-static PLI_INT32 variable_cb_2(p_cb_data cause)
++/* Write out every variable that variable_cb_1() queued into vcd_dmp_list.
++ * Factored out of variable_cb_2() so that finish_cb() can reuse it: $finish
++ * can pre-empt the ReadOnlySynch callback that normally does this, and without
++ * an explicit flush the value changes of the final simulation time are lost. */
++static void flush_pending(PLI_UINT64 now)
+ {
+-      debug_print("variable_cb_2\n");
+-
+       struct vcd_info* info = vcd_dmp_list;
+-      PLI_UINT64 now = timerec_to_time64(cause->time);
+ 
+-      debug_print("now %ld\n", now);
+-      debug_print("vcd_cur_time %ld\n", vcd_cur_time);
++      debug_print("flush_pending %ld\n", now);
++
++      if (!info) return;
+ 
+       if (now != vcd_cur_time) {
+ 	    fstWriterEmitTimeChange(dump_file, now);
+@@ -185,6 +228,15 @@
+ 
+       vcd_dmp_list = 0;
+ 
++      debug_print("flush_pending done\n");
++}
++
++static PLI_INT32 variable_cb_2(p_cb_data cause)
++{
++      debug_print("variable_cb_2\n");
++
++      flush_pending(timerec_to_time64(cause->time));
++
+       debug_print("variable_cb_2 done\n");
+ 
+       return 0;
+@@ -280,14 +332,18 @@
+       
+       debug_print("dumpvars_time %ld\n", dumpvars_time);
+ 
+-      if (!dump_is_off && !dump_is_full && dumpvars_time != vcd_cur_time) {
+-	    fstWriterEmitTimeChange(dump_file, dumpvars_time);
++      /* $finish can run before the ReadOnlySynch callback that normally
++       * drains vcd_dmp_list, which used to silently drop every value change
++       * that happened at the final simulation time.  Flush them explicitly. */
++      if (!dump_is_off && !dump_is_full) {
++	    flush_pending(dumpvars_time);
+       }
+ 
+       fstWriterClose(dump_file);
+ 
+       for (cur = vcd_list ;  cur ;  cur = next) {
+ 	    next = cur->next;
++	    free(cur->last_str);
+ 	    free(cur);
+       }
+       vcd_list = 0;
+@@ -627,6 +683,7 @@
+ 	  case vpiFunction:   stype = FST_ST_VCD_FUNCTION; break;
+ 	  case vpiGenScope:   stype = FST_ST_VCD_GENERATE; break;
+ 	  case vpiModule:     stype = FST_ST_VCD_MODULE; break;
++	  case vpiInterface:  stype = FST_ST_VCD_INTERFACE; break;
+ 	  case vpiPackage:    stype = FST_ST_VCD_PACKAGE; break;
+ 	  case vpiTask:       stype = FST_ST_VCD_TASK; break;
+ 
+@@ -753,6 +810,11 @@
+ 		  info->item  = item;
+ 		  info->handle = new_ident;
+ 		  info->scheduled = 0;
++		    /* no last value yet: must be initialised, malloc() does
++		     * not zero the block and show_this_item() reads them. */
++		  info->last_valid = 0;
++		  info->last_real  = 0.0;
++		  info->last_str   = NULL;
+ 
+ 		  cb.time      = &info->time;
+ 		  cb.user_data = (char*)info;
+@@ -773,6 +835,7 @@
+ 	    break;
+ 
+ 	  case vpiModule:
++	  case vpiInterface:
+ 	  case vpiPackage:
+ 	  case vpiGenScope:
+ 	  case vpiFunction:
+@@ -794,6 +857,7 @@
+ 			/* Scope */
+ 			vpiFunction,
+ 			vpiGenScope,
++			vpiInterface,
+ 			vpiModule,
+ 			vpiNamedBegin,
+ 			vpiNamedFork,
+@@ -845,16 +909,48 @@
+ 			vpiHandle hand;
+ 			
+ 			# ifndef ICARUS_VERILOG
+-			// Workaround for Xcelium
+-			if (item_type == vpiModule) {
+-			  if (types[i] == vpiFunction || 
+-			      types[i] == vpiGenScope || 
+-			      types[i] == vpiNamedBegin || 
+-			      types[i] == vpiNamedFork || 
++			/* --- Simulators with a strict / partial VPI implementation --
++			 * Measured on Cadence Xcelium 25.09-a081.  From a vpiModule
++			 * *or* a vpiInterface handle none of these can be iterated:
++			 *   vpiTask, vpiFunction, vpiGenScope -> VPI ... "is not
++			 *                                       supported for a
++			 *                                       reference handle"
++			 *   vpiNamedBegin, vpiNamedFork      -> VPI CANTIT "Can't
++			 *                                       iterate on type"
++			 *   vpiModule (from vpiInterface)    -> not supported
++			 * Only vpiModule (from a module) and vpiInterface (from a
++			 * module) iterate cleanly.  Calling an unsupported operation
++			 * makes Xcelium print a VPI error for *every* scope, so they
++			 * are skipped here.
++			 *
++			 * Upstream guarded only `vpiModule`.  Now that interfaces
++			 * are traversed too (see `case vpiInterface` above) the
++			 * guard has to cover them as well, otherwise every
++			 * interface instance adds four more VPI errors to the log.
++			 *
++			 * NOTE: this is a genuine coverage loss -- task/function
++			 * locals and generate-block signals simply cannot be
++			 * reached through VPI on Xcelium.  Recovering them needs a
++			 * runtime scope-discovery hook, not a dumpvars-time walk.
++			 *
++			 * Define FSTDUMPER_XCELIUM_TRY_SUBSCOPES on a simulator
++			 * that does support these iterators.
++			 * --------------------------------------------------------- */
++			#  ifndef FSTDUMPER_XCELIUM_TRY_SUBSCOPES
++			if (item_type == vpiModule || item_type == vpiInterface) {
++			  if (types[i] == vpiFunction ||
++			      types[i] == vpiGenScope ||
++			      types[i] == vpiNamedBegin ||
++			      types[i] == vpiNamedFork ||
+ 			      types[i] == vpiTask) {
+ 			    continue;
+ 			  }
+ 			}
++			  /* an interface instantiates no modules */
++			if (item_type == vpiInterface && types[i] == vpiModule) {
++			  continue;
++			}
++			#  endif
+ 			# endif
+ 			
+ 			vpiHandle argv = vpi_iterate(types[i], item);
+--- /dev/null
++++ b/testbench/fst_regress_tb.sv
+@@ -0,0 +1,83 @@
++// fst_regress_tb.sv —— fstdumper 回归 testbench
++//
++// 覆盖 fstdumper 在 Xcelium 上的各条 dump 路径：
++//   * interface（含 modport / clocking block 的宿主 interface）
++//   * task / function 内的 begin 块（自动变量）
++//   * real 变量（vpiRealVar）
++//   * named event（vpiNamedEvent）
++//   * $fstDumpoff / $fstDumpon / $fstDumpall / $fstDumpflush
++//   * $finish 同刻的值变化（验证最后一次跳变不丢失）
++//
++// 运行：xrun -64bit -sv +access+r \
++//         -loadvpi ./fstdumper.so:vlog_startup_routines_bootstrap \
++//         testbench/fst_regress_tb.sv -top fst_regress_tb
++
++`timescale 1ns/1ps
++
++interface reg_if (input logic clk);
++    logic [7:0] data;
++    logic       valid;
++    clocking cb @(posedge clk);
++        output data;
++        output valid;
++    endclocking
++    modport mp (clocking cb);
++endinterface
++
++module fst_regress_tb;
++
++    logic clk = 1'b0;
++    always #5 clk = ~clk;
++
++    reg_if u_if (.clk(clk));
++
++    real        r_sig;                  // vpiRealVar
++    event       ev_sig;                 // vpiNamedEvent
++    logic [3:0] vec;
++    logic       done;
++
++    // task 内的自动变量 —— 动态 begin scope
++    task automatic do_work(input int n);
++        logic [7:0] tmp;
++        tmp = 8'(n) * 8'd3;
++        #1;
++        u_if.data  = tmp;
++        u_if.valid = 1'b1;
++        -> ev_sig;
++        #1;
++        u_if.valid = 1'b0;
++    endtask
++
++    initial begin
++        $fstDumpfile("fst_regress_tb.fst");
++        $fstDumpvars(0, fst_regress_tb);
++
++        r_sig = 0.0;
++        vec   = 4'd0;
++        done  = 1'b0;
++
++        repeat (4) begin
++            @(posedge clk);
++            r_sig = r_sig + 1.5;
++            vec   = vec + 4'd1;
++            do_work(vec);
++        end
++
++        // ---- $fstDumpoff / $fstDumpall / $fstDumpon ----
++        $fstDumpoff;                    // 之后所有信号写 x
++        @(posedge clk);
++        vec = 4'd9;
++        $fstDumpall;                    // checkpoint
++        $fstDumpon;
++        @(posedge clk);
++        vec = 4'd10;
++        $fstDumpflush;
++
++        // ---- $finish 同刻的变化（修复后必须出现在 FST 里）----
++        @(posedge clk);
++        vec  = 4'd15;
++        done = 1'b1;                    // 与 $finish 同一时刻
++        $finish;
++    end
++
++endmodule

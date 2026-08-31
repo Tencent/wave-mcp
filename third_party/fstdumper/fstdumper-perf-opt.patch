@@ -1,0 +1,130 @@
+--- a/src/sys_fst.c
++++ b/src/sys_fst.c
+@@ -51,10 +51,20 @@
+ 	 * which would pad the dump with redundant transitions; keeping the
+ 	 * last emitted value lets show_this_item() skip those no-ops.
+ 	 * `last_real` is used for vpiRealVar, `last_str` for everything else;
+-	 * `last_valid` is 0 until the first value has been dumped. */
++	 * `last_valid` is 0 until the first value has been dumped.
++	 * `last_str` is a *reused* buffer (see `last_cap`) so the hot path does
++	 * no malloc/free at all. */
+       int last_valid;
+       double last_real;
+       char *last_str;
++      size_t last_cap;
++	/* --- hot-path cache -------------------------------------------------
++	 * show_this_item() runs once per value change of every dumped signal.
++	 * vpi_get(vpiType,...) / vpi_get(vpiSize,...) were re-issued on every
++	 * single call although both are fixed at dumpvars time; on a 77k-signal
++	 * design that dominates the dump cost.  Cached here at registration. */
++      PLI_INT32 item_type;
++      int item_size;
+ };
+ 
+ 
+@@ -83,12 +93,36 @@
+       "fs"
+ };
+ 
++/* Remember the value just written, reusing the per-signal buffer so the hot
++ * path (one call per value change of every dumped signal) never calls
++ * malloc/free.  On OOM the dedup cache is simply switched off (last_valid=0),
++ * degrading to the original "always emit" behaviour -- never to wrong output. */
++static void cache_last_str(struct vcd_info *info, const char *str)
++{
++      size_t need = strlen(str) + 1;
++
++      if (info->last_cap < need) {
++	    size_t cap = info->last_cap ? info->last_cap : 32;
++	    while (cap < need) cap *= 2;
++	    char *p = realloc(info->last_str, cap);
++	    if (!p) {
++		  info->last_valid = 0;      /* out of memory: stop dedup'ing */
++		  return;
++	    }
++	    info->last_str = p;
++	    info->last_cap = cap;
++      }
++      memcpy(info->last_str, str, need);
++      info->last_valid = 1;
++}
++
+ static void show_this_item(struct vcd_info*info)
+ {
+       debug_print("show_this_item\n");
+ 
+       s_vpi_value value;
+-      PLI_INT32 type = vpi_get(vpiType, info->item);
++	/* cached at dumpvars time -- vpiType never changes (see struct vcd_info) */
++      PLI_INT32 type = info->item_type;
+ 
+       if (type == vpiRealVar) {
+ 	    value.format = vpiRealVal;
+@@ -116,9 +150,7 @@
+ 		  debug_print("show_this_item skipped (unchanged str)\n");
+ 		  return;
+ 	    }
+-	    free(info->last_str);
+-	    info->last_str   = strdup(value.value.str);
+-	    info->last_valid = 1;
++	    cache_last_str(info, value.value.str);
+ 	    fstWriterEmitValueChange(dump_file, info->handle, value.value.str);
+       }
+ 
+@@ -130,7 +162,7 @@
+ {
+       debug_print("show_this_item_x\n");
+ 
+-      PLI_INT32 type = vpi_get(vpiType, info->item);
++      PLI_INT32 type = info->item_type;
+ 
+       if (type == vpiRealVar) {
+ 	      /* Some tools dump nothing here...? */
+@@ -142,18 +174,18 @@
+       } else if (type == vpiNamedEvent) {
+ 	    /* Do nothing for named events. */
+       } else {
+-	    int siz = vpi_get(vpiSize, info->item);
++	    int siz = info->item_size;
+ 	      /* NOTE: +1 for the NUL terminator -- fstWriterEmitValueChange()
+ 	       * treats the buffer as a C string.  The original code allocated
+ 	       * only `siz` bytes and wrote one past the end. */
+-	    char *xmem = malloc(siz + 1);
+-	    memset(xmem, 'x', siz);
+-	    xmem[siz] = '\0';
+-	    fstWriterEmitValueChange(dump_file, info->handle, xmem);
+-	    free(info->last_str);
+-	    info->last_str   = strdup(xmem);
+-	    info->last_valid = 1;
+-	    free(xmem);
++	    char *xmem = malloc((size_t)siz + 1);
++	    if (xmem) {
++		  memset(xmem, 'x', siz);
++		  xmem[siz] = '\0';
++		  fstWriterEmitValueChange(dump_file, info->handle, xmem);
++		  cache_last_str(info, xmem);
++		  free(xmem);
++	    }
+       }
+       
+       debug_print("show_this_item_x done\n");
+@@ -810,11 +842,19 @@
+ 		  info->item  = item;
+ 		  info->handle = new_ident;
+ 		  info->scheduled = 0;
++		    /* hot-path cache: vpiType / vpiSize are fixed for the whole
++		     * run, so resolve them once here instead of on every value
++		     * change.  (vpiNamedEvent has no size -- it is dumped as a
++		     * single bit, matching the upstream code.)              */
++		  info->item_type = item_type;
++		  info->item_size = (item_type == vpiNamedEvent)
++		                  ? 1 : (int)vpi_get(vpiSize, item);
+ 		    /* no last value yet: must be initialised, malloc() does
+ 		     * not zero the block and show_this_item() reads them. */
+ 		  info->last_valid = 0;
+ 		  info->last_real  = 0.0;
+ 		  info->last_str   = NULL;
++		  info->last_cap   = 0;
+ 
+ 		  cb.time      = &info->time;
+ 		  cb.user_data = (char*)info;

@@ -39,6 +39,56 @@ records the exact GTKWave version/commit) so the binary can be rebuilt/relinked.
 The GTKWave GUI application is GPL-licensed, but wave-mcp does NOT use or ship
 it; only the MIT FST library plus the above converter sources are used.
 
+## FSDB converter (local build artifact only, never distributed)
+
+`third_party/fsdb2fst/` contains the source of `fsdb2fst`, an FSDB-to-FST
+converter built by `deploy/build_fsdb2fst.sh`. The converter source and the
+vendored FST writer are:
+
+| Component | License | Source |
+| --- | --- | --- |
+| fsdb2fst.cpp (this repo) | MIT (wave-mcp) | original code |
+| fstapi / libfst | MIT | https://github.com/gtkwave/libfst (via gtkwave 3.3.121) |
+| LZ4 | BSD-2-Clause (Yann Collet) | via gtkwave 3.3.121 |
+| FastLZ | MIT (Ariya Hidayat) | via gtkwave 3.3.121 |
+
+The converter additionally links at BUILD time against the Synopsys
+FsdbReader runtime (`libnffr.so` + `libnsys.so` from a local Verdi
+installation, `$VERDI_HOME/share/FsdbReader/linux64`). Those libraries are
+proprietary Synopsys property: they are NEVER committed, vendored, or
+redistributed; the produced binary is a local artifact and is excluded from
+git, PyPI, and the offline bundle (`third_party/verdi_runtime/` is
+gitignored). Runtime use of the FsdbReader libraries performs no Synopsys
+license checkout (verify in your own environment, e.g. with `lmstat`).
+
+## fstdumper patches (not distributed; users build it themselves)
+
+`third_party/fstdumper/` carries patch files for the upstream
+[fstdumper](https://github.com/semify-eda/fstdumper) project (GPL-3.0), a VPI
+plugin that lets Xcelium (xrun) dump FST directly during simulation. See
+[docs/XCELIUM_FST_GUIDE.md](XCELIUM_FST_GUIDE.md) for the integration flow.
+
+| Component | License | Source |
+| --- | --- | --- |
+| fstdumper (upstream plugin) | GPL-3.0 | https://github.com/semify-eda/fstdumper |
+| `fstdumper-xcelium-fixes.patch` | GPL-3.0 (inherits upstream license) | this repo |
+| `fstdumper-perf-opt.patch` (optional) | GPL-3.0 (inherits upstream license) | this repo |
+
+Licensing notes:
+
+- fstdumper is NOT bundled, built, or redistributed by wave-mcp. Users clone
+  the upstream repository, apply the patches with `patch -p1`, and build the
+  `.so` themselves. The plugin is loaded by the simulator at simulation time
+  and never links into wave-mcp, so this is a mere aggregation and does not
+  affect the MIT license of wave-mcp.
+- The patch files are derived work of GPL-3.0 code and are therefore
+  distributed under GPL-3.0 as well. They are NOT covered by wave-mcp's MIT
+  license.
+- Compiled `.so` artifacts must never be committed or shipped with wave-mcp,
+  its PyPI package, or its release assets.
+- Contributing the fixes upstream is planned; once merged, the local patches
+  can be dropped.
+
 ## Standalone Python runtime (offline bundle only)
 
 If the offline bundle embeds a standalone CPython (python-build-standalone),

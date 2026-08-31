@@ -21,6 +21,13 @@ runtime/
 # stray local artifacts (keep examples/sample/*.fst|*.vcd as quickstart data)
 /test.fst.hier
 
+# fsdb2fst local build artifacts + Verdi FsdbReader runtime (NEVER redistribute)
+third_party/verdi_runtime/
+third_party/fsdb2fst/fsdb2fst
+third_party/fsdb2fst/*.o
+third_party/fsdb2fst/*.fst
+third_party/fstdumper/*.so
+
 # offline bundle build outputs (built via deploy/, not tracked)
 wave-mcp-bundle*/
 *.tar.gz

@@ -257,7 +257,8 @@ something a purely static design database cannot offer.
 
 If your simulator only dumps VCD (e.g. Questa), convert it to FST first: **~1/50 the size, fast
 random access**. Xcelium (xrun) users can skip VCD entirely and dump FST directly via the
-fstdumper plugin, see the [Xcelium FST guide](docs/XCELIUM_FST_GUIDE.md).
+fstdumper plugin, see the [Xcelium FST guide](docs/XCELIUM_FST_GUIDE.md) (includes a set of
+Xcelium fixes verified on Xcelium 25.09, see the guide and `third_party/fstdumper/`).
 Conversion relies on the `vcd2fst` tool shipped with GTKWave:
 
 ```bash
