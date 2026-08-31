@@ -576,7 +576,14 @@ class FstSource:
     def _decode(buf) -> str:
         if buf == ffi.NULL:
             return ""
-        return ffi.string(buf).decode("latin-1")
+        s = ffi.string(buf).decode("latin-1")
+        # fstReaderGetValueFromHandleAtTime returns reals as "r%.16g"
+        # (fstapi convention). Strip the 'r' prefix so real signals surface
+        # a plain number string; ordinary 0/1/x/z values never start with
+        # 'r', so this is unambiguous.
+        if s.startswith("r"):
+            s = s[1:]
+        return s
 
     @staticmethod
     def _to_hex(binval: str) -> Optional[str]:

@@ -16,19 +16,21 @@ from .server import ViewerServer
 from .translate import desired_to_sucl
 
 
-def _fst_end_time(path: str):
-    """Header-only end-time read (ms even on tens-of-GB files)."""
+def _fst_meta(path: str):
+    """Header-only read of (end_time, timescale_exp); ms even on huge files."""
     try:
         from pylibfst import lib
         ctx = lib.fstReaderOpen(path.encode())
         if not ctx:
-            return None
+            return None, None
         try:
-            return int(lib.fstReaderGetEndTime(ctx))
+            end = int(lib.fstReaderGetEndTime(ctx))
+            ts = int(lib.fstReaderGetTimescale(ctx))
+            return end, ts
         finally:
             lib.fstReaderClose(ctx)
     except Exception:
-        return None
+        return None, None
 
 
 class ViewManager:
@@ -84,12 +86,16 @@ class ViewManager:
         state = ViewState()
         sources = []
         for i, p in enumerate(surver.fst_paths):   # resolved absolute paths
-            sources.append({
+            end_time, ts = _fst_meta(p)
+            entry = {
                 "id": chr(ord("a") + i),
                 "path": p,
                 "label": (labels[i] if labels and i < len(labels) else ""),
-                "end_time": _fst_end_time(p),
-            })
+                "end_time": end_time,
+            }
+            if ts is not None:
+                entry["timescale_exp"] = ts
+            sources.append(entry)
         state.set_sources(sources)
         state.update_desired(signals=signals, cursor=cursor,
                              viewport=viewport, markers=markers,

@@ -111,6 +111,9 @@ class ViewState:
             "user_dirty": False,
             "updated_at": None,
         }
+        # FST timescale exponent of the focused waveform; needed to turn
+        # schema times (which carry a unit) into Surfer's raw numbers.
+        self.timescale_exp: int = 0
 
     # -- desired ---------------------------------------------------------
 
@@ -126,6 +129,8 @@ class ViewState:
                 }
                 if s.get("end_time") is not None:
                     entry["end_time"] = int(s["end_time"])
+                if s.get("timescale_exp") is not None:
+                    self.timescale_exp = int(s["timescale_exp"])
                 clean.append(entry)
             self.desired["waveform"]["sources"] = clean
             self._bump()
@@ -190,7 +195,8 @@ class ViewState:
             # (runtime InjectMessage cursor control is a silent no-op on the
             # pinned build, so boot-time commands are the reliable path).
             from .translate import desired_to_sucl
-            self.desired["startup_commands_cache"] = desired_to_sucl(self.desired)
+            self.desired["startup_commands_cache"] = desired_to_sucl(
+                self.desired, self.timescale_exp)
             return self._bump()
 
     def _bump(self) -> int:

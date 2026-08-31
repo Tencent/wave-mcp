@@ -20,12 +20,35 @@ from typing import Any, Dict, List
 # ps as the canonical schema unit; revisit if a non-ps timescale shows up.
 
 
-def _raw(obj: Dict[str, Any]) -> str:
-    return str(obj["time"])
+def _raw(obj: Dict[str, Any], timescale_exp: int = 0) -> str:
+    """Convert a schema time {time, unit} into waveform-native units.
+
+    Schema times carry a unit (default ps); Surfer's batch commands take
+    RAW NUMBERS in the waveform's own timescale, so passing ``830s``
+    straight through makes it fail with InvalidParameter. Reuse the
+    project-wide time parser so viewer and analysis tools agree.
+    """
+    from ..timeutil import time_to_fst_units
+
+    val = str(obj["time"])
+    unit = str(obj.get("unit") or "ps")
+    text = val if val.endswith(unit) else f"{val}{unit}"
+    try:
+        return str(time_to_fst_units(text, int(timescale_exp)))
+    except ValueError:
+        # unknown unit or malformed value: pass the number through rather
+        # than dropping the command entirely
+        return str(val)
 
 
-def desired_to_sucl(desired: Dict[str, Any]) -> str:
-    """Build the startup_commands string for the current desired state."""
+def desired_to_sucl(desired: Dict[str, Any],
+                    timescale_exp: int = 0) -> str:
+    """Build the startup_commands string for the current desired state.
+
+    ``timescale_exp`` is the FST timescale exponent (10**exp native units
+    per second); it is required to turn schema times into the raw numbers
+    Surfer's batch layer expects.
+    """
     cmds: List[str] = []
 
     # multi-file surver: Surfer pops a file picker instead of auto-loading;
@@ -51,7 +74,9 @@ def desired_to_sucl(desired: Dict[str, Any]) -> str:
     for sig in desired.get("signals", []):
         group = sig.get("group")
         if group and group != current_group:
-            cmds.append(f"divider_add {group}")
+            # quote: multi-word group names would otherwise parse as
+            # several parameters (ExtraParameters("domain"))
+            cmds.append(f'divider_add "{group}"')
             current_group = group
         cmds.append(f"variable_add {sig['path']}")
         if sig.get("color"):
@@ -63,19 +88,24 @@ def desired_to_sucl(desired: Dict[str, Any]) -> str:
             if fmt:
                 cmds.append(f"item_set_format {fmt}")
 
-    # viewport / cursor / markers
+    # viewport / cursor / markers (all times in waveform-native units)
     vp = desired.get("viewport")
     if vp:
-        cmds.append(f"zoom_to {vp['from']} {vp['to']}")
+        vunit = vp.get("unit", "ps")
+        cmds.append(
+            f"zoom_to "
+            f"{_raw({'time': vp['from'], 'unit': vunit}, timescale_exp)} "
+            f"{_raw({'time': vp['to'], 'unit': vunit}, timescale_exp)}")
     elif desired.get("signals"):
         cmds.append("zoom_fit")
 
     cur = desired.get("cursor")
     if cur:
-        cmds.append(f"cursor_set {_raw(cur)}")
-        cmds.append(f"goto_time {_raw(cur)}")
+        t = _raw(cur, timescale_exp)
+        cmds.append(f"cursor_set {t}")
+        cmds.append(f"goto_time {t}")
 
     for i, mk in enumerate(desired.get("markers", []), start=1):
-        cmds.append(f"marker_set_at {i} {_raw(mk)}")
+        cmds.append(f"marker_set_at {i} {_raw(mk, timescale_exp)}")
 
     return ";".join(cmds)

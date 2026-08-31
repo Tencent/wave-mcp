@@ -45,6 +45,15 @@
 #define FFR_API_INCLUDE "ffrAPI.h"
 #endif
 
+/* V-2023.12's ffrAPI.h uses TRUE/FALSE without defining them. Define them
+ * here (guarded) so no helper script needs -DTRUE on the compile line. */
+#ifndef TRUE
+#define TRUE true
+#endif
+#ifndef FALSE
+#define FALSE false
+#endif
+
 #include FFR_API_INCLUDE
 #include "fstapi.h"
 
@@ -74,6 +83,7 @@ namespace {
 const char *kVersion = "fsdb2fst 0.1.0 (wave-mcp)";
 
 int g_verbose = 0;
+int g_dump_tree = 0;   /* --dump-tree: print raw tree callbacks */
 
 void vlog(const char *fmt, ...) {
     if (!g_verbose) return;
@@ -121,10 +131,10 @@ unsigned long long ParseScaleFs(const char *s) {
     unit[n] = '\0';
 
     double mult;
-    if      (!std::strcmp(unit, "fs")) mult = 1e0;
-    else if (!std::strcmp(unit, "ps")) mult = 1e3;
-    else if (!std::strcmp(unit, "ns")) mult = 1e6;
-    else if (!std::strcmp(unit, "us")) mult = 1e9;
+    if      (!std::strcmp(unit, "fs") || !std::strcmp(unit, "f")) mult = 1e0;
+    else if (!std::strcmp(unit, "ps") || !std::strcmp(unit, "p")) mult = 1e3;
+    else if (!std::strcmp(unit, "ns") || !std::strcmp(unit, "n")) mult = 1e6;
+    else if (!std::strcmp(unit, "us") || !std::strcmp(unit, "u")) mult = 1e9;
     else if (!std::strcmp(unit, "ms")) mult = 1e12;
     else if (!std::strcmp(unit, "s"))  mult = 1e15;
     else return 0;
@@ -205,22 +215,57 @@ struct FsdbReader {
         case FSDB_TREE_CBT_SCOPE: {
             fsdbTreeCBDataScope *s =
                 static_cast<fsdbTreeCBDataScope *>(tree_cb_data);
+            if (g_dump_tree) {
+                std::fprintf(stderr, "TREE SCOPE  depth=%zu name=%s type=%u\n",
+                             r->scope_stack.size(),
+                             s->name ? s->name : "(null)",
+                             static_cast<unsigned>(s->type));
+            }
             r->scope_stack.push_back(s->name ? s->name : "");
             break;
         }
         case FSDB_TREE_CBT_UPSCOPE:
+            if (g_dump_tree)
+                std::fprintf(stderr, "TREE UPSCOPE depth=%zu\n",
+                             r->scope_stack.size());
             if (!r->scope_stack.empty()) r->scope_stack.pop_back();
+            break;
+        case FSDB_TREE_CBT_BEGIN_TREE:
+            if (g_dump_tree) std::fprintf(stderr, "TREE BEGIN_TREE\n");
+            if (!r->scope_stack.empty()) r->scope_stack.clear();
+            break;
+        case FSDB_TREE_CBT_END_TREE:
+            if (g_dump_tree) std::fprintf(stderr, "TREE END_TREE\n");
+            break;
+        case FSDB_TREE_CBT_END_ALL_TREE:
+            if (g_dump_tree) std::fprintf(stderr, "TREE END_ALL_TREE\n");
             break;
         case FSDB_TREE_CBT_VAR: {
             fsdbTreeCBDataVar *v =
                 static_cast<fsdbTreeCBDataVar *>(tree_cb_data);
+            if (g_dump_tree) {
+                std::string p;
+                for (const auto &q : r->scope_stack)
+                    { p += q; p += '.'; }
+                p += v->name ? v->name : "(null)";
+                std::fprintf(stderr,
+                             "TREE VAR    depth=%zu id=%u bpb=%u len=%d..%d "
+                             "path=%s\n",
+                             r->scope_stack.size(),
+                             static_cast<unsigned>(v->u.idcode),
+                             v->bytes_per_bit, v->rbitnum, v->lbitnum,
+                             p.c_str());
+            }
             Signal sig;
             sig.id = v->u.idcode;
             sig.len = (v->lbitnum >= v->rbitnum)
                           ? (v->lbitnum - v->rbitnum + 1)
                           : (v->rbitnum - v->lbitnum + 1);
             if (sig.len == 0) sig.len = 1;
-            sig.bytes_per_bit = v->bytes_per_bit ? v->bytes_per_bit : 1;
+            /* fsdbBytesPerBit: 0=1B, 1=2B(strength), 2=4B(real), 3=8B(real).
+               Do NOT normalise 0 to 1 -- that turns every ordinary 1B signal
+               into a 2B strength signal and it gets skipped later. */
+            sig.bytes_per_bit = v->bytes_per_bit;
             sig.direction = static_cast<unsigned int>(v->direction);
             sig.var_type = static_cast<unsigned int>(v->type);
             sig.name = v->name ? v->name : "";
@@ -315,6 +360,9 @@ void Usage() {
         "             (one path per line, '#' starts a comment)\n"
         "  -p PACK    FST packing: lz4 (default) | fastlz | zlib\n"
         "  --info     print file/scale/signal summary only, no conversion\n"
+        "  --dump-tree  print the raw tree callback stream (BEGIN/END TREE,\n"
+        "               SCOPE/UPSCOPE nesting, VAR lines) and exit; used to\n"
+        "               diagnose scope-path issues. No conversion.\n"
         "  --allow-empty  succeed even when no value data could be loaded\n"
         "  -v         verbose progress on stderr\n"
         "  -h         this help\n"
@@ -339,6 +387,7 @@ int main(int argc, char **argv) {
     const char *pack = "lz4";
     bool info_only = false;
     bool allow_empty = false;
+    bool dump_tree = false;
 
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -351,6 +400,8 @@ int main(int argc, char **argv) {
             info_only = true;
         } else if (!std::strcmp(a, "--allow-empty")) {
             allow_empty = true;
+        } else if (!std::strcmp(a, "--dump-tree")) {
+            dump_tree = true;
         } else if (!std::strcmp(a, "-p")) {
             if (++i >= argc) die("-p needs an argument (lz4|fastlz|zlib)");
             pack = argv[i];
@@ -389,6 +440,7 @@ int main(int argc, char **argv) {
         Usage();
         return 2;
     }
+    if (dump_tree) g_dump_tree = 1;
 
     /* ---- phase 0: read hierarchy + scale ---- */
     FsdbReader rd;
@@ -410,6 +462,12 @@ int main(int argc, char **argv) {
                   rd.signals[i].len, rd.signals[i].is_real ? " (real)" : "");
         if (rd.signals.size() > 10)
             vinfo("  ... and %zu more", rd.signals.size() - 10);
+        rd.Close();
+        return 0;
+    }
+    if (dump_tree) {
+        /* the tree stream has already been printed by the callbacks during
+         * rd.Open(); exit before doing any conversion work */
         rd.Close();
         return 0;
     }
@@ -460,40 +518,25 @@ int main(int argc, char **argv) {
     /* keep the FSDB unit as-is: FST time values are raw counts of 10^exp
      * seconds, FSDB ticks are raw counts of the FSDB unit, so passing the
      * tick through with the same exponent is exact and lossless. */
+    /* Derive the FST exponent from the parsed fs-per-tick value instead of
+     * re-parsing the unit prefix: covers "1ns" (-9), "100fs" (-13) and
+     * decimal forms like "0.01n" (=10ps, -11) in one place. Non-power-of-10
+     * scales cannot be represented losslessly in FST and still abort. */
     {
-        char *endp = nullptr;
         /* scale_unit looks like "1ns"/"100fs"; reuse the parsed fs-per-tick
          * to derive the FST exponent (10^exp seconds per tick). */
         int exp10 = 0;
-        double num = std::strtod(rd.scale_unit.c_str(), &endp);
-        if (endp == rd.scale_unit.c_str()) num = 1.0;
-        while (endp && (*endp == ' ' || *endp == '\t')) endp++;
-        char unit[8] = {0};
-        if (endp) {
-            size_t n = 0;
-            for (; endp[n] && n + 1 < sizeof(unit); n++)
-                unit[n] = static_cast<char>(std::tolower(
-                    static_cast<unsigned char>(endp[n])));
-        }
-        if      (!std::strcmp(unit, "fs")) exp10 = -15;
-        else if (!std::strcmp(unit, "ps")) exp10 = -12;
-        else if (!std::strcmp(unit, "ns")) exp10 = -9;
-        else if (!std::strcmp(unit, "us")) exp10 = -6;
-        else if (!std::strcmp(unit, "ms")) exp10 = -3;
-        else if (!std::strcmp(unit, "s"))  exp10 =  0;
-        else die("unreachable: scale unit \"%s\" parsed earlier but unmapped",
-                 rd.scale_unit.c_str());
-        /* fold the numeric prefix (1 / 10 / 100) into the exponent; a bare
-         * unit equals 1. FSDB scales are 1|10|100 x 10^N fs, so exp10 stays
-         * an exact integer in [-21, 0]. */
-        if (num == 10.0) exp10 += 1;
-        else if (num == 100.0) exp10 += 2;
-        else if (num != 1.0)
-            die("unsupported FSDB scale prefix %g in \"%s\"", num,
+        double fsd = static_cast<double>(rd.scale_fs);
+        double nearest = std::floor(std::log10(fsd) + 0.5);
+        double err = std::fabs(fsd - std::pow(10.0, nearest));
+        if (err > fsd * 1e-9)
+            die("FSDB scale \"%s\" is not a power of 10 femtoseconds; FST "
+                "cannot represent it losslessly. Please report this file.",
                 rd.scale_unit.c_str());
+        exp10 = static_cast<int>(nearest) - 15;
         fstWriterSetTimescale(wctx, exp10);
-        vlog("FST timescale exponent: %d (from FSDB scale \"%s\")",
-             exp10, rd.scale_unit.c_str());
+        vlog("FST timescale exponent: %d (from FSDB scale \"%s\" = %llu fs "
+             "per tick)", exp10, rd.scale_unit.c_str(), rd.scale_fs);
     }
     if (!std::strcmp(pack, "zlib"))
         fstWriterSetPackType(wctx, FST_WR_PT_ZLIB);
@@ -509,13 +552,18 @@ int main(int argc, char **argv) {
         std::vector<std::string> cur_scope;
         std::set<std::string> seen_path;
         for (Signal *s : sel) {
-            /* close/open scopes down to this signal's scope path */
+            /* close/open scopes down to this signal's scope path.
+             * cur_scope MUST be truncated to common: without resize() it only
+             * ever grows, so every sibling switch emits too many Upscopes and
+             * the reader loses one prefix level per switch (seen as 453/500
+             * signals missing the top_tb. prefix on the Verdi machine). */
             size_t common = 0;
             while (common < cur_scope.size() && common < s->scope.size() &&
                    cur_scope[common] == s->scope[common])
                 common++;
             for (size_t d = cur_scope.size(); d > common; d--)
                 fstWriterSetUpscope(wctx);
+            cur_scope.resize(common);
             for (size_t d = common; d < s->scope.size(); d++) {
                 fstWriterSetScope(wctx, FST_ST_VCD_MODULE,
                                   s->scope[d].c_str(), nullptr);
@@ -609,7 +657,7 @@ int main(int argc, char **argv) {
         fstWriterEmitValueChange(wctx, (s_)->fh, &d);                \
     } while (0)
 
-    while (FSDB_RC_SUCCESS == thdl->ffrGotoNextVC()) {
+    auto process_one = [&](bool &stop) {
         fsdbVarIdcode idc;
         fsdbXTag xtag;
         byte_T *vc = nullptr;
@@ -617,9 +665,10 @@ int main(int argc, char **argv) {
         if (FSDB_RC_SUCCESS !=
             thdl->ffrGetVarIdcodeXTagVCSeqNum(&idc, &xtag, &vc, &seq)) {
             rc_fail++;
-            continue;
+            stop = true;
+            return;
         }
-        if (!vc) continue;
+        if (!vc) return;
         /* fsdbXTag is layout-compatible with fsdbTag64 in the 64-bit API
          * (TraceWeave relies on the same); assert at compile time. */
         static_assert(sizeof(fsdbXTag) == sizeof(fsdbTag64),
@@ -636,11 +685,11 @@ int main(int argc, char **argv) {
         }
 
         auto it = id2fh.find(idc);
-        if (it == id2fh.end() || alias_ids.count(idc)) continue;
+        if (it == id2fh.end() || alias_ids.count(idc)) return;
         auto sit = id2sig.find(idc);
-        if (sit == id2sig.end()) continue;
+        if (sit == id2sig.end()) return;
         Signal *s = sit->second;
-        if (!s) continue;
+        if (!s) return;
 
         if (s->is_real) {
             EMIT_REAL(s, vc);
@@ -650,6 +699,22 @@ int main(int argc, char **argv) {
         emitted++;
         if (g_verbose && (emitted & 0xFFFFFFFULL) == 0)
             vlog("... %llu transitions, tick=%llu", emitted, last_tick);
+    };
+
+    /* ffrAPI hands back a traverse handle that is ALREADY positioned on the
+     * first value change (the t=0 initial value). It has to be consumed with
+     * ffrGet...() before the first ffrGotoNextVC(), otherwise that record is
+     * skipped and the t=0 initial values never reach the FST.
+     * Cf. $VERDI_HOME/share/FsdbReader/example/read_analog.cpp. */
+    {
+        bool stop = false;
+        process_one(stop);
+    }
+
+    while (FSDB_RC_SUCCESS == thdl->ffrGotoNextVC()) {
+        bool stop = false;
+        process_one(stop);
+        if (stop) break;
     }
 
     thdl->ffrFree();
@@ -672,6 +737,18 @@ int main(int argc, char **argv) {
     if (std::rename(tmp_path.c_str(), out_path.c_str()) != 0)
         die("cannot move %s to %s (%s)", tmp_path.c_str(), out_path.c_str(),
             std::strerror(errno));
+    /* fstWriterCreate(name, 0) keeps the hierarchy as a sidecar file named
+     * <name>.hier (fstReaderOpen requires it). The sidecar was written next
+     * to the tmp name; move it along with the main file. */
+    {
+        std::string tmp_hier = tmp_path + ".hier";
+        std::string out_hier = out_path + ".hier";
+        std::remove(out_hier.c_str());
+        if (std::rename(tmp_hier.c_str(), out_hier.c_str()) != 0)
+            die("cannot move %s to %s (%s); the FST is unusable without its "
+                ".hier sidecar", tmp_hier.c_str(), out_hier.c_str(),
+                std::strerror(errno));
+    }
 
     auto t1 = std::chrono::steady_clock::now();
     double sec =

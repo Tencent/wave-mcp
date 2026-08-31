@@ -249,16 +249,54 @@ fsdbRC ffrTimeBasedVCTrvsHdl_t::ffrGetVarIdcodeXTagVCSeqNum(
          * large static buffer to be safe */
         static unsigned char big[65536];
         std::memset(big, 0, sizeof(big));
-        double d = std::strtod(v.val.c_str(), NULL);
         unsigned char as_bytes[8];
-        std::memcpy(as_bytes, &d, 8);
+        std::memset(as_bytes, 0, 8);
+        /* "f:<number>" parses as a float for 4B signals or a double for
+         * 8B signals, matching the real FSDB binary layout. Without the
+         * prefix, value chars land in the low bytes so the bit pattern
+         * stays visible in hex dumps and in the FST binary block. */
+        {
+            unsigned int var_bpb = 0;
+            for (const StubVar &sv : g_state->vars)
+                if (sv.id == v.id) { var_bpb = sv.bpb; break; }
+            if (v.val.rfind("f:", 0) == 0) {
+                double parsed = std::strtod(v.val.c_str() + 2, NULL);
+                if (var_bpb == 2) {          /* FSDB_BYTES_PER_BIT_4B */
+                    float f = static_cast<float>(parsed);
+                    std::memcpy(as_bytes, &f, sizeof(f));
+                } else {                     /* FSDB_BYTES_PER_BIT_8B */
+                    std::memcpy(as_bytes, &parsed, sizeof(parsed));
+                }
+            } else {
+                for (unsigned int rb = 0; rb < v.val.size() && rb < 8; rb++)
+                    as_bytes[rb] = static_cast<unsigned char>(v.val[rb]);
+            }
+        }
         /* if the value text is exactly len chars of 0/1/x/z treat as bits */
         bool bits = !v.val.empty();
         for (char c : v.val)
             if (c != '0' && c != '1' && c != 'x' && c != 'z' &&
                 c != 'X' && c != 'Z') { bits = false; break; }
+        /* the value text uses 0/1/x/z chars; the real ffrAPI hands FSDB
+         * byte codes (FSDB_BT_VCD_*), so translate text -> byte codes.
+         * Reals: 4B signals store 4-byte floats, 8B signals 8-byte
+         * doubles (matches the real FSDB layout). The stub always fills
+         * 8 bytes; the converter's EMIT_REAL reads 4 or 8 per the
+         * signal's bytes_per_bit. */
         if (bits) {
-            std::memcpy(big, v.val.data(), v.val.size());
+            /* FSDB per-bit arrays are MSB-first (same order as the VCD value
+             * string fstapi expects; TraceWeave's verified wrapper maps
+             * vc[i] -> s[i] directly). Script text is MSB-first too, so this
+             * is a straight text->bytecode translation. */
+            for (size_t k = 0; k < v.val.size(); k++) {
+                switch (v.val[k]) {
+                case '0': big[k] = FSDB_BT_VCD_0; break;
+                case '1': big[k] = FSDB_BT_VCD_1; break;
+                case 'x': case 'X': big[k] = FSDB_BT_VCD_X; break;
+                case 'z': case 'Z': big[k] = FSDB_BT_VCD_Z; break;
+                default:  big[k] = FSDB_BT_VCD_X; break;
+                }
+            }
         } else {
             std::memcpy(big, as_bytes, 8);
         }
