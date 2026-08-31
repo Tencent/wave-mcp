@@ -1,0 +1,68 @@
+$date Mon Jan 1 2026 $end
+$version wave-mcp sample $end
+$timescale 1ns $end
+$scope module top_tb $end
+$var wire 1 ! clk $end
+$var wire 1 " rst_n $end
+$scope module u_counter $end
+$var wire 1 # clk $end
+$var wire 1 $ rst_n $end
+$var reg 8 % count [7:0] $end
+$var wire 1 & overflow $end
+$upscope $end
+$upscope $end
+$enddefinitions $end
+$dumpvars
+0!
+0"
+0#
+0$
+bxxxxxxxx %
+x&
+$end
+#0
+0!
+0"
+0#
+0$
+bxxxxxxxx %
+x&
+#5
+1!
+1#
+#10
+0!
+0#
+1"
+1$
+b00000000 %
+0&
+#15
+1!
+1#
+#20
+0!
+0#
+b00000001 %
+#25
+1!
+1#
+#30
+0!
+0#
+b00000010 %
+#35
+1!
+1#
+#40
+0!
+0#
+b11111111 %
+#45
+1!
+1#
+#50
+0!
+0#
+b00000000 %
+1&
