@@ -54,6 +54,12 @@ self.addEventListener("fetch", function (event) {
       })
       .catch(function (e) {
         console.error(e);
+        // Return a proper error response instead of undefined
+        return new Response("Service Worker fetch error: " + e.message, {
+          status: 502,
+          statusText: "Bad Gateway",
+          headers: { "Content-Type": "text/plain" }
+        });
       })
   );
 });

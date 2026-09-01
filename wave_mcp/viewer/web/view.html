@@ -12,67 +12,121 @@
   // Validated: dev-docs/viewer-validation-2026-08-29.md
   var EXPECTED_SW_VERSION = 1;   // keep in sync with sw.js SW_VERSION
 
-  function setStatus(m) { document.getElementById("status").textContent = m; }
+  function setStatus(m) { 
+    console.log("[view.html] " + m);
+    document.getElementById("status").textContent = m; 
+  }
 
   function queryVersion(worker, timeoutMs) {
     return new Promise(function (resolve) {
       var mc = new MessageChannel();
-      var timer = setTimeout(function () { resolve(null); }, timeoutMs);
+      var timer = setTimeout(function () { 
+        setStatus("Version query timeout");
+        resolve(null); 
+      }, timeoutMs);
       mc.port1.onmessage = function (e) {
         clearTimeout(timer);
+        setStatus("Version query response: " + (e.data && e.data.version));
         resolve(e.data && e.data.version);
       };
-      try { worker.postMessage({ type: "GET_VERSION" }, [mc.port2]); }
-      catch (err) { clearTimeout(timer); resolve(null); }
+      try { 
+        worker.postMessage({ type: "GET_VERSION" }, [mc.port2]); 
+      } catch (err) { 
+        clearTimeout(timer); 
+        setStatus("Version query error: " + err.message);
+        resolve(null); 
+      }
     });
   }
 
   function waitControllerChange(timeoutMs) {
     return new Promise(function (resolve) {
-      var timer = setTimeout(resolve, timeoutMs);
+      var timer = setTimeout(function() {
+        setStatus("Controller change timeout");
+        resolve();
+      }, timeoutMs);
       navigator.serviceWorker.addEventListener("controllerchange", function () {
-        clearTimeout(timer); resolve();
+        clearTimeout(timer); 
+        setStatus("Controller changed");
+        resolve();
       }, { once: true });
     });
   }
 
   async function ensureFreshWorker() {
-    var reg = await navigator.serviceWorker.register(
-      "sw.js", { updateViaCache: "none" });
-    await navigator.serviceWorker.ready;
-    if (!navigator.serviceWorker.controller) {
-      await waitControllerChange(3000);
+    setStatus("Registering service worker...");
+    try {
+      var reg = await navigator.serviceWorker.register(
+        "/sw.js", { updateViaCache: "none" });
+      setStatus("Service worker registered, waiting for ready...");
+      await navigator.serviceWorker.ready;
+      setStatus("Service worker ready");
+      
+      if (!navigator.serviceWorker.controller) {
+        setStatus("Waiting for service worker to take control...");
+        await waitControllerChange(3000);
+      }
+      
+      for (var attempt = 0; attempt < 3; attempt++) {
+        var ctrl = navigator.serviceWorker.controller;
+        if (!ctrl) {
+          setStatus("No controller on attempt " + (attempt + 1));
+          break;
+        }
+        setStatus("Checking service worker version (attempt " + (attempt + 1) + ")...");
+        var v = await queryVersion(ctrl, 1500);
+        if (v === EXPECTED_SW_VERSION) {
+          setStatus("Service worker version OK");
+          return true;
+        }
+        setStatus("Updating viewer components (attempt " + (attempt + 1) + ")...");
+        try { await reg.update(); } catch (e) { 
+          setStatus("Update error: " + e.message);
+        }
+        await waitControllerChange(4000);
+      }
+      setStatus("Service worker version mismatch after 3 attempts");
+      return false;
+    } catch (e) {
+      setStatus("Service worker setup failed: " + e.message);
+      throw e;
     }
-    for (var attempt = 0; attempt < 3; attempt++) {
-      var ctrl = navigator.serviceWorker.controller;
-      if (!ctrl) break;
-      var v = await queryVersion(ctrl, 1500);
-      if (v === EXPECTED_SW_VERSION) return true;
-      setStatus("Updating viewer components...");
-      try { await reg.update(); } catch (e) { /* offline */ }
-      await waitControllerChange(4000);
-    }
-    return false;
   }
 
   async function go() {
+    setStatus("Initializing...");
+    var swOk = false;
     if ("serviceWorker" in navigator) {
       try {
-        var ok = await ensureFreshWorker();
-        if (!ok) {
+        swOk = await ensureFreshWorker();
+        if (!swOk) {
           if (!sessionStorage.getItem("wv_reloaded")) {
+            setStatus("Service worker not ready, reloading in 1s...");
             sessionStorage.setItem("wv_reloaded", "1");
-            location.reload();
+            setTimeout(function() { location.reload(); }, 1000);
             return;
+          } else {
+            setStatus("Service worker failed after reload, continuing anyway...");
           }
         } else {
           sessionStorage.removeItem("wv_reloaded");
         }
-      } catch (e) { console.warn("service worker setup failed:", e); }
+      } catch (e) { 
+        console.warn("service worker setup failed:", e);
+        setStatus("Service worker setup failed, continuing anyway...");
+      }
+    } else {
+      setStatus("Service worker not supported, continuing...");
     }
-    location.replace("/shell.html" + location.search);
+    
+    setStatus("Redirecting to viewer in 500ms...");
+    setTimeout(function() { 
+      location.replace("/shell.html" + location.search); 
+    }, 500);
   }
-  go();
+  
+  // Start with a slight delay to ensure DOM is ready
+  setTimeout(go, 100);
 </script>
 </body>
 </html>

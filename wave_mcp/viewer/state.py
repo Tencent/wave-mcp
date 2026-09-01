@@ -3,7 +3,7 @@
 Single source of truth shared by the MCP tools (PUT desired), the browser
 shell (poll desired / write back actual) and ``get_view_state`` (read).
 
-Schema: dev-docs/viewer-schema-v1.md (public copy will land in docs/).
+Schema: see docs/WAVE_VIEWER.md.
 Thread-safe; the HTTP server accesses it from worker threads.
 """
 from __future__ import annotations

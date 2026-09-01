@@ -7,7 +7,8 @@ Probed syntax on the pinned Surfer build (see dev-docs):
   * time arguments are RAW NUMBERS in waveform timescale units — a unit
     suffix like ``83000ps`` is rejected (InvalidParameter);
   * cursor:   ``cursor_set <t>`` (+ ``goto_time <t>`` to scroll there);
-  * markers:  ``marker_set_at <n> <t>`` (n starts at 1); ``marker_add``
+  * markers:  ``marker_set_at <t> <n>`` (time FIRST, then marker id/name,
+    per upstream command_parser.rs at the pinned commit); ``marker_add``
     is a GUI-only command and fails in batch mode;
   * viewport: ``zoom_to <from> <to>``; ``zoom_to_range`` is not sucl.
 """
@@ -106,6 +107,6 @@ def desired_to_sucl(desired: Dict[str, Any],
         cmds.append(f"goto_time {t}")
 
     for i, mk in enumerate(desired.get("markers", []), start=1):
-        cmds.append(f"marker_set_at {i} {_raw(mk, timescale_exp)}")
+        cmds.append(f"marker_set_at {_raw(mk, timescale_exp)} {i}")
 
     return ";".join(cmds)

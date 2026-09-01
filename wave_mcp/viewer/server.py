@@ -5,8 +5,6 @@ Single local origin serving:
   * ``/surver/*``    -> reverse proxy to the local surver (restores the
                         ``Server: Surfer`` header that reverse proxies strip)
   * ``/api/view-state`` GET (?since= long-poll) / PUT desired / POST actual
-
-Validated design notes: dev-docs/viewer-validation-2026-08-29.md.
 """
 from __future__ import annotations
 
