@@ -160,6 +160,25 @@ get_view_state({"view_id": "a1b2c3d4"})
 
 Typical use: the user says "the value at my cursor looks wrong". The agent first calls `get_view_state` to grab the cursor time, then continues with `signal_value_at` / `active_drivers` from that moment. `user_dirty: true` means the user has manually adjusted the view; before updating, the agent may choose to respect the user's current viewpoint and only touch markers and notes without stealing the cursor.
 
+### 4.4 list_wave_views / close_wave_view
+
+`list_wave_views()` returns every open view (`view_id`, `url`, `title`, `fst_paths`, `revision`, `surver_alive`), newest first. `close_wave_view(view_id)` closes one; `close_wave_view(all_views=True)` closes them all. These matter for batch work such as regression triage, where views would otherwise pile up.
+
+Two details worth knowing. First, a streaming backend is shared by waveform file set, so closing a view only stops that backend when it was the last user of it; the response reports this as `surver_stopped`. Second, there is a safety cap: at most 8 views are kept open by default and the oldest is evicted beyond that. Tune it with `WAVE_MCP_MAX_VIEWS`, or set 0 to disable the cap.
+
+### 4.5 Port configuration
+
+By default each view takes two random high ports (page server plus streaming backend). That is the least hassle locally, where you never think about port conflicts.
+
+It gets annoying when you work on a remote host and forward with `ssh -L`, because the port changes on every view and no fixed forwarding rule can be prepared in advance. Set a port base and views are confined to `[base, base + 64)`:
+
+```bash
+export WAVE_MCP_VIEWER_PORT_BASE=45400
+ssh -L 45400:localhost:45400 -L 45401:localhost:45401 <host>
+```
+
+The window is 64 because each view uses two ports, which comfortably covers the default 8-view cap. If the whole window is taken, allocation falls back to an ephemeral port instead of failing to open the view. An invalid base (non-numeric, below 1024, or out of range) falls back the same way.
+
 ## 5. Typical agent workflows
 
 **Scenario 1: single-waveform root-cause presentation**
@@ -267,6 +286,21 @@ ssh -L <port>:localhost:<port> <server>   # then open the URL in your local brow
 **Native Surfer client**: if the Surfer desktop app is installed locally, connect straight to surver with the `native_hint` (`surfer <token_url>`); the experience matches the browser.
 
 **Air-gapped networks**: build the offline bundle with `--viewer` to pack the assets; the installer sets `WAVE_MCP_VIEWER_ASSETS` automatically. Use the musl static surver on old hosts. See [DEPLOY_AIRGAP.md](DEPLOY_AIRGAP.md).
+
+**Several people on one host**: have each person run their own wave-mcp under their own account rather than sharing a single server process. Views and streaming backends bind to loopback, so the processes cannot see each other and isolation comes from accounts and file permissions. No extra configuration needed.
+
+The one thing to agree on is ports. Random ports never collide by themselves, but if everyone wants fixed ports for `ssh -L` forwarding, give each person a non-overlapping window of 64:
+
+```bash
+# user A, ~/.bashrc
+export WAVE_MCP_VIEWER_PORT_BASE=45400   # uses 45400-45463
+# user B, ~/.bashrc
+export WAVE_MCP_VIEWER_PORT_BASE=45500   # uses 45500-45563
+```
+
+Two more notes. Conversion artifacts are cached next to the source waveform, so several people analysing the same regression dump share one `.fst`, which saves time but requires that directory to be writable by them; when it is read-only, each falls back to its own session directory and converts separately, with no loss of function. And `WAVE_MCP_MAX_VIEWS` is a per-process cap rather than a per-host one, so keep an eye on the total number of browser and backend processes when several people work at once.
+
+If what you want is one server on a host handing out links to other people, that is not supported yet: the viewer binds to loopback only. That mode is on the roadmap.
 
 ## 11. Licensing
 

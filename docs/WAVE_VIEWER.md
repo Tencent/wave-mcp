@@ -299,6 +299,21 @@ ssh -L <port>:localhost:<port> <server>   # 然后本机浏览器打开 URL
 
 **隔离网**：离线 bundle 加 `--viewer` 参数把资产打进包，安装时自动设置 `WAVE_MCP_VIEWER_ASSETS`；老机器用 musl 静态 surver。见 [DEPLOY_AIRGAP.md](DEPLOY_AIRGAP.md)。
 
+**多人共用一台机器**：每人在自己账号下各起一份 wave-mcp，不要多人共享同一个 server 进程。视图和 surver 都绑在回环上，各自进程互不可见，隔离直接由账号和文件权限保证，不需要额外配置。
+
+唯一需要约定的是端口。默认随机端口本身不会冲突，但如果大家都想用固定端口做 `ssh -L` 转发，就得给每人分一段互不重叠的区间（每段 64 个，一人一段）：
+
+```bash
+# A 用户 ~/.bashrc
+export WAVE_MCP_VIEWER_PORT_BASE=45400   # 占用 45400-45463
+# B 用户 ~/.bashrc
+export WAVE_MCP_VIEWER_PORT_BASE=45500   # 占用 45500-45563
+```
+
+另有两点值得注意。一是转换缓存默认写在源波形旁边，所以多人分析同一份回归波形时会共享同一个 `.fst` 产物，这是省时间的好事，但要求那个目录对相关用户可写；目录只读时会自动回退到各自的 session 目录，各转一份，功能不受影响。二是 `WAVE_MCP_MAX_VIEWS` 是每进程的上限，不是整机上限，机器上同时有几个人在用时，留意总的浏览器与 surver 进程数。
+
+如果你要的是"主机起一个 server、把链接分发给其他人连"，当前版本还不支持，viewer 只绑回环。这个形态在规划中。
+
 ## 11. 许可说明
 
 wave-mcp 核心（含 viewer 的 Python 编排层与前端 shell）是 MIT。Surfer WASM 与 surver 二进制来自 [Surfer 项目](https://surfer-project.org/)，许可为 EUPL-1.2，因此打进**独立的** `wave-mcp-viewer-assets` 资产包分发，与 MIT 核心是聚合关系而非链接关系，核心许可不受影响。不装资产包，核心功能零缺失。构建复现路径与完整法律口径见 [THIRD_PARTY.md](THIRD_PARTY.md)。
