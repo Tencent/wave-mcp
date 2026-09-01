@@ -180,25 +180,32 @@ def prepare_session(out_dir: str, wave_path: str,
                     incdirs: Optional[List[str]] = None,
                     defines: Optional[List[str]] = None,
                     mode: str = "speed",
+                    fsdb_scopes: Optional[List[str]] = None,
+                    fsdb_signals_file: Optional[str] = None,
                     session_id: Optional[str] = None) -> dict[str, Any]:
     """One-shot waveform analysis entry point — the standard team workflow.
 
     Takes a waveform file your simulator already produced and leaves an OPEN
     session ready to query:
-        waveform (.fst read directly / .vcd auto-converted) ->
+        waveform (.fst read directly / .fsdb or .vcd auto-converted) ->
         build session.json -> open session.
 
     This never runs a simulator. Run your sim (xrun / Verilator / etc.) with your
-    own flow first, then point this at the resulting ``.fst`` or ``.vcd``.
+    own flow first, then point this at the resulting ``.fst``, ``.fsdb`` or ``.vcd``.
+
+    Conversions are cached next to the source waveform, so repeated sessions on
+    the same waveform convert only once.
 
     Call this first whenever you want to start analyzing a waveform; afterwards
     use the query tools (signal_values, list_child_instances, ...).
 
     Args:
         out_dir: directory to hold the session (session.json, fst).
-        wave_path: waveform file to analyze — ``.fst`` (read directly) or ``.vcd``
-            (auto-converted to FST). This is a file the sim already dumped.
-        fst_path: output FST when converting a VCD (default: out_dir/<vcd>.fst).
+        wave_path: waveform file to analyze — ``.fst`` (read directly), ``.fsdb``
+            (auto-converted via bundled fsdb2fst) or ``.vcd`` (auto-converted via
+            vcd2fst). This is a file the sim already dumped.
+        fst_path: explicit output FST when converting (default: cached artifact
+            next to the source waveform, falling back to out_dir).
         top: top instance name.
         filelist / filelist_path: RTL source list (enables file/declaration tools).
             A .f filelist is parsed for +incdir+/+define+/-y automatically.
@@ -207,6 +214,11 @@ def prepare_session(out_dir: str, wave_path: str,
             (connectivity/drivers/trace) silently degrades to unavailable.
         defines: extra `+define+NAME[=VAL]` macros for elaboration.
         mode: VCD->FST packing — "speed" (fastlz, default) / "balanced" / "size".
+        fsdb_scopes: for .fsdb only — convert just the signals whose full path
+            contains any of these substrings (fsdb2fst -l). Use on huge designs;
+            the loader refuses batches above 5M signals.
+        fsdb_signals_file: for .fsdb only — file listing exact signal paths to
+            convert, one per line (fsdb2fst -L).
 
     Returns the session summary plus per-step timing.
     """
@@ -214,7 +226,8 @@ def prepare_session(out_dir: str, wave_path: str,
         result = pipeline.prepare_session(
             out_dir, wave_path, fst_path=fst_path,
             top=top, filelist=filelist, filelist_path=filelist_path,
-            incdirs=incdirs, defines=defines, mode=mode)
+            incdirs=incdirs, defines=defines, mode=mode,
+            fsdb_scopes=fsdb_scopes, fsdb_signals_file=fsdb_signals_file)
     except (FileNotFoundError, ValueError, convert.ConversionError) as exc:
         return {"status": "error", "error": str(exc)}
     sid = SESSIONS.open(result["session_path"], session_id)
@@ -286,6 +299,49 @@ def convert_vcd_to_fst(vcd_path: str, fst_path: Optional[str] = None,
     """
     try:
         res = convert.convert(vcd_path, fst_path, mode=mode, parallel=parallel)
+        return {"status": "ok", **res.to_dict()}
+    except convert.ConversionError as exc:
+        return {"status": "error", "error": str(exc)}
+
+
+@mcp.tool()
+def convert_fsdb_to_fst(fsdb_path: str, fst_path: Optional[str] = None,
+                        scopes: Optional[List[str]] = None,
+                        signals_file: Optional[str] = None,
+                        pack: str = "lz4",
+                        info_only: bool = False) -> dict[str, Any]:
+    """Convert a Synopsys FSDB to FST via the bundled fsdb2fst (single pass).
+
+    ``prepare_session`` already converts ``.fsdb`` automatically, so reach for
+    this tool when you want to inspect or control the conversion first: check the
+    scale and signal census of a huge file (``info_only=True``), or convert one
+    subtree at a time. No VCD intermediate; requires Verdi's FsdbReader runtime
+    on this machine (checks out no license). See docs/FSDB_GUIDE.md.
+
+    Args:
+        fsdb_path: input .fsdb path.
+        fst_path: output .fst path (default: same name with .fst). The companion
+            ``<fst>.hier`` sidecar is written alongside and BOTH files are needed
+            to open the FST.
+        scopes: convert only signals whose full path contains any of these
+            substrings (fsdb2fst -l). Required for very large designs: the loader
+            refuses batches above 5M signals and can crash beyond that regardless.
+        signals_file: file with exact signal paths, one per line (fsdb2fst -L).
+        pack: FST packing — "lz4" (default) / "fastlz" / "zlib".
+        info_only: only report scale + signal census, convert nothing.
+
+    Returns the output path, timing, sizes and the signal census (real /
+    strength-skipped / unsupported-type counts).
+    """
+    binary = convert.resolve_fsdb2fst()
+    if binary is None:
+        return {"status": "error", "error": str(convert.fsdb2fst_missing_error())}
+    try:
+        if info_only:
+            return {"status": "ok", "info_only": True,
+                    **convert.fsdb_info(fsdb_path)}
+        res = convert.convert_fsdb(fsdb_path, fst_path, scopes=scopes,
+                                   signals_file=signals_file, pack=pack)
         return {"status": "ok", **res.to_dict()}
     except convert.ConversionError as exc:
         return {"status": "error", "error": str(exc)}

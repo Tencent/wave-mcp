@@ -5,8 +5,7 @@ a fail waveform of the same design, find the first time the two runs
 diverge and which signals diverge first. Those earliest divergers are the
 prime suspects; everything later is usually downstream contagion.
 
-Differentiation vs. TraceWeave's diff_first_divergence: our diverging
-signals feed directly into the netlist ground-truth tools (signal_fanin /
+The diverging signals feed directly into the netlist tools (signal_fanin /
 active_drivers / signal_drivers) for causal backtracking, and into
 open_wave_view for a dual-waveform diff view with an auto marker.
 

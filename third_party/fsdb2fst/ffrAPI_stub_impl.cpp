@@ -76,17 +76,13 @@ void fire_tree(void) {
             t = FSDB_TREE_CBT_SCOPE; g_cb(t, g_cb_data, &s);
             stack.push_back(scope_hold);
         } else if (line.rfind("var ", 0) == 0) {
-            /* var NAME LEN BPB [DIR TYPE] */
+            /* var NAME LEN BPB [DIR [TYPE [DTID]]] */
             StubVar v;
             char nbuf[512];
-            if (5 == sscanf(line.c_str(), "var %511s %u %u %u %u",
-                            nbuf, &v.len, &v.bpb, &v.dir, &v.type)) {
-                v.name = nbuf;
-            } else if (4 == sscanf(line.c_str(), "var %511s %u %u %u",
-                                   nbuf, &v.len, &v.bpb, &v.dir)) {
-                v.name = nbuf;
-            } else if (3 == sscanf(line.c_str(), "var %511s %u %u",
-                                   nbuf, &v.len, &v.bpb)) {
+            uint_T dtid = 0;
+            int n = sscanf(line.c_str(), "var %511s %u %u %u %u %u",
+                        nbuf, &v.len, &v.bpb, &v.dir, &v.type, &dtid);
+            if (n >= 3 && n <= 5) {
                 v.name = nbuf;
             } else {
                 continue;
@@ -104,6 +100,7 @@ void fire_tree(void) {
             d.bytes_per_bit = v.bpb;
             d.direction = v.dir;
             d.type = v.type;
+            d.dtidcode = dtid;
             t = FSDB_TREE_CBT_VAR; g_cb(t, g_cb_data, &d);
         }
         /* "begin"/"end" lines in the script's tree list are ignored here;

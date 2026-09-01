@@ -3,12 +3,16 @@
 This wires the team's standard workflow into one entry point so an LLM client can
 go from "I want to analyze the waveform" to a ready session in a single call:
 
-    waveform file (.fst / .vcd)  ->  [convert VCD to FST]  ->
+    waveform file (.fst / .fsdb / .vcd)  ->  [convert to FST]  ->
     build session.json           ->  open session          ->  ready to query
 
 The entry point takes a *waveform file your simulator already produced*:
   * ``.fst`` — read directly (no conversion).
+  * ``.fsdb`` — auto-converted to FST (bundled fsdb2fst; docs/FSDB_GUIDE.md).
   * ``.vcd`` — auto-converted to FST (GTKWave vcd2fst).
+
+Conversions are cached next to the source waveform (keyed on mtime/size plus the
+slicing options), so building several sessions from one waveform converts once.
 
 It never invokes a simulator. Run your sim (xrun / Verilator / whatever) with
 your own flow, then point this at the resulting waveform.
@@ -285,36 +289,72 @@ def prepare_session(out_dir: str, wave_path: str, *,
                     incdirs: Optional[List[str]] = None,
                     defines: Optional[List[str]] = None,
                     mode: str = "speed",
+                    fsdb_scopes: Optional[List[str]] = None,
+                    fsdb_signals_file: Optional[str] = None,
                     build_netlist_flag: bool = True) -> dict:
     """Orchestrate waveform file -> FST -> session and return the manifest path
     plus per-step timing.
 
     ``wave_path`` is a waveform file your simulator already produced:
       * ``.fst`` — read directly (no conversion).
+      * ``.fsdb`` — auto-converted via the bundled fsdb2fst (docs/FSDB_GUIDE.md).
       * ``.vcd`` (anything else) — auto-converted to FST via GTKWave vcd2fst.
+
+    Both conversions are cached next to the source waveform, so repeated
+    sessions on the same waveform convert only once. ``fsdb_scopes`` /
+    ``fsdb_signals_file`` slice a huge FSDB down to a subset (fsdb2fst -l / -L)
+    and take part in the cache key.
 
     Never runs a simulator. Does NOT open the session (the server does that so the
     session is registered in its SessionManager)."""
     steps: List[StepResult] = []
     os.makedirs(out_dir, exist_ok=True)
 
-    if wave_path.lower().endswith(".fst"):
+    lowered = wave_path.lower()
+    if lowered.endswith(".fst"):
         # already an FST: read it in place, no conversion step.
         if not os.path.exists(wave_path):
             raise FileNotFoundError(f"FST not found: {wave_path}")
         fst_path = os.path.abspath(wave_path)
+    elif lowered.endswith(".fsdb"):
+        # FSDB -> FST through the bundled single-pass converter. Cached, since
+        # these are routinely GB-scale and cost minutes per run.
+        if not os.path.exists(wave_path):
+            raise FileNotFoundError(f"FSDB not found: {wave_path}")
+        t0 = time.time()
+        if fst_path:
+            # explicit destination: honour it exactly, skip the shared cache.
+            res = convert.convert_fsdb(
+                wave_path, fst_path, scopes=fsdb_scopes,
+                signals_file=fsdb_signals_file).to_dict()
+            fst_path = res["fst_path"]
+            detail = res
+        else:
+            got = convert.cached_fst(
+                wave_path, kind="fsdb", fallback_dir=out_dir,
+                scopes=fsdb_scopes, signals_file=fsdb_signals_file)
+            fst_path = got["fst_path"]
+            detail = {**got["detail"], "cached": got["cached"],
+                      "cache_dir": got["cache_dir"]}
+        steps.append(StepResult("convert_fsdb_to_fst", True, time.time() - t0,
+                                detail))
     else:
-        # treat as VCD -> convert to FST inside the session dir.
+        # treat as VCD -> convert to FST (cached next to the source when possible).
         if not os.path.exists(wave_path):
             raise FileNotFoundError(f"VCD not found: {wave_path}")
-        if fst_path is None:
-            base = os.path.splitext(os.path.basename(wave_path))[0]
-            fst_path = os.path.join(out_dir, base + ".fst")
         t0 = time.time()
-        res = convert.convert(wave_path, fst_path, mode=mode)
-        fst_path = res.fst_path
+        if fst_path:
+            res = convert.convert(wave_path, fst_path, mode=mode)
+            fst_path = res.fst_path
+            detail = res.to_dict()
+        else:
+            got = convert.cached_fst(
+                wave_path, kind="vcd", fallback_dir=out_dir, mode=mode)
+            fst_path = got["fst_path"]
+            detail = {**got["detail"], "cached": got["cached"],
+                      "cache_dir": got["cache_dir"]}
         steps.append(StepResult("convert_vcd_to_fst", True, time.time() - t0,
-                                res.to_dict()))
+                                detail))
 
     # resolve the source file list + include dirs + defines (inline or from .f).
     # A .f filelist is parsed for +incdir+/+define+/-y so the netlist can

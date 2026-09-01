@@ -41,7 +41,12 @@
  *   value) records in time order. RAM scales with the design's value data;
  *   use -l / -L to convert a subset when the design is huge.
  */
-#ifndef FFR_API_INCLUDE
+/* Offline stub builds (-DFFRAPI_STUB, machines without Verdi) pick up the
+ * vendored ffrAPI_stub.h from this directory; the real build must leave
+ * FFRAPI_STUB undefined and resolves the genuine ffrAPI.h through -I. */
+#ifdef FFRAPI_STUB
+#define FFR_API_INCLUDE "ffrAPI_stub.h"
+#elif !defined(FFR_API_INCLUDE)
 #define FFR_API_INCLUDE "ffrAPI.h"
 #endif
 
@@ -114,8 +119,7 @@ void vinfo(const char *fmt, ...) {  /* printed regardless of verbosity */
 }
 
 /* ---------- FSDB scale string ("1ns", "100fs", ...) -> fs per tick ----------
- * Same contract as the TraceWeave wrapper: unparseable -> 0, callers must
- * abort rather than assume a unit. */
+ * Contract: unparseable -> 0, callers must abort rather than assume a unit. */
 
 unsigned long long ParseScaleFs(const char *s) {
     if (!s || !*s) return 0;
@@ -175,6 +179,45 @@ fstVarType MapVarType(unsigned int t) {
     }
 }
 
+/* Var types we can represent faithfully in an FST. Everything else is
+ * skipped: FSDB carries stream/transaction vars, multi-dimensional arrays,
+ * properties & assertions, coverage, SV/SystemC/AMS internals and various
+ * "for internal use only" types whose value payload is not a plain bit or
+ * real vector. Handing those to ffrLoadSignals either yields garbage (we
+ * saw bogus doubles out of $$ESD_OPTIONS.*) or crashes outright
+ * (FSDB_VT_STREAM: a bus/transaction fsdb segfaults inside libnffr).
+ *
+ * FSDB_VT_MIDDLE (64) and FSDB_VT_COMPUTED (128) are flag bits OR-ed onto
+ * the base type for verilog/vhdl files, so mask FSDB_VT_MC_MASK off first.
+ *
+ * NOTE: the FSDB_VT_* values come from Synopsys' fsdbShr.h. The offline stub
+ * header fills them with placeholders that only satisfy this switch. */
+bool IsConvertibleVar(unsigned int t) {
+    switch (t & ~FSDB_VT_MC_MASK) {
+    case FSDB_VT_VCD_WIRE:
+    case FSDB_VT_VCD_REG:
+    case FSDB_VT_VCD_REG2:
+    case FSDB_VT_VCD_INTEGER:
+    case FSDB_VT_VCD_REAL:
+    case FSDB_VT_VCD_PARAMETER:  /* constant; carries an initial value only */
+    case FSDB_VT_VCD_TRI:
+    case FSDB_VT_VCD_TRIAND:
+    case FSDB_VT_VCD_TRIOR:
+    case FSDB_VT_VCD_TRIREG:
+    case FSDB_VT_VCD_TRI0:
+    case FSDB_VT_VCD_TRI1:
+    case FSDB_VT_VCD_WAND:
+    case FSDB_VT_VCD_WOR:
+    case FSDB_VT_VCD_SUPPLY0:
+    case FSDB_VT_VCD_SUPPLY1:
+    case FSDB_VT_VHDL_SIGNAL:
+    case FSDB_VT_VHDL_VARIABLE:
+        return true;
+    default:
+        return false;
+    }
+}
+
 fstVarDir MapVarDir(unsigned int d) {
     /* FSDB: 0=IMPLICIT 1=INPUT 2=OUTPUT 3=INOUT 4=BUFFER 5=LINKAGE, which
      * matches fstapi's FST_VD_* numbering exactly. */
@@ -195,8 +238,40 @@ struct Signal {
     std::string path;              /* dot-joined scope + name */
     bool is_real = false;
     bool loadable = true;          /* false for strength vars (rejected) */
+    /* Value byte-code alphabet. Verilog-style vars use FSDB_BT_VCD_*
+     * (0=0 1=1 2=x 3=z) while VHDL std_(u)logic vars use FSDB_BT_VHDL_STD_LOGIC_*
+     * (0=U 1=X 2=0 3=1 4=Z 5=W 6=L 7=H 8=-). Decoding a VHDL var with the
+     * VCD table turns every 0/1 into x/z, so keep them apart. */
+    bool std_logic_alphabet = false;
     fstHandle fh = 0;              /* fstapi handle once created */
 };
+
+/* VHDL std_logic / std_ulogic byte code -> FST value char.
+ * U/W/- have no 4-value equivalent; fold them to x. L/H are weak 0/1. */
+static inline unsigned char StdLogicToChar(unsigned char c) {
+    switch (c) {
+    case 2: return '0';            /* STD_LOGIC_0 */
+    case 3: return '1';            /* STD_LOGIC_1 */
+    case 6: return '0';            /* L (weak 0) */
+    case 7: return '1';            /* H (weak 1) */
+    case 4: return 'z';            /* Z          */
+    case 1: return 'x';            /* X          */
+    case 0:                        /* U          */
+    case 5:                        /* W          */
+    case 8:                        /* -          */
+    default: return 'x';
+    }
+}
+
+static inline unsigned char VcdToChar(unsigned char c) {
+    switch (c) {
+    case FSDB_BT_VCD_0: return '0';
+    case FSDB_BT_VCD_1: return '1';
+    case FSDB_BT_VCD_Z: return 'z';
+    case FSDB_BT_VCD_X:
+    default:            return 'x';
+    }
+}
 
 /* ---------- FSDB reader: tree walk + signal table ---------- */
 
@@ -207,6 +282,7 @@ struct FsdbReader {
     std::vector<Signal> signals;
     std::vector<std::string> scope_stack;
     unsigned int n_strength = 0;
+    unsigned int n_unsupported = 0;    /* stream/MDA/property/internal types */
 
     static bool_T TreeCB(fsdbTreeCBType cb_type, void *client_data,
                          void *tree_cb_data) {
@@ -243,19 +319,6 @@ struct FsdbReader {
         case FSDB_TREE_CBT_VAR: {
             fsdbTreeCBDataVar *v =
                 static_cast<fsdbTreeCBDataVar *>(tree_cb_data);
-            if (g_dump_tree) {
-                std::string p;
-                for (const auto &q : r->scope_stack)
-                    { p += q; p += '.'; }
-                p += v->name ? v->name : "(null)";
-                std::fprintf(stderr,
-                             "TREE VAR    depth=%zu id=%u bpb=%u len=%d..%d "
-                             "path=%s\n",
-                             r->scope_stack.size(),
-                             static_cast<unsigned>(v->u.idcode),
-                             v->bytes_per_bit, v->rbitnum, v->lbitnum,
-                             p.c_str());
-            }
             Signal sig;
             sig.id = v->u.idcode;
             sig.len = (v->lbitnum >= v->rbitnum)
@@ -268,6 +331,14 @@ struct FsdbReader {
             sig.bytes_per_bit = v->bytes_per_bit;
             sig.direction = static_cast<unsigned int>(v->direction);
             sig.var_type = static_cast<unsigned int>(v->type);
+            /* A non-zero data type idcode means the var carries a real VHDL
+             * type (std_logic, enum, ...) rather than a plain bit; such vars
+             * are encoded with the VHDL alphabet. Plain bits (dtid 0) and
+             * verilog vars keep the VCD alphabet. */
+            sig.std_logic_alphabet =
+                    (v->dtidcode != 0) &&
+                (((sig.var_type & ~FSDB_VT_MC_MASK) == FSDB_VT_VHDL_SIGNAL) ||
+                 ((sig.var_type & ~FSDB_VT_MC_MASK) == FSDB_VT_VHDL_VARIABLE));
             sig.name = v->name ? v->name : "";
             sig.scope = r->scope_stack;
             std::string path;
@@ -279,12 +350,31 @@ struct FsdbReader {
             path += sig.name;
             sig.path = path;
 
-            if (sig.bytes_per_bit == FSDB_BYTES_PER_BIT_4B ||
-                sig.bytes_per_bit == FSDB_BYTES_PER_BIT_8B) {
+            /* Var type first: stream/transaction vars report bpb 8B and
+             * internal option vars report 4B, so a bpb-led test would
+             * happily call them "real" and try to load them. */
+            if (!IsConvertibleVar(sig.var_type)) {
+                /* stream/transaction, MDA, property, coverage, internal... */
+                sig.loadable = false;
+                r->n_unsupported++;
+            } else if (sig.bytes_per_bit == FSDB_BYTES_PER_BIT_4B ||
+                       sig.bytes_per_bit == FSDB_BYTES_PER_BIT_8B) {
                 sig.is_real = true;
             } else if (sig.bytes_per_bit > FSDB_BYTES_PER_BIT_1B) {
                 sig.loadable = false;  /* strength (2B): out of scope */
                 r->n_strength++;
+            }
+            if (g_dump_tree) {
+                std::string path;
+                for (const auto &q : r->scope_stack)
+                    { path += q; path += '.'; }
+                path += v->name ? v->name : "(null)";
+                std::fprintf(stderr,
+                             "TREE VAR    depth=%zu name=%s len=%u type=%u "
+                             "bpb=%u dtid=%u\n",
+                             r->scope_stack.size(), path.c_str(), sig.len,
+                             sig.var_type, sig.bytes_per_bit,
+                             static_cast<unsigned>(v->dtidcode));
             }
             r->signals.push_back(std::move(sig));
             break;
@@ -339,9 +429,10 @@ struct Filter {
 
     bool Passes(const std::string &path) const {
         if (!exact.empty() && !exact.count(path)) return false;
+        if (substrs.empty()) return true;
         for (const auto &k : substrs)
-            if (path.find(k) == std::string::npos) return false;
-        return true;
+            if (path.find(k) != std::string::npos) return true;  /* OR */
+        return false;
     }
 };
 
@@ -369,6 +460,12 @@ void Usage() {
         "\n"
         "notes:\n"
         "  * strength-valued vars (2 bytes per bit) are skipped.\n"
+        "  * batches of more than 5000000 SELECTED signals are refused up\n"
+        "    front (the loader would crash); filter with -l / -L to convert\n"
+        "    a subset, or override via FSDB2FST_MAX_SIGNALS=<n> (0=off).\n"
+        "  * on an oversized file, filtering gets you past that limit but\n"
+        "    FsdbReader may still crash inside ffrLoadSignals regardless of\n"
+        "    the subset size; that is a reader limitation, not a filter bug.\n"
         "  * all selected signals are loaded into RAM at once; for very\n"
         "    large designs convert per-scope with -l / -L.\n",
         stderr);
@@ -453,8 +550,9 @@ int main(int argc, char **argv) {
     vinfo("[fsdb2fst] scale: %s (%llu fs per tick)", 
           rd.scale_unit.empty() ? "unknown" : rd.scale_unit.c_str(),
           rd.scale_fs);
-    vinfo("[fsdb2fst] signals: %zu (%u real, %u strength-skipped)",
-          rd.signals.size(), n_real, rd.n_strength);
+    vinfo("[fsdb2fst] signals: %zu (%u real, %u strength-skipped, "
+          "%u unsupported-type)",
+          rd.signals.size(), n_real, rd.n_strength, rd.n_unsupported);
 
     if (info_only) {
         for (size_t i = 0; i < rd.signals.size() && i < 10; i++)
@@ -473,6 +571,15 @@ int main(int argc, char **argv) {
     }
 
     /* ---- select the signals to convert ---- */
+    /* Huge designs (gate-level nets with tens of millions of vars) can make
+     * ffrLoadSignals/ffrCreateTimeBasedVCTrvsHdl segfault deep inside libnffr.
+     * It is not an OOM, and it can happen even for a 1-signal subset. The
+     * guard bounds the number of signals actually loaded (the SELECTED set,
+     * after -l/-L) so that filtering stays useful.
+     * Override with FSDB2FST_MAX_SIGNALS=<n>; 0 disables the guard. */
+    unsigned long max_signals = 5000000;
+    if (const char *env_ms = std::getenv("FSDB2FST_MAX_SIGNALS"))
+        max_signals = std::strtoul(env_ms, nullptr, 10);
     std::vector<Signal *> sel;
     for (auto &s : rd.signals) {
         if (!s.loadable) continue;
@@ -480,6 +587,22 @@ int main(int argc, char **argv) {
         sel.push_back(&s);
     }
     if (sel.empty()) die("no convertible signal matches the filter");
+    if (max_signals && sel.size() > max_signals)
+        die("%zu selected signals exceed the in-core limit (%lu); "
+            "ffrLoadSignals would crash on a batch this size. Filter with "
+            "-l/-L to convert a subset (split per scope), or raise the limit "
+            "via FSDB2FST_MAX_SIGNALS=<n> (0 disables).",
+            sel.size(), max_signals);
+    /* The file as a whole is oversized: -l/-L gets us past the guard, but
+     * FsdbReader may still fail inside ffrLoadSignals regardless of how few
+     * signals were asked for. Say so instead of letting a raw segfault be the
+     * only feedback. */
+    if (max_signals && rd.signals.size() > max_signals)
+        vinfo("[fsdb2fst] warning: this FSDB holds %zu signals in total; "
+              "FsdbReader can fail inside ffrLoadSignals on designs this "
+              "large even when only a few signals are selected. If that "
+              "happens, -l/-L cannot help.",
+              rd.signals.size());
     if (sel.size() > 2000000)
         vinfo("[fsdb2fst] warning: %zu signals selected; consider -l/-L "
               "to split the conversion", sel.size());
@@ -548,15 +671,15 @@ int main(int argc, char **argv) {
     /* create scopes + vars; dedupe shared idcodes as fst aliases */
     std::map<fsdbVarIdcode, fstHandle> id2fh;      /* idcode -> primary handle */
     std::set<fsdbVarIdcode> alias_ids;             /* ids emitted via primary */
+    std::set<fsdbVarIdcode> primary_ids;           /* ids that own the data   */
     {
         std::vector<std::string> cur_scope;
         std::set<std::string> seen_path;
         for (Signal *s : sel) {
             /* close/open scopes down to this signal's scope path.
-             * cur_scope MUST be truncated to common: without resize() it only
-             * ever grows, so every sibling switch emits too many Upscopes and
-             * the reader loses one prefix level per switch (seen as 453/500
-             * signals missing the top_tb. prefix on the Verdi machine). */
+             * cur_scope MUST be truncated to the common prefix: without the
+             * resize() it only ever grows, so every sibling switch emits too
+             * many Upscopes and the reader loses one prefix level per switch. */
             size_t common = 0;
             while (common < cur_scope.size() && common < s->scope.size() &&
                    cur_scope[common] == s->scope[common])
@@ -579,7 +702,8 @@ int main(int argc, char **argv) {
             fstVarDir vd = MapVarDir(s->direction);
             auto it = id2fh.find(s->id);
             if (it != id2fh.end()) {
-                /* same idcode as an earlier var: fst alias */
+                /* same idcode as an earlier var: fst alias (shares the
+                 * primary's handle, and therefore its value data) */
                 s->fh = fstWriterCreateVar(wctx, vt, vd, s->len,
                                            s->name.c_str(), it->second);
                 alias_ids.insert(s->id);
@@ -587,6 +711,13 @@ int main(int argc, char **argv) {
                 s->fh = fstWriterCreateVar(wctx, vt, vd, s->len,
                                            s->name.c_str(), 0);
                 id2fh[s->id] = s->fh;
+                /* This is the primary for its idcode: it is the one that
+                 * must go into ffrAddToSignalList and the one the iterator
+                 * writes through. Note this cannot be keyed off "not in
+                 * alias_ids": alias_ids is keyed by idcode, so it contains
+                 * the primary too as soon as any alias exists, which would
+                 * exclude the primary and drop the group's value data. */
+                primary_ids.insert(s->id);
             }
             if (!s->fh) die("fstWriterCreateVar failed for %s",
                             s->path.c_str());
@@ -598,12 +729,18 @@ int main(int argc, char **argv) {
 
     /* ---- phase 2: load value data, stream through the merged iterator ---- */
     for (Signal *s : sel) {
-        if (s->fh && !alias_ids.count(s->id))
-            rd.obj->ffrAddToSignalList(s->id);
+        if (s->fh && primary_ids.count(s->id)) {
+            fsdbRC rc = rd.obj->ffrAddToSignalList(s->id);
+            if (FSDB_RC_SUCCESS != rc)
+                die("ffrAddToSignalList failed for id %u (%s)",
+                    static_cast<unsigned>(s->id), s->path.c_str());
+        }
     }
     vlog("loading value data for %zu signals (RAM heavy for big designs)...",
          id2fh.size());
-    rd.obj->ffrLoadSignals();
+    if (FSDB_RC_SUCCESS != rd.obj->ffrLoadSignals())
+        die("ffrLoadSignals failed; the FSDB may be truncated or use an "
+            "unsupported layout. Try --info first and report this file.");
 
     std::vector<fsdbVarIdcode> ids;
     ids.reserve(id2fh.size());
@@ -613,12 +750,12 @@ int main(int argc, char **argv) {
             static_cast<unsigned int>(ids.size()), ids.data());
     if (!thdl) die("ffrCreateTimeBasedVCTrvsHdl failed");
 
-    /* idcode -> primary signal (id2fh 的 key 对应唯一主变量记录)，避免
-     * 遍历热循环里对 sel 做线性扫描 */
+    /* idcode -> primary signal, so the traversal hot loop does not have to
+     * scan sel linearly. */
     std::unordered_map<fsdbVarIdcode, Signal *> id2sig;
     id2sig.reserve(id2fh.size());
     for (Signal *s : sel) {
-        if (s->fh && !alias_ids.count(s->id))
+        if (s->fh && primary_ids.count(s->id))
             id2sig.emplace(s->id, s);
     }
 
@@ -633,13 +770,8 @@ int main(int argc, char **argv) {
         buf.resize((s_)->len);                                       \
         for (unsigned int bi = 0; bi < (s_)->len; bi++) {            \
             unsigned char c = (vc_)[bi];                             \
-            switch (c) {                                             \
-            case FSDB_BT_VCD_0: buf[bi] = '0'; break;                \
-            case FSDB_BT_VCD_1: buf[bi] = '1'; break;                \
-            case FSDB_BT_VCD_X: buf[bi] = 'x'; break;                \
-            case FSDB_BT_VCD_Z: buf[bi] = 'z'; break;                \
-            default:            buf[bi] = 'x'; break;                \
-            }                                                        \
+            buf[bi] = (s_)->std_logic_alphabet ? StdLogicToChar(c)    \
+                                               : VcdToChar(c);        \
         }                                                            \
         fstWriterEmitValueChange(wctx, (s_)->fh, buf.data());        \
     } while (0)
@@ -657,6 +789,17 @@ int main(int argc, char **argv) {
         fstWriterEmitValueChange(wctx, (s_)->fh, &d);                \
     } while (0)
 
+    /* NOTE ON INITIAL VALUES
+     * The merged time-based iterator only yields *changes*, so a signal that
+     * never changes (a parameter, a constant-driven net) ends up with no
+     * value at all in the FST. Seeding those from per-signal traverse
+     * handles (ffrCreateVCTrvsHdl + ffrGotoTheFirstVC) does work, but the
+     * cost scales with the file: on a 321k-VC file it turns a 0.1 s
+     * conversion into >300 s, because each handle walks the value index
+     * again. The payoff is a handful of constant signals, so it is
+     * deliberately not done. Such signals show up in the hierarchy with no
+     * data, same as an undriven net.
+     */
     auto process_one = [&](bool &stop) {
         fsdbVarIdcode idc;
         fsdbXTag xtag;
@@ -669,8 +812,8 @@ int main(int argc, char **argv) {
             return;
         }
         if (!vc) return;
-        /* fsdbXTag is layout-compatible with fsdbTag64 in the 64-bit API
-         * (TraceWeave relies on the same); assert at compile time. */
+        /* fsdbXTag is layout-compatible with fsdbTag64 in the 64-bit API;
+         * assert at compile time. */
         static_assert(sizeof(fsdbXTag) == sizeof(fsdbTag64),
                       "unexpected fsdbXTag size; revisit the tag conversion");
         fsdbTag64 tag;
@@ -684,8 +827,12 @@ int main(int argc, char **argv) {
             have_time = true;
         }
 
+        /* Write through the primary signal of this idcode. Do not reject on
+         * alias_ids: that set is keyed by idcode, so it also contains the
+         * primary whenever any alias exists, and rejecting on it would drop
+         * the whole group's value data. */
         auto it = id2fh.find(idc);
-        if (it == id2fh.end() || alias_ids.count(idc)) return;
+        if (it == id2fh.end()) return;
         auto sit = id2sig.find(idc);
         if (sit == id2sig.end()) return;
         Signal *s = sit->second;

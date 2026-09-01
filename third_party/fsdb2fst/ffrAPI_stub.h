@@ -47,6 +47,52 @@ typedef fsdbTag64 fsdbXTag;
 #define FSDB_BT_VCD_X 2
 #define FSDB_BT_VCD_Z 3
 
+/* VHDL-std_(u)logic byte codes (only relevant for dtidcode!=0 vars) */
+#define FSDB_BT_VHDL_STD_LOGIC_U 0
+#define FSDB_BT_VHDL_STD_LOGIC_X 1
+#define FSDB_BT_VHDL_STD_LOGIC_0 2
+#define FSDB_BT_VHDL_STD_LOGIC_1 3
+#define FSDB_BT_VHDL_STD_LOGIC_Z 4
+#define FSDB_BT_VHDL_STD_LOGIC_W 5
+#define FSDB_BT_VHDL_STD_LOGIC_L 6
+#define FSDB_BT_VHDL_STD_LOGIC_H 7
+#define FSDB_BT_VHDL_STD_LOGIC_DASH 8
+
+/* FSDB variable types (subset of the real fsdbShr enum).
+ * MIDDLE=64 / COMPUTED=128 are flag bits OR-ed onto the base type. */
+enum {
+    FSDB_VT_VCD_EVENT       = 0,
+    FSDB_VT_VCD_INTEGER     = 1,
+    FSDB_VT_VCD_PARAMETER   = 2,
+    FSDB_VT_VCD_REAL        = 3,
+    FSDB_VT_VCD_REG         = 5,
+    FSDB_VT_VCD_SUPPLY0     = 6,
+    FSDB_VT_VCD_SUPPLY1     = 7,
+    FSDB_VT_VCD_TIME        = 8,
+    FSDB_VT_VCD_TRI         = 9,
+    FSDB_VT_VCD_TRIAND      = 10,
+    FSDB_VT_VCD_TRIOR       = 11,
+    FSDB_VT_VCD_TRIREG      = 12,
+    FSDB_VT_VCD_TRI0        = 13,
+    FSDB_VT_VCD_TRI1        = 14,
+    FSDB_VT_VCD_WAND        = 15,
+    FSDB_VT_VCD_WIRE        = 16,
+    FSDB_VT_VCD_WOR         = 17,
+    FSDB_VT_VCD_REG2        = 20,
+    /* VHDL std_logic / std_ulogic vars show up as these two when dtidcode
+     * is non-zero. The exact enum values live in Verdi's real fsdbShr.h
+     * (not redistributed); in the stub they only have to satisfy
+     * IsConvertibleVar in fsdb2fst.cpp. */
+    FSDB_VT_VHDL_SIGNAL     = 26,
+    FSDB_VT_VHDL_VARIABLE   = 27,
+    /* Some non-convertible types that show up in real FSDBs. */
+    FSDB_VT_STREAM          = 64,     /* transaction stream vars */
+    FSDB_VT_ESD_OPTION      = 129,    /* $$ESD_OPTIONS.* */
+    FSDB_VT_MIDDLE          = 64,     /* verilog/vhdl flag bit */
+    FSDB_VT_COMPUTED        = 128,    /* verilog/vhdl flag bit */
+    FSDB_VT_MC_MASK         = (FSDB_VT_MIDDLE | FSDB_VT_COMPUTED)
+};
+
 enum fsdbBytesPerBit {
     FSDB_BYTES_PER_BIT_1B = 0,
     FSDB_BYTES_PER_BIT_2B = 1,
@@ -77,6 +123,7 @@ typedef struct {
     uint_T bytes_per_bit;
     uint_T direction;
     uint_T type;
+    uint_T dtidcode;   /* non-zero for real VHDL-typed vars (std_logic, enum) */
 } fsdbTreeCBDataVar;
 
 typedef bool_T (*fsdbTreeCBFuncT)(fsdbTreeCBType, void *, void *);
