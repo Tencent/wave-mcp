@@ -1,3 +1,5 @@
+`timescale 1ns/1ps
+
 // Demo 4: pass/fail diff — CRC residue mismatch on a serial stream
 //
 // Bug story (intentional): the CRC LFSR misses one data bit whenever two

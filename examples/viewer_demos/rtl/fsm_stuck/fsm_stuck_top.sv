@@ -1,3 +1,5 @@
+`timescale 1ns/1ps
+
 // Demo 2: FSM deadlock
 //
 // Bug story (intentional): the WREQ handshake uses a req/ack pair, but the

@@ -15,7 +15,7 @@
       {
         "code": "WidthExpand",
         "is_error": true,
-        "text": "rtl/xprop/xprop_top.sv:50:34: warning: implicit conversion expands from 6 to 8 bits [-Wwidth-expand]"
+        "text": "rtl/xprop/xprop_top.sv:52:34: warning: implicit conversion expands from 6 to 8 bits [-Wwidth-expand]"
       }
     ],
     "actionable_hints": []
@@ -33,43 +33,43 @@
     "xprop_tb": {
       "name": "xprop_tb",
       "file": "rtl/xprop/xprop_top.sv",
-      "line": 60,
+      "line": 62,
       "ports": {},
       "signals": {
         "clk": {
           "kind": "variable",
           "width": 1,
-          "line": 61,
+          "line": 63,
           "file": "rtl/xprop/xprop_top.sv"
         },
         "rst_n": {
           "kind": "variable",
           "width": 1,
-          "line": 61,
+          "line": 63,
           "file": "rtl/xprop/xprop_top.sv"
         },
         "start": {
           "kind": "variable",
           "width": 1,
-          "line": 61,
+          "line": 63,
           "file": "rtl/xprop/xprop_top.sv"
         },
         "din": {
           "kind": "variable",
           "width": 8,
-          "line": 62,
+          "line": 64,
           "file": "rtl/xprop/xprop_top.sv"
         },
         "data_out": {
           "kind": "net",
           "width": 8,
-          "line": 63,
+          "line": 65,
           "file": "rtl/xprop/xprop_top.sv"
         },
         "done": {
           "kind": "net",
           "width": 1,
-          "line": 64,
+          "line": 66,
           "file": "rtl/xprop/xprop_top.sv"
         }
       },
@@ -81,7 +81,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/xprop/xprop_top.sv",
-            "line": 66,
+            "line": 68,
             "snippet": "xprop_top dut (.clk(clk), .rst_n(rst_n), .start(start),",
             "port_ref": {
               "instance": "dut",
@@ -98,7 +98,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/xprop/xprop_top.sv",
-            "line": 66,
+            "line": 68,
             "snippet": "xprop_top dut (.clk(clk), .rst_n(rst_n), .start(start),",
             "port_ref": {
               "instance": "dut",
@@ -117,7 +117,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/xprop/xprop_top.sv",
-            "line": 69,
+            "line": 71,
             "snippet": "always #5 clk = ~clk;"
           },
           {
@@ -126,7 +126,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/xprop/xprop_top.sv",
-            "line": 81,
+            "line": 83,
             "snippet": "clk = 0; rst_n = 0; start = 0; din = 8'h00;"
           }
         ],
@@ -137,7 +137,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/xprop/xprop_top.sv",
-            "line": 81,
+            "line": 83,
             "snippet": "clk = 0; rst_n = 0; start = 0; din = 8'h00;"
           },
           {
@@ -146,7 +146,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/xprop/xprop_top.sv",
-            "line": 82,
+            "line": 84,
             "snippet": "#12 rst_n = 1;"
           },
           {
@@ -155,7 +155,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/xprop/xprop_top.sv",
-            "line": 85,
+            "line": 87,
             "snippet": "#20 rst_n = 0;            // mid-run reset pulse"
           },
           {
@@ -164,7 +164,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/xprop/xprop_top.sv",
-            "line": 86,
+            "line": 88,
             "snippet": "#8  rst_n = 1;            // byte_cnt survives as stale value"
           }
         ],
@@ -175,7 +175,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/xprop/xprop_top.sv",
-            "line": 81,
+            "line": 83,
             "snippet": "clk = 0; rst_n = 0; start = 0; din = 8'h00;"
           }
         ],
@@ -186,7 +186,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/xprop/xprop_top.sv",
-            "line": 81,
+            "line": 83,
             "snippet": "clk = 0; rst_n = 0; start = 0; din = 8'h00;"
           }
         ]
@@ -241,27 +241,27 @@
       "loc": {
         "clk": {
           "file": "rtl/xprop/xprop_top.sv",
-          "line": 61
+          "line": 63
         },
         "rst_n": {
           "file": "rtl/xprop/xprop_top.sv",
-          "line": 61
+          "line": 63
         },
         "start": {
           "file": "rtl/xprop/xprop_top.sv",
-          "line": 61
+          "line": 63
         },
         "din": {
           "file": "rtl/xprop/xprop_top.sv",
-          "line": 62
+          "line": 64
         },
         "data_out": {
           "file": "rtl/xprop/xprop_top.sv",
-          "line": 63
+          "line": 65
         },
         "done": {
           "file": "rtl/xprop/xprop_top.sv",
-          "line": 64
+          "line": 66
         }
       },
       "instances": [
@@ -284,7 +284,7 @@
             "data_out": "output",
             "done": "output"
           },
-          "line": 66
+          "line": 68
         }
       ],
       "skipped_members": 0
@@ -292,48 +292,48 @@
     "xprop_top": {
       "name": "xprop_top",
       "file": "rtl/xprop/xprop_top.sv",
-      "line": 13,
+      "line": 15,
       "ports": {
         "clk": {
-          "direction": "input",
-          "width": 1,
-          "type": "port",
-          "line": 14,
-          "file": "rtl/xprop/xprop_top.sv"
-        },
-        "rst_n": {
-          "direction": "input",
-          "width": 1,
-          "type": "port",
-          "line": 15,
-          "file": "rtl/xprop/xprop_top.sv"
-        },
-        "start": {
           "direction": "input",
           "width": 1,
           "type": "port",
           "line": 16,
           "file": "rtl/xprop/xprop_top.sv"
         },
+        "rst_n": {
+          "direction": "input",
+          "width": 1,
+          "type": "port",
+          "line": 17,
+          "file": "rtl/xprop/xprop_top.sv"
+        },
+        "start": {
+          "direction": "input",
+          "width": 1,
+          "type": "port",
+          "line": 18,
+          "file": "rtl/xprop/xprop_top.sv"
+        },
         "din": {
           "direction": "input",
           "width": 8,
           "type": "port",
-          "line": 17,
+          "line": 19,
           "file": "rtl/xprop/xprop_top.sv"
         },
         "data_out": {
           "direction": "output",
           "width": 8,
           "type": "port",
-          "line": 18,
+          "line": 20,
           "file": "rtl/xprop/xprop_top.sv"
         },
         "done": {
           "direction": "output",
           "width": 1,
           "type": "port",
-          "line": 19,
+          "line": 21,
           "file": "rtl/xprop/xprop_top.sv"
         }
       },
@@ -341,61 +341,61 @@
         "clk": {
           "kind": "net",
           "width": 1,
-          "line": 14,
+          "line": 16,
           "file": "rtl/xprop/xprop_top.sv"
         },
         "rst_n": {
           "kind": "net",
           "width": 1,
-          "line": 15,
+          "line": 17,
           "file": "rtl/xprop/xprop_top.sv"
         },
         "start": {
           "kind": "net",
           "width": 1,
-          "line": 16,
+          "line": 18,
           "file": "rtl/xprop/xprop_top.sv"
         },
         "din": {
           "kind": "net",
           "width": 8,
-          "line": 17,
+          "line": 19,
           "file": "rtl/xprop/xprop_top.sv"
         },
         "data_out": {
           "kind": "variable",
           "width": 8,
-          "line": 18,
+          "line": 20,
           "file": "rtl/xprop/xprop_top.sv"
         },
         "done": {
           "kind": "variable",
           "width": 1,
-          "line": 19,
+          "line": 21,
           "file": "rtl/xprop/xprop_top.sv"
         },
         "fsm_state": {
           "kind": "variable",
           "width": 2,
-          "line": 24,
+          "line": 26,
           "file": "rtl/xprop/xprop_top.sv"
         },
         "shift_ticks": {
           "kind": "variable",
           "width": 3,
-          "line": 25,
+          "line": 27,
           "file": "rtl/xprop/xprop_top.sv"
         },
         "byte_cnt": {
           "kind": "variable",
           "width": 3,
-          "line": 26,
+          "line": 28,
           "file": "rtl/xprop/xprop_top.sv"
         },
         "shreg": {
           "kind": "variable",
           "width": 8,
-          "line": 27,
+          "line": 29,
           "file": "rtl/xprop/xprop_top.sv"
         }
       },
@@ -424,7 +424,7 @@
               }
             ],
             "file": "rtl/xprop/xprop_top.sv",
-            "line": 31,
+            "line": 33,
             "snippet": "fsm_state   <= IDLE;"
           },
           {
@@ -477,7 +477,7 @@
               }
             ],
             "file": "rtl/xprop/xprop_top.sv",
-            "line": 38,
+            "line": 40,
             "snippet": "fsm_state   <= SHIFT;"
           },
           {
@@ -538,7 +538,7 @@
               }
             ],
             "file": "rtl/xprop/xprop_top.sv",
-            "line": 47,
+            "line": 49,
             "snippet": "fsm_state <= FLUSH;"
           },
           {
@@ -583,7 +583,7 @@
               }
             ],
             "file": "rtl/xprop/xprop_top.sv",
-            "line": 52,
+            "line": 54,
             "snippet": "fsm_state <= IDLE;"
           },
           {
@@ -613,7 +613,7 @@
               }
             ],
             "file": "rtl/xprop/xprop_top.sv",
-            "line": 54,
+            "line": 56,
             "snippet": "default: fsm_state <= IDLE;"
           }
         ],
@@ -639,7 +639,7 @@
               }
             ],
             "file": "rtl/xprop/xprop_top.sv",
-            "line": 32,
+            "line": 34,
             "snippet": "shift_ticks <= 3'd0;"
           },
           {
@@ -690,7 +690,7 @@
               }
             ],
             "file": "rtl/xprop/xprop_top.sv",
-            "line": 39,
+            "line": 41,
             "snippet": "shift_ticks <= 3'd0;"
           },
           {
@@ -735,7 +735,7 @@
               }
             ],
             "file": "rtl/xprop/xprop_top.sv",
-            "line": 44,
+            "line": 46,
             "snippet": "shift_ticks <= shift_ticks + 1'b1;"
           }
         ],
@@ -761,7 +761,7 @@
               }
             ],
             "file": "rtl/xprop/xprop_top.sv",
-            "line": 33,
+            "line": 35,
             "snippet": "done        <= 1'b0;"
           },
           {
@@ -785,7 +785,7 @@
               }
             ],
             "file": "rtl/xprop/xprop_top.sv",
-            "line": 35,
+            "line": 37,
             "snippet": "done <= 1'b0;"
           },
           {
@@ -828,7 +828,7 @@
               }
             ],
             "file": "rtl/xprop/xprop_top.sv",
-            "line": 51,
+            "line": 53,
             "snippet": "done      <= 1'b1;"
           }
         ],
@@ -883,7 +883,7 @@
               }
             ],
             "file": "rtl/xprop/xprop_top.sv",
-            "line": 40,
+            "line": 42,
             "snippet": "shreg       <= din;"
           },
           {
@@ -928,7 +928,7 @@
               }
             ],
             "file": "rtl/xprop/xprop_top.sv",
-            "line": 43,
+            "line": 45,
             "snippet": "shreg       <= {shreg[6:0], 1'b0};"
           }
         ],
@@ -975,7 +975,7 @@
               }
             ],
             "file": "rtl/xprop/xprop_top.sv",
-            "line": 45,
+            "line": 47,
             "snippet": "byte_cnt    <= byte_cnt + 1'b1;   // X+1 = X"
           }
         ],
@@ -1023,7 +1023,7 @@
               }
             ],
             "file": "rtl/xprop/xprop_top.sv",
-            "line": 50,
+            "line": 52,
             "snippet": "data_out  <= {byte_cnt, shreg[7:5]}; // X bits in [7:5]"
           }
         ]
@@ -1089,22 +1089,6 @@
         ]
       },
       "loads": {
-        "fsm_state": [
-          "fsm_state",
-          "shift_ticks",
-          "done",
-          "shreg",
-          "byte_cnt",
-          "data_out"
-        ],
-        "FLUSH": [
-          "fsm_state",
-          "shift_ticks",
-          "done",
-          "shreg",
-          "byte_cnt",
-          "data_out"
-        ],
         "rst_n": [
           "fsm_state",
           "shift_ticks",
@@ -1113,7 +1097,19 @@
           "byte_cnt",
           "data_out"
         ],
-        "SHIFT": [
+        "clk": [
+          "fsm_state",
+          "shift_ticks",
+          "done",
+          "shreg",
+          "byte_cnt",
+          "data_out"
+        ],
+        "shift_ticks": [
+          "fsm_state",
+          "shift_ticks"
+        ],
+        "fsm_state": [
           "fsm_state",
           "shift_ticks",
           "done",
@@ -1129,12 +1125,7 @@
           "byte_cnt",
           "data_out"
         ],
-        "start": [
-          "fsm_state",
-          "shift_ticks",
-          "shreg"
-        ],
-        "clk": [
+        "FLUSH": [
           "fsm_state",
           "shift_ticks",
           "done",
@@ -1142,9 +1133,18 @@
           "byte_cnt",
           "data_out"
         ],
-        "shift_ticks": [
+        "start": [
           "fsm_state",
-          "shift_ticks"
+          "shift_ticks",
+          "shreg"
+        ],
+        "SHIFT": [
+          "fsm_state",
+          "shift_ticks",
+          "done",
+          "shreg",
+          "byte_cnt",
+          "data_out"
         ],
         "din": [
           "shreg"
@@ -1161,43 +1161,43 @@
       "loc": {
         "clk": {
           "file": "rtl/xprop/xprop_top.sv",
-          "line": 14
+          "line": 16
         },
         "rst_n": {
           "file": "rtl/xprop/xprop_top.sv",
-          "line": 15
+          "line": 17
         },
         "start": {
           "file": "rtl/xprop/xprop_top.sv",
-          "line": 16
+          "line": 18
         },
         "din": {
           "file": "rtl/xprop/xprop_top.sv",
-          "line": 17
+          "line": 19
         },
         "data_out": {
           "file": "rtl/xprop/xprop_top.sv",
-          "line": 18
+          "line": 20
         },
         "done": {
           "file": "rtl/xprop/xprop_top.sv",
-          "line": 19
+          "line": 21
         },
         "fsm_state": {
           "file": "rtl/xprop/xprop_top.sv",
-          "line": 24
+          "line": 26
         },
         "shift_ticks": {
           "file": "rtl/xprop/xprop_top.sv",
-          "line": 25
+          "line": 27
         },
         "byte_cnt": {
           "file": "rtl/xprop/xprop_top.sv",
-          "line": 26
+          "line": 28
         },
         "shreg": {
           "file": "rtl/xprop/xprop_top.sv",
-          "line": 27
+          "line": 29
         }
       },
       "instances": [],

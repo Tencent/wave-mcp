@@ -1,3 +1,5 @@
+`timescale 1ns/1ps
+
 // Demo 3: CDC (clock-domain crossing) metastability
 //
 // Bug story (intentional): a pulse generated in the 50 MHz "fast" domain

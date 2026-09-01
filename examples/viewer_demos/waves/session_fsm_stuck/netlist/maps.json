@@ -25,61 +25,61 @@
     "fsm_stuck_tb": {
       "name": "fsm_stuck_tb",
       "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-      "line": 64,
+      "line": 66,
       "ports": {},
       "signals": {
         "clk": {
           "kind": "variable",
           "width": 1,
-          "line": 65,
+          "line": 67,
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
         },
         "rst_n": {
           "kind": "variable",
           "width": 1,
-          "line": 65,
+          "line": 67,
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
         },
         "rd_en": {
           "kind": "variable",
           "width": 1,
-          "line": 65,
+          "line": 67,
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
         },
         "ack": {
           "kind": "variable",
           "width": 1,
-          "line": 65,
+          "line": 67,
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
         },
         "req": {
           "kind": "net",
           "width": 1,
-          "line": 66,
+          "line": 68,
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
         },
         "ack_unused": {
           "kind": "net",
           "width": 1,
-          "line": 66,
+          "line": 68,
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
         },
         "rd_count": {
           "kind": "net",
           "width": 8,
-          "line": 67,
+          "line": 69,
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
         },
         "rd_data": {
           "kind": "net",
           "width": 8,
-          "line": 67,
+          "line": 69,
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
         },
         "ack_wanted": {
           "kind": "variable",
           "width": 1,
-          "line": 70,
+          "line": 72,
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
         }
       },
@@ -91,7 +91,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-            "line": 72,
+            "line": 74,
             "snippet": "fsm_stuck_top dut (.clk(clk), .rst_n(rst_n), .rd_en(rd_en), .ack(ack),",
             "port_ref": {
               "instance": "dut",
@@ -108,7 +108,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-            "line": 72,
+            "line": 74,
             "snippet": "fsm_stuck_top dut (.clk(clk), .rst_n(rst_n), .rd_en(rd_en), .ack(ack),",
             "port_ref": {
               "instance": "dut",
@@ -125,7 +125,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-            "line": 72,
+            "line": 74,
             "snippet": "fsm_stuck_top dut (.clk(clk), .rst_n(rst_n), .rd_en(rd_en), .ack(ack),",
             "port_ref": {
               "instance": "dut",
@@ -144,7 +144,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-            "line": 75,
+            "line": 77,
             "snippet": "always #5 clk = ~clk;"
           },
           {
@@ -153,7 +153,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-            "line": 78,
+            "line": 80,
             "snippet": "clk = 0; rst_n = 0; rd_en = 0; ack = 0; ack_wanted = 1;"
           }
         ],
@@ -164,7 +164,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-            "line": 78,
+            "line": 80,
             "snippet": "clk = 0; rst_n = 0; rd_en = 0; ack = 0; ack_wanted = 1;"
           },
           {
@@ -173,7 +173,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-            "line": 79,
+            "line": 81,
             "snippet": "#12 rst_n = 1;"
           }
         ],
@@ -184,7 +184,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-            "line": 78,
+            "line": 80,
             "snippet": "clk = 0; rst_n = 0; rd_en = 0; ack = 0; ack_wanted = 1;"
           },
           {
@@ -193,7 +193,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-            "line": 83,
+            "line": 85,
             "snippet": "@(negedge clk); rd_en = 1;"
           },
           {
@@ -202,7 +202,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-            "line": 84,
+            "line": 86,
             "snippet": "@(negedge clk); rd_en = 0;"
           },
           {
@@ -211,7 +211,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-            "line": 91,
+            "line": 93,
             "snippet": "@(negedge clk); rd_en = 1;"
           },
           {
@@ -220,7 +220,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-            "line": 92,
+            "line": 94,
             "snippet": "@(negedge clk); rd_en = 0;"
           }
         ],
@@ -231,7 +231,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-            "line": 78,
+            "line": 80,
             "snippet": "clk = 0; rst_n = 0; rd_en = 0; ack = 0; ack_wanted = 1;"
           },
           {
@@ -240,7 +240,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-            "line": 85,
+            "line": 87,
             "snippet": "wait (req); @(negedge clk); ack = 1;   // slave acks"
           },
           {
@@ -249,7 +249,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-            "line": 86,
+            "line": 88,
             "snippet": "@(negedge clk); ack = 0;"
           },
           {
@@ -268,7 +268,7 @@
               }
             ],
             "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-            "line": 93,
+            "line": 95,
             "snippet": "@(negedge clk); if (ack_wanted) ack = 1;"
           },
           {
@@ -292,7 +292,7 @@
               }
             ],
             "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-            "line": 100,
+            "line": 102,
             "snippet": "always @(negedge clk) if (!ack_wanted) ack = 0;"
           }
         ],
@@ -303,7 +303,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-            "line": 78,
+            "line": 80,
             "snippet": "clk = 0; rst_n = 0; rd_en = 0; ack = 0; ack_wanted = 1;"
           },
           {
@@ -312,7 +312,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-            "line": 90,
+            "line": 92,
             "snippet": "#10 ack_wanted = 0;"
           }
         ]
@@ -381,39 +381,39 @@
       "loc": {
         "clk": {
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-          "line": 65
+          "line": 67
         },
         "rst_n": {
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-          "line": 65
+          "line": 67
         },
         "rd_en": {
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-          "line": 65
+          "line": 67
         },
         "ack": {
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-          "line": 65
+          "line": 67
         },
         "req": {
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-          "line": 66
+          "line": 68
         },
         "ack_unused": {
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-          "line": 66
+          "line": 68
         },
         "rd_count": {
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-          "line": 67
+          "line": 69
         },
         "rd_data": {
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-          "line": 67
+          "line": 69
         },
         "ack_wanted": {
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-          "line": 70
+          "line": 72
         }
       },
       "instances": [
@@ -438,7 +438,7 @@
             "rd_count": "output",
             "rd_data": "output"
           },
-          "line": 72
+          "line": 74
         }
       ],
       "skipped_members": 0
@@ -446,55 +446,55 @@
     "fsm_stuck_top": {
       "name": "fsm_stuck_top",
       "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-      "line": 14,
+      "line": 16,
       "ports": {
         "clk": {
-          "direction": "input",
-          "width": 1,
-          "type": "port",
-          "line": 15,
-          "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
-        },
-        "rst_n": {
-          "direction": "input",
-          "width": 1,
-          "type": "port",
-          "line": 16,
-          "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
-        },
-        "rd_en": {
           "direction": "input",
           "width": 1,
           "type": "port",
           "line": 17,
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
         },
-        "ack": {
+        "rst_n": {
           "direction": "input",
           "width": 1,
           "type": "port",
           "line": 18,
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
         },
+        "rd_en": {
+          "direction": "input",
+          "width": 1,
+          "type": "port",
+          "line": 19,
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
+        },
+        "ack": {
+          "direction": "input",
+          "width": 1,
+          "type": "port",
+          "line": 20,
+          "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
+        },
         "req": {
           "direction": "output",
           "width": 1,
           "type": "port",
-          "line": 19,
+          "line": 21,
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
         },
         "rd_count": {
           "direction": "output",
           "width": 8,
           "type": "port",
-          "line": 20,
+          "line": 22,
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
         },
         "rd_data": {
           "direction": "output",
           "width": 8,
           "type": "port",
-          "line": 21,
+          "line": 23,
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
         }
       },
@@ -502,55 +502,55 @@
         "clk": {
           "kind": "net",
           "width": 1,
-          "line": 15,
+          "line": 17,
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
         },
         "rst_n": {
           "kind": "net",
           "width": 1,
-          "line": 16,
+          "line": 18,
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
         },
         "rd_en": {
           "kind": "net",
           "width": 1,
-          "line": 17,
+          "line": 19,
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
         },
         "ack": {
           "kind": "net",
           "width": 1,
-          "line": 18,
+          "line": 20,
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
         },
         "req": {
           "kind": "variable",
           "width": 1,
-          "line": 19,
+          "line": 21,
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
         },
         "rd_count": {
           "kind": "variable",
           "width": 8,
-          "line": 20,
+          "line": 22,
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
         },
         "rd_data": {
           "kind": "variable",
           "width": 8,
-          "line": 21,
+          "line": 23,
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
         },
         "state": {
           "kind": "variable",
           "width": 2,
-          "line": 26,
+          "line": 28,
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
         },
         "fake_data": {
           "kind": "variable",
           "width": 8,
-          "line": 27,
+          "line": 29,
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv"
         }
       },
@@ -579,7 +579,7 @@
               }
             ],
             "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-            "line": 31,
+            "line": 33,
             "snippet": "state    <= IDLE;"
           },
           {
@@ -632,7 +632,7 @@
               }
             ],
             "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-            "line": 40,
+            "line": 42,
             "snippet": "state <= WAIT_ACK;"
           },
           {
@@ -685,7 +685,7 @@
               }
             ],
             "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-            "line": 48,
+            "line": 50,
             "snippet": "state    <= CAPTURE;"
           },
           {
@@ -730,7 +730,7 @@
               }
             ],
             "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-            "line": 52,
+            "line": 54,
             "snippet": "state <= IDLE;"
           },
           {
@@ -760,7 +760,7 @@
               }
             ],
             "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-            "line": 54,
+            "line": 56,
             "snippet": "default: state <= IDLE;"
           }
         ],
@@ -786,7 +786,7 @@
               }
             ],
             "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-            "line": 32,
+            "line": 34,
             "snippet": "req      <= 1'b0;"
           },
           {
@@ -837,7 +837,7 @@
               }
             ],
             "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-            "line": 39,
+            "line": 41,
             "snippet": "req   <= 1'b1;"
           },
           {
@@ -888,7 +888,7 @@
               }
             ],
             "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-            "line": 45,
+            "line": 47,
             "snippet": "req      <= 1'b0;"
           }
         ],
@@ -914,7 +914,7 @@
               }
             ],
             "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-            "line": 33,
+            "line": 35,
             "snippet": "rd_count <= 8'h00;"
           },
           {
@@ -967,7 +967,7 @@
               }
             ],
             "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-            "line": 46,
+            "line": 48,
             "snippet": "rd_count <= rd_count + 1'b1;"
           }
         ],
@@ -993,7 +993,7 @@
               }
             ],
             "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-            "line": 34,
+            "line": 36,
             "snippet": "rd_data  <= 8'h00;"
           },
           {
@@ -1046,7 +1046,7 @@
               }
             ],
             "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-            "line": 47,
+            "line": 49,
             "snippet": "rd_data  <= fake_data;"
           }
         ],
@@ -1088,7 +1088,7 @@
               }
             ],
             "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-            "line": 61,
+            "line": 63,
             "snippet": "if (state == IDLE && rd_en) fake_data <= fake_data + 1'b1;"
           }
         ]
@@ -1143,6 +1143,11 @@
         ]
       },
       "loads": {
+        "rd_en": [
+          "state",
+          "req",
+          "fake_data"
+        ],
         "state": [
           "state",
           "req",
@@ -1150,19 +1155,13 @@
           "rd_data",
           "fake_data"
         ],
-        "rst_n": [
-          "state",
-          "req",
-          "rd_count",
-          "rd_data"
-        ],
         "WAIT_ACK": [
           "state",
           "req",
           "rd_count",
           "rd_data"
         ],
-        "CAPTURE": [
+        "ack": [
           "state",
           "req",
           "rd_count",
@@ -1175,6 +1174,12 @@
           "rd_data",
           "fake_data"
         ],
+        "rst_n": [
+          "state",
+          "req",
+          "rd_count",
+          "rd_data"
+        ],
         "IDLE": [
           "state",
           "req",
@@ -1182,12 +1187,7 @@
           "rd_data",
           "fake_data"
         ],
-        "rd_en": [
-          "state",
-          "req",
-          "fake_data"
-        ],
-        "ack": [
+        "CAPTURE": [
           "state",
           "req",
           "rd_count",
@@ -1204,39 +1204,39 @@
       "loc": {
         "clk": {
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-          "line": 15
+          "line": 17
         },
         "rst_n": {
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-          "line": 16
+          "line": 18
         },
         "rd_en": {
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-          "line": 17
+          "line": 19
         },
         "ack": {
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-          "line": 18
+          "line": 20
         },
         "req": {
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-          "line": 19
+          "line": 21
         },
         "rd_count": {
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-          "line": 20
+          "line": 22
         },
         "rd_data": {
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-          "line": 21
+          "line": 23
         },
         "state": {
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-          "line": 26
+          "line": 28
         },
         "fake_data": {
           "file": "rtl/fsm_stuck/fsm_stuck_top.sv",
-          "line": 27
+          "line": 29
         }
       },
       "instances": [],

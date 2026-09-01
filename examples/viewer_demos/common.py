@@ -59,9 +59,23 @@ class DemoDriver:
     def hold(self) -> None:
         """Keep the server (and the viewer URL) alive for inspection.
 
-        Active with --hold on the command line or DEMO_HOLD=1 in the
-        environment; otherwise behaves exactly like stop().
+        Three modes:
+        - ``--hold-sleep``: sleep forever without touching stdin (suitable
+          for nohup/multiplexed deployments where there is no TTY).
+        - ``--hold`` or ``DEMO_HOLD=1``: wait for Enter on stdin.
+        - neither: behave exactly like stop().
         """
+        if "--hold-sleep" in sys.argv:
+            print("[demo] --hold-sleep: viewer stays alive without stdin. "
+                  "Ctrl+C to stop.", flush=True)
+            try:
+                import time
+                while True:
+                    time.sleep(3600)
+            except KeyboardInterrupt:
+                pass
+            self.stop()
+            return
         if "--hold" in sys.argv or os.environ.get("DEMO_HOLD"):
             print("[demo] viewer stays up. Open the URL above, poke around, "
                   "then press Enter here to finish.")

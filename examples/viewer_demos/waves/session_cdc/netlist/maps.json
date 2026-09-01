@@ -25,49 +25,49 @@
     "cdc_tb": {
       "name": "cdc_tb",
       "file": "rtl/cdc/cdc_top.sv",
-      "line": 48,
+      "line": 50,
       "ports": {},
       "signals": {
         "clk_fast": {
           "kind": "variable",
           "width": 1,
-          "line": 49,
+          "line": 51,
           "file": "rtl/cdc/cdc_top.sv"
         },
         "clk_slow": {
           "kind": "variable",
           "width": 1,
-          "line": 49,
+          "line": 51,
           "file": "rtl/cdc/cdc_top.sv"
         },
         "rst_n": {
           "kind": "variable",
           "width": 1,
-          "line": 49,
+          "line": 51,
           "file": "rtl/cdc/cdc_top.sv"
         },
         "trigger": {
           "kind": "variable",
           "width": 1,
-          "line": 49,
+          "line": 51,
           "file": "rtl/cdc/cdc_top.sv"
         },
         "pulse_seen": {
           "kind": "net",
           "width": 1,
-          "line": 50,
+          "line": 52,
           "file": "rtl/cdc/cdc_top.sv"
         },
         "pulse_count": {
           "kind": "net",
           "width": 8,
-          "line": 51,
+          "line": 53,
           "file": "rtl/cdc/cdc_top.sv"
         },
         "k": {
           "kind": "variable",
           "width": 32,
-          "line": 66,
+          "line": 68,
           "file": "rtl/cdc/cdc_top.sv"
         }
       },
@@ -79,7 +79,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/cdc/cdc_top.sv",
-            "line": 53,
+            "line": 55,
             "snippet": "cdc_top dut (.clk_fast(clk_fast), .rst_n(rst_n), .trigger(trigger),",
             "port_ref": {
               "instance": "dut",
@@ -96,7 +96,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/cdc/cdc_top.sv",
-            "line": 53,
+            "line": 55,
             "snippet": "cdc_top dut (.clk_fast(clk_fast), .rst_n(rst_n), .trigger(trigger),",
             "port_ref": {
               "instance": "dut",
@@ -113,7 +113,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/cdc/cdc_top.sv",
-            "line": 61,
+            "line": 63,
             "snippet": "initial clk_fast = 0;"
           },
           {
@@ -124,7 +124,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/cdc/cdc_top.sv",
-            "line": 62,
+            "line": 64,
             "snippet": "always #10 clk_fast = ~clk_fast;"
           }
         ],
@@ -135,7 +135,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/cdc/cdc_top.sv",
-            "line": 63,
+            "line": 65,
             "snippet": "initial begin clk_slow = 0; #13; end"
           },
           {
@@ -146,7 +146,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/cdc/cdc_top.sv",
-            "line": 64,
+            "line": 66,
             "snippet": "always #25 clk_slow = ~clk_slow;"
           }
         ],
@@ -157,7 +157,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/cdc/cdc_top.sv",
-            "line": 68,
+            "line": 70,
             "snippet": "rst_n = 0; trigger = 0;"
           },
           {
@@ -166,7 +166,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/cdc/cdc_top.sv",
-            "line": 69,
+            "line": 71,
             "snippet": "#15 rst_n = 1;"
           }
         ],
@@ -177,7 +177,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/cdc/cdc_top.sv",
-            "line": 68,
+            "line": 70,
             "snippet": "rst_n = 0; trigger = 0;"
           },
           {
@@ -186,7 +186,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/cdc/cdc_top.sv",
-            "line": 71,
+            "line": 73,
             "snippet": "@(posedge clk_fast); trigger = 1;"
           },
           {
@@ -195,7 +195,7 @@
             "control": [],
             "guard": [],
             "file": "rtl/cdc/cdc_top.sv",
-            "line": 72,
+            "line": 74,
             "snippet": "@(posedge clk_fast); trigger = 0;"
           }
         ]
@@ -253,31 +253,31 @@
       "loc": {
         "clk_fast": {
           "file": "rtl/cdc/cdc_top.sv",
-          "line": 49
+          "line": 51
         },
         "clk_slow": {
           "file": "rtl/cdc/cdc_top.sv",
-          "line": 49
+          "line": 51
         },
         "rst_n": {
           "file": "rtl/cdc/cdc_top.sv",
-          "line": 49
+          "line": 51
         },
         "trigger": {
           "file": "rtl/cdc/cdc_top.sv",
-          "line": 49
+          "line": 51
         },
         "pulse_seen": {
           "file": "rtl/cdc/cdc_top.sv",
-          "line": 50
+          "line": 52
         },
         "pulse_count": {
           "file": "rtl/cdc/cdc_top.sv",
-          "line": 51
+          "line": 53
         },
         "k": {
           "file": "rtl/cdc/cdc_top.sv",
-          "line": 66
+          "line": 68
         }
       },
       "instances": [
@@ -300,7 +300,7 @@
             "pulse_seen": "output",
             "pulse_count": "output"
           },
-          "line": 53
+          "line": 55
         }
       ],
       "skipped_members": 0
@@ -308,48 +308,48 @@
     "cdc_top": {
       "name": "cdc_top",
       "file": "rtl/cdc/cdc_top.sv",
-      "line": 15,
+      "line": 17,
       "ports": {
         "clk_fast": {
-          "direction": "input",
-          "width": 1,
-          "type": "port",
-          "line": 16,
-          "file": "rtl/cdc/cdc_top.sv"
-        },
-        "rst_n": {
-          "direction": "input",
-          "width": 1,
-          "type": "port",
-          "line": 17,
-          "file": "rtl/cdc/cdc_top.sv"
-        },
-        "trigger": {
           "direction": "input",
           "width": 1,
           "type": "port",
           "line": 18,
           "file": "rtl/cdc/cdc_top.sv"
         },
-        "clk_slow": {
+        "rst_n": {
           "direction": "input",
           "width": 1,
           "type": "port",
           "line": 19,
           "file": "rtl/cdc/cdc_top.sv"
         },
+        "trigger": {
+          "direction": "input",
+          "width": 1,
+          "type": "port",
+          "line": 20,
+          "file": "rtl/cdc/cdc_top.sv"
+        },
+        "clk_slow": {
+          "direction": "input",
+          "width": 1,
+          "type": "port",
+          "line": 21,
+          "file": "rtl/cdc/cdc_top.sv"
+        },
         "pulse_seen": {
           "direction": "output",
           "width": 1,
           "type": "port",
-          "line": 20,
+          "line": 22,
           "file": "rtl/cdc/cdc_top.sv"
         },
         "pulse_count": {
           "direction": "output",
           "width": 8,
           "type": "port",
-          "line": 21,
+          "line": 23,
           "file": "rtl/cdc/cdc_top.sv"
         }
       },
@@ -357,43 +357,43 @@
         "clk_fast": {
           "kind": "net",
           "width": 1,
-          "line": 16,
+          "line": 18,
           "file": "rtl/cdc/cdc_top.sv"
         },
         "rst_n": {
           "kind": "net",
           "width": 1,
-          "line": 17,
+          "line": 19,
           "file": "rtl/cdc/cdc_top.sv"
         },
         "trigger": {
           "kind": "net",
           "width": 1,
-          "line": 18,
+          "line": 20,
           "file": "rtl/cdc/cdc_top.sv"
         },
         "clk_slow": {
           "kind": "net",
           "width": 1,
-          "line": 19,
+          "line": 21,
           "file": "rtl/cdc/cdc_top.sv"
         },
         "pulse_seen": {
           "kind": "variable",
           "width": 1,
-          "line": 20,
+          "line": 22,
           "file": "rtl/cdc/cdc_top.sv"
         },
         "pulse_count": {
           "kind": "variable",
           "width": 8,
-          "line": 21,
+          "line": 23,
           "file": "rtl/cdc/cdc_top.sv"
         },
         "pulse_fast": {
           "kind": "variable",
           "width": 1,
-          "line": 24,
+          "line": 26,
           "file": "rtl/cdc/cdc_top.sv"
         }
       },
@@ -420,7 +420,7 @@
               }
             ],
             "file": "rtl/cdc/cdc_top.sv",
-            "line": 30,
+            "line": 32,
             "snippet": "pulse_fast <= 1'b0;"
           },
           {
@@ -447,7 +447,7 @@
               }
             ],
             "file": "rtl/cdc/cdc_top.sv",
-            "line": 32,
+            "line": 34,
             "snippet": "pulse_fast <= trigger && !pulse_fast;"
           }
         ],
@@ -473,7 +473,7 @@
               }
             ],
             "file": "rtl/cdc/cdc_top.sv",
-            "line": 38,
+            "line": 40,
             "snippet": "pulse_seen  <= 1'b0;"
           },
           {
@@ -499,7 +499,7 @@
               }
             ],
             "file": "rtl/cdc/cdc_top.sv",
-            "line": 41,
+            "line": 43,
             "snippet": "pulse_seen <= pulse_fast;           // crossing with no sync"
           }
         ],
@@ -525,7 +525,7 @@
               }
             ],
             "file": "rtl/cdc/cdc_top.sv",
-            "line": 39,
+            "line": 41,
             "snippet": "pulse_count <= 8'h00;"
           },
           {
@@ -572,7 +572,7 @@
               }
             ],
             "file": "rtl/cdc/cdc_top.sv",
-            "line": 43,
+            "line": 45,
             "snippet": "pulse_count <= pulse_count + 1'b1;"
           }
         ]
@@ -598,61 +598,61 @@
         ]
       },
       "loads": {
-        "clk_fast": [
-          "pulse_fast"
-        ],
-        "trigger": [
-          "pulse_fast"
+        "rst_n": [
+          "pulse_fast",
+          "pulse_seen",
+          "pulse_count"
         ],
         "pulse_fast": [
           "pulse_fast",
           "pulse_seen",
           "pulse_count"
         ],
-        "rst_n": [
-          "pulse_fast",
-          "pulse_seen",
-          "pulse_count"
+        "clk_fast": [
+          "pulse_fast"
+        ],
+        "trigger": [
+          "pulse_fast"
         ],
         "clk_slow": [
           "pulse_seen",
           "pulse_count"
         ],
-        "pulse_seen": [
+        "pulse_count": [
           "pulse_count"
         ],
-        "pulse_count": [
+        "pulse_seen": [
           "pulse_count"
         ]
       },
       "loc": {
         "clk_fast": {
           "file": "rtl/cdc/cdc_top.sv",
-          "line": 16
+          "line": 18
         },
         "rst_n": {
           "file": "rtl/cdc/cdc_top.sv",
-          "line": 17
+          "line": 19
         },
         "trigger": {
           "file": "rtl/cdc/cdc_top.sv",
-          "line": 18
+          "line": 20
         },
         "clk_slow": {
           "file": "rtl/cdc/cdc_top.sv",
-          "line": 19
+          "line": 21
         },
         "pulse_seen": {
           "file": "rtl/cdc/cdc_top.sv",
-          "line": 20
+          "line": 22
         },
         "pulse_count": {
           "file": "rtl/cdc/cdc_top.sv",
-          "line": 21
+          "line": 23
         },
         "pulse_fast": {
           "file": "rtl/cdc/cdc_top.sv",
-          "line": 24
+          "line": 26
         }
       },
       "instances": [],

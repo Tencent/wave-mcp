@@ -1,3 +1,5 @@
+`timescale 1ns/1ps
+
 // Demo 1: X-propagation root cause
 //
 // Bug story (intentional): byte_cnt is a shift-counter that is NEVER reset

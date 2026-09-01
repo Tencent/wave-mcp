@@ -76,13 +76,13 @@ def main() -> int:
              "format": "dec"},
         ],
         "cursor": {"time": stuck_req[-1]["time"] if stuck_req else "145",
-                   "unit": "s"},
-        "viewport": {"from": "0", "to": "240", "unit": "s"},
+                   "unit": "ns"},
+        "viewport": {"from": "0", "to": "240", "unit": "ns"},
         "markers": [
-            {"time": "125", "unit": "s",
+            {"time": "125", "unit": "ns",
              "label": "最后一笔完成的事务（rd_count=3）", "color": "green"},
             {"time": stuck_req[-1]["time"] if stuck_req else "145",
-             "unit": "s", "label": "req 拉高但 ack 始终不来",
+             "unit": "ns", "label": "req 拉高但 ack 始终不来",
              "color": "red"},
         ],
         "annotation": {
@@ -106,7 +106,7 @@ def main() -> int:
     # ---- 5. zoom where the user would look, then read back actual ------
     d.call("update_wave_view", {
         "view_id": d.view_id,
-        "viewport": {"from": "100", "to": "240", "unit": "s"},
+        "viewport": {"from": "100", "to": "240", "unit": "ns"},
     })
     state = d.call("get_view_state", {"view_id": d.view_id})
     print("[demo2] actual viewport (user sees):",

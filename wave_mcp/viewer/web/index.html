@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>wave-mcp agent 调试样例</title>
+<style>
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center;
+         justify-content: center; background: #f5f5f7; color: #1d1d1f;
+         font-family: -apple-system, "PingFang SC", "Helvetica Neue",
+                      "Microsoft YaHei", sans-serif; }
+  main { max-width: 640px; padding: 48px 24px; }
+  h1 { font-size: 32px; font-weight: 600; letter-spacing: -.5px; }
+  p.sub { color: #6e6e73; font-size: 15px; margin-top: 8px; }
+  .card { display: block; margin-top: 14px; padding: 18px 20px;
+          background: #fff; border-radius: 14px; text-decoration: none;
+          color: inherit; box-shadow: 0 1px 3px rgba(0,0,0,.06);
+          transition: transform .15s ease, box-shadow .15s ease; }
+  .card:hover { transform: translateY(-1px);
+                box-shadow: 0 6px 16px rgba(0,0,0,.10); }
+  .name { font-size: 17px; font-weight: 600; }
+  .desc { font-size: 13px; color: #6e6e73; margin-top: 4px; }
+  .tag { display: inline-block; font-size: 11px; padding: 2px 9px;
+         border-radius: 999px; margin-left: 8px; vertical-align: 2px; }
+  .t1 { background: #ffe5e0; color: #b64400; }
+  .t2 { background: #fff3d6; color: #946a00; }
+  .t3 { background: #e3f0ff; color: #0a6ebd; }
+  .t4 { background: #e2f6e9; color: #1d7a3e; }
+</style>
+</head>
+<body>
+<main>
+  <h1>agent 替你摆好的波形现场</h1>
+  <p class="sub">四个场景各自是一个独立会话，点进去就能看 agent 分析完后的呈现：分组、游标、标记和分析结论都在。</p>
+  <a class="card" id="c1" href="#">
+    <span class="name">X 态传播<span class="tag t1">根因回溯</span></span>
+    <div class="desc">data_out 每个包都带 X，游标停在第一个坏包，trace 回到那个从未复位的计数器。</div>
+  </a>
+  <a class="card" id="c2" href="#">
+    <span class="name">FSM 死锁<span class="tag t2">握手卡死</span></span>
+    <div class="desc">req 拉高后 ack 一直不来，WAIT_ACK 状态没有超时出口，游标停在卡死瞬间。</div>
+  </a>
+  <a class="card" id="c3" href="#">
+    <span class="name">CDC 丢脉冲<span class="tag t3">跨时钟域</span></span>
+    <div class="desc">6 发 2 收：脉冲落在两个慢时钟沿之间，绿/红两个标记对比采到和丢掉的脉冲。</div>
+  </a>
+  <a class="card" id="c4" href="#">
+    <span class="name">CRC 对比<span class="tag t4">双波形 diff</span></span>
+    <div class="desc">pass/fail 两版波形左右同屏、锁步缩放，一眼看到 LFSR 从哪一拍开始分叉。</div>
+  </a>
+</main>
+<script>
+  fetch("/api/views").then(function (r) { return r.json(); }).then(function (d) {
+    var names = ["c1", "c2", "c3", "c4"];
+    var tokens = d.views.map(function (v) { return v.token; });
+    for (var i = 0; i < names.length && i < tokens.length; i++) {
+      document.getElementById(names[i]).href =
+        "/view.html?token=" + encodeURIComponent(tokens[i]);
+    }
+  });
+</script>
+</body>
+</html>

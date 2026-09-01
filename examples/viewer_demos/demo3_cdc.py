@@ -76,11 +76,11 @@ def main() -> int:
             {"path": "cdc_tb.pulse_count",        "group": "慢时钟域",
              "format": "dec"},
         ],
-        "viewport": {"from": "0", "to": "1100", "unit": "s"},
+        "viewport": {"from": "0", "to": "1100", "unit": "ns"},
         "markers": [
-            {"time": captured_t, "unit": "s",
+            {"time": captured_t, "unit": "ns",
              "label": "采到的脉冲", "color": "green"},
-            {"time": missed_t, "unit": "s",
+            {"time": missed_t, "unit": "ns",
              "label": "丢失的脉冲（窗口内无慢时钟沿）", "color": "red"},
         ],
         "annotation": {
@@ -104,12 +104,12 @@ def main() -> int:
     })
 
     # ---- 4. cursor walkthrough of one missed pulse ---------------------
-    mt = int(missed_t.rstrip("s"))
+    mt = int("".join(ch for ch in missed_t if ch.isdigit()))
     d.call("update_wave_view", {
         "view_id": d.view_id,
-        "cursor": {"time": missed_t, "unit": "s"},
+        "cursor": {"time": missed_t, "unit": "ns"},
         "viewport": {"from": str(mt - 60),
-                     "to": str(mt + 60), "unit": "s"},
+                     "to": str(mt + 60), "unit": "ns"},
         "annotation": {
             "markdown": (
                 f"游标停在丢失脉冲的位置 {missed_t}。在框出的窗口内，"

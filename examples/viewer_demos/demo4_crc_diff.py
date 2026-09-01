@@ -80,11 +80,11 @@ def main() -> int:
             {"path": "crc_diff_tb.crc_err",        "group": "校验结果",
              "source": "b", "color": "red"},
         ],
-        "cursor": {"time": div_t, "unit": "s"},
-        "viewport": {"from": "0", "to": "1000", "unit": "s"},
+        "cursor": {"time": div_t, "unit": "ns"},
+        "viewport": {"from": "0", "to": "1000", "unit": "ns"},
         "diff": {
             "source_a": "a", "source_b": "b",
-            "first_divergence": {"time": div_t, "unit": "s"},
+            "first_divergence": {"time": div_t, "unit": "ns"},
         },
         "annotation": {
             "markdown": (
@@ -108,12 +108,12 @@ def main() -> int:
     d.call("update_wave_view", {
         "view_id": d.view_id,
         "markers": [
-            {"time": div_t, "unit": "s",
+            {"time": div_t, "unit": "ns",
              "label": "首个分叉（dut.crc）", "color": "red"},
-            {"time": err_t, "unit": "s",
+            {"time": err_t, "unit": "ns",
              "label": "crc_err 拉高（仅 fail）", "color": "orange"},
         ],
-        "viewport": {"from": "0", "to": "1000", "unit": "s"},
+        "viewport": {"from": "0", "to": "1000", "unit": "ns"},
     })
 
     state = d.call("get_view_state", {"view_id": d.view_id})

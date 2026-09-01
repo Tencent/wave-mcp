@@ -66,10 +66,10 @@ def main() -> int:
              "color": "red", "format": "hex"},
             {"path": "xprop_tb.done",              "group": "控制通路"},
         ],
-        "cursor": {"time": x_rows[0]["time"], "unit": "s"},
-        "viewport": {"from": "0", "to": "460", "unit": "s"},
+        "cursor": {"time": x_rows[0]["time"], "unit": "ns"},
+        "viewport": {"from": "0", "to": "460", "unit": "ns"},
         "markers": [
-            {"time": x_rows[0]["time"], "unit": "s",
+            {"time": x_rows[0]["time"], "unit": "ns",
              "label": "data_out 上第一个 X", "color": "red"},
         ],
         "annotation": {
@@ -95,11 +95,11 @@ def main() -> int:
     # ---- 4. incremental refinement: zoom into the corrupted packet -----
     d.call("update_wave_view", {
         "view_id": d.view_id,
-        "viewport": {"from": "70", "to": "130", "unit": "s"},
+        "viewport": {"from": "70", "to": "130", "unit": "ns"},
         "markers": [
-            {"time": x_rows[0]["time"], "unit": "s",
+            {"time": x_rows[0]["time"], "unit": "ns",
              "label": "data_out 上第一个 X", "color": "red"},
-            {"time": "75", "unit": "s",
+            {"time": "75", "unit": "ns",
              "label": "rst_n 在运行中途释放", "color": "orange"},
         ],
         "annotation": {
