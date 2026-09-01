@@ -6,8 +6,8 @@
  *
  *   g++ -DFFRAPI_STUB -Ithird_party/fsdb2fst -c third_party/fsdb2fst/fsdb2fst.cpp
  *
- * Signatures mirror the subset of ffrAPI exercised by the TraceWeave
- * fsdb_wrapper (which compiles against real FsdbReader headers), so a clean
+ * Signatures mirror the subset of ffrAPI exercised by fsdb2fst.cpp (which
+ * compiles against real FsdbReader headers), so a clean
  * compile here validates our usage against that API shape. The real build
  * must use the genuine $VERDI_HOME/share/FsdbReader/ffrAPI.h; this stub
  * never ships in that build and is harmless if the include order picks it
@@ -36,8 +36,8 @@ typedef int     fsdbRC;
 
 typedef uint32_t fsdbVarIdcode;
 typedef uint32_t fsdbSeqNum;
-/* real ffrAPI: fsdbXTag is layout-identical to fsdbTag64 (the TraceWeave
- * wrapper casts between them) */
+/* real ffrAPI: fsdbXTag is layout-identical to fsdbTag64 (the converter
+ * casts between them) */
 typedef struct fsdbTag64 { uint_T H; uint_T L; } fsdbTag64;
 typedef fsdbTag64 fsdbXTag;
 

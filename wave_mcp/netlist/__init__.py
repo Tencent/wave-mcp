@@ -1,4 +1,4 @@
-"""Static RTL netlist extraction + trace engine (Indago categories 5 / 6).
+"""Static RTL netlist extraction + trace engine.
 
 Built from a pyslang-elaborated design (no Surelog/UHDM, no Verible), persisted
 as JSON maps:

@@ -418,7 +418,7 @@ glibc 2.17 档产物即可：`deploy/docker_build_all.sh` 自动在容器内自�
 
 ```
 wave_mcp/
-  server.py              # MCP server，注册全部 31 工具
+  server.py              # MCP server，注册全部 32 工具
   session.py             # Session / session.json / 指纹校验 / 三层 definition_name
   pipeline.py            # prepare_session / prepare_static_session 编排
   diff.py                # diff_waveforms 首分歧定位（时钟对齐采样）

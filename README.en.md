@@ -290,7 +290,7 @@ wave-session --vcd sim/dump.vcd --top top_tb --filelist rtl.f --out sessions/mod
 
 ---
 
-## Tools (31, in 10 categories)
+## Tools (32, in 10 categories)
 
 | Category | Tools | Notes |
 | --- | --- | --- |

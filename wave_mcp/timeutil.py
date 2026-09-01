@@ -3,7 +3,7 @@
 FST stores time as integer counts of ``10**timescale_exponent`` seconds, where
 the exponent is returned by ``fstReaderGetTimescale`` (e.g. -9 == ns, -12 == ps).
 
-User-facing time strings follow Indago/Verisium convention: ``"100ns"``,
+User-facing time strings use the conventional EDA form: ``"100ns"``,
 ``"3954ps"``, ``"1us"``, and the special tokens ``"min"`` / ``"max"`` handled by
 callers.
 """

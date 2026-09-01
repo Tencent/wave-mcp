@@ -282,7 +282,7 @@ fsdbRC ffrTimeBasedVCTrvsHdl_t::ffrGetVarIdcodeXTagVCSeqNum(
          * signal's bytes_per_bit. */
         if (bits) {
             /* FSDB per-bit arrays are MSB-first (same order as the VCD value
-             * string fstapi expects; TraceWeave's verified wrapper maps
+             * string fstapi expects; the converter maps
              * vc[i] -> s[i] directly). Script text is MSB-first too, so this
              * is a straight text->bytecode translation. */
             for (size_t k = 0; k < v.val.size(); k++) {

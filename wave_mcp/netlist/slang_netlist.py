@@ -1,6 +1,6 @@
 """Build a fully-elaborated static netlist from pyslang (slang SV front-end).
 
-Single, complete backend for Indago categories 5 / 6 — no Surelog/UHDM, no
+Single, complete backend for driver/load tracing — no Surelog/UHDM, no
 Verible. pyslang performs full elaboration (parameters, generate, interfaces,
 packages), so the extracted maps are accurate, and it ships as a pip wheel
 (portable to the air-gapped network).

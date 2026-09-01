@@ -1,4 +1,4 @@
-"""RTL static-analysis data source (Indago categories 2.5, 3-line, 5, 6, 8).
+"""RTL static-analysis data source.
 
 Single backend: a pyslang-elaborated netlist (built offline into maps.json) plus
 the FST for temporal decisions. No Surelog/UHDM, no Verible.

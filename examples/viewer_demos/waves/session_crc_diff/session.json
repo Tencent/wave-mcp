@@ -1,9 +1,9 @@
 {
   "top": "crc_diff_tb",
-  "fst_path": "/data/home/wukongxin/workspace/wave_mcp/examples/viewer_demos/waves/crc_pass.fst",
-  "maps_path": "/data/home/wukongxin/workspace/wave_mcp/examples/viewer_demos/waves/session_crc_diff/netlist/maps.json",
+  "fst_path": "../crc_pass.fst",
+  "maps_path": "netlist/maps.json",
   "filelist": [
-    "/data/home/wukongxin/workspace/wave_mcp/examples/viewer_demos/rtl/crc_diff/crc_diff_top.sv"
+    "../../rtl/crc_diff/crc_diff_top.sv"
   ],
   "fst_hash": "e32c801df2aba3c1aa7c1ad032cc88d9eeee3098",
   "filelist_hash": "bca521b5e580a6a760ef160eca2e06db27b6ee1a"

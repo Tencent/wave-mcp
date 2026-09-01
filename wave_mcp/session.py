@@ -12,9 +12,9 @@ A *session* is one isolated debug context (one module / one user), described by 
       "fst_hash": "...", "filelist_hash": "..."  # consistency fingerprints
     }
 
-``open_session(path)`` loads everything at once, mirroring Indago ``launch`` —
-the user only ever sees one handle. Per the requirements, a consistency check
-runs on open and refuses to silently serve stale data.
+``open_session(path)`` loads everything at once, so the user only ever sees
+one handle. A consistency check runs on open and refuses to silently serve
+stale data.
 """
 from __future__ import annotations
 

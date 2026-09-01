@@ -1,6 +1,6 @@
 """FST waveform data source (backed by pylibfst / fstapi).
 
-Responsibilities (Indago categories 2*, 3*, 4):
+Responsibilities:
   * design hierarchy (scope tree) from FST scopes
   * signal listing per instance with width / direction / type
   * signal value queries: point value, value over a time window, full history
@@ -205,7 +205,7 @@ class FstSource:
 
         ``filter_noise`` (default False for backward-compat) drops anonymous
         ``begin``/``fork`` procedural blocks that are not real instances, matching
-        Indago's design-hierarchy view. Interface/generate scopes are kept (they
+        a design-hierarchy view. Interface/generate scopes are kept (they
         are legitimate design elements) but flagged via ``scope_kind`` so callers
         can filter further.
         """

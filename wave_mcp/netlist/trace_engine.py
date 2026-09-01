@@ -1,6 +1,6 @@
 """Trace engine: structural (UHDM-equivalent netlist) x temporal (FST values).
 
-Implements Indago categories 5.5 / 6 on top of the pyslang netlist + FST:
+Combines the pyslang netlist with FST values to provide:
   * active drivers of a signal at a time (value-informed)
   * driver contributors
   * trace_value : backward driver-chain walk, each node annotated with its value
@@ -534,7 +534,7 @@ class TraceEngine:
 
         root = node(signal_path, 0)
 
-        # Build tree summary for the user (P2: Indago reports depth/truncation)
+        # Build tree summary for the user (depth / truncation reporting)
         tree_summary = {"max_depth": 0, "total_nodes": 0,
                         "truncated_nodes": 0, "modules_crossed": 0}
 
