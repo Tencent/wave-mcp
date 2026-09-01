@@ -877,10 +877,49 @@ def get_view_state(view_id: str) -> dict[str, Any]:
     Returns the actual state (cursor position, selected/displayed signals,
     viewport, user_dirty) written back by the browser, plus a desired-state
     summary. Use this to continue the conversation from where the user is
-    looking — e.g. analyze the signal at their cursor.
+    looking, e.g. analyze the signal at their cursor.
     """
     try:
         return _viewer().get_state(view_id)
+    except (ValueError, RuntimeError) as exc:
+        return {"available": False, "error": str(exc)}
+
+
+@mcp.tool()
+def list_wave_views() -> dict[str, Any]:
+    """List the wave views currently open in this server.
+
+    Returns each view's view_id, url, title, waveform paths, revision and
+    whether its streaming backend is still alive, newest first. Use it to
+    find a view again after losing track of a view_id, or to check what is
+    still holding resources during a long batch run.
+    """
+    try:
+        return _viewer().list_views()
+    except (ValueError, RuntimeError) as exc:
+        return {"available": False, "error": str(exc)}
+
+
+@mcp.tool()
+def close_wave_view(view_id: Optional[str] = None,
+                    all_views: bool = False) -> dict[str, Any]:
+    """Close a wave view and release its server and streaming backend.
+
+    Views stay open until closed, so a batch that opens many of them should
+    close each one when done. The streaming backend is shared between views
+    on the same waveform set and is only stopped once no view still uses it.
+
+    Args:
+        view_id: the view to close. Required unless all_views is set.
+        all_views: close every open view instead of a single one.
+    """
+    try:
+        if all_views:
+            return _viewer().close_all()
+        if not view_id:
+            return {"available": False,
+                    "error": "provide view_id, or set all_views=true"}
+        return _viewer().close_view(view_id)
     except (ValueError, RuntimeError) as exc:
         return {"available": False, "error": str(exc)}
 

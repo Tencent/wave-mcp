@@ -10,7 +10,7 @@ English | [简体中文](README.md)
 
 **wave-mcp is an open-source RTL waveform debug MCP server from the Penglai Lab verification team
 at Tencent**, a debugging toolkit for LLMs: it reads **FST waveforms + an RTL netlist** and
-provides **32 MCP tools** for hierarchy exploration, signal queries, driver analysis, waveform diff, a browser wave viewer, and
+provides **34 MCP tools** for hierarchy exploration, signal queries, driver analysis, waveform diff, a browser wave viewer, and
 value/X tracing. **MIT licensed, no commercial license required, unlimited concurrency.**
 
 > As long as your simulator can dump **FST** (Verilator `--trace-fst`, Icarus, or by converting
@@ -43,7 +43,7 @@ XiangShan added to the test set:
 | Tool calls | 3.1 million+ calls all passed |
 | Driver analysis | drivers / fan-in / connectivity / tracing fully validated on production projects |
 | Huge modules | **million-scale scopes analyzed stably** |
-| Tool coverage | all 32 tools validated, including unit and browser e2e coverage for viewer / diff |
+| Tool coverage | all 34 tools validated, including unit and browser e2e coverage for viewer / diff |
 
 ![Tool call distribution](docs/images/tool-calls-distribution.png)
 
@@ -133,7 +133,7 @@ Or call the `prepare_session` MCP tool directly from your Code Agent (see below)
 
 ## CLI queries (`wave-mcp query`)
 
-All 32 tools are also callable from the terminal, without an agent:
+All 34 tools are also callable from the terminal, without an agent:
 
 ```bash
 wave-mcp query --list                            # list every tool
@@ -290,7 +290,7 @@ wave-session --vcd sim/dump.vcd --top top_tb --filelist rtl.f --out sessions/mod
 
 ---
 
-## Tools (32, in 10 categories)
+## Tools (34, in 10 categories)
 
 | Category | Tools | Notes |
 | --- | --- | --- |
@@ -302,7 +302,7 @@ wave-session --vcd sim/dump.vcd --top top_tb --filelist rtl.f --out sessions/mod
 | Driver analysis | `signal_connectivity` / `signal_drivers` / `signal_loads` / `signal_fanin` / `active_drivers` / `driver_contributors` | pyslang netlist (statically precise) + 4-value branch evaluation |
 | Value / X tracing | `trace_value` / `trace_x` | netlist × FST back-traversal, cross-module drill-down |
 | Waveform diff | `diff_waveforms` | first-divergence localization between a pass and a fail run: exact divergence time, ranked diverging signals, clock-aligned sampling to filter glitches; divergers feed straight into `signal_fanin`/`active_drivers` for causal backtracking |
-| Wave viewer | `open_wave_view` / `update_wave_view` / `get_view_state` | agent-driven browser waveform: suspect signals + cursor pinned at the failure time + an analysis-log popup; dual-waveform compare view with lockstep sync; `get_view_state` tells the agent what the user is looking at (conversational two-way debug) |
+| Wave viewer | `open_wave_view` / `update_wave_view` / `get_view_state` / `list_wave_views` / `close_wave_view` | agent-driven browser waveform: suspect signals + cursor pinned at the failure time + an analysis-log popup; dual-waveform compare view with lockstep sync; `get_view_state` tells the agent what the user is looking at (conversational two-way debug); `list_wave_views` / `close_wave_view` manage view lifecycle so batch runs can clean up |
 | Files | `list_files` / `find_files` / `modules_in_file` | filelist + pyslang netlist |
 
 > The driver-analysis and tracing categories require the pyslang netlist (pass the right
@@ -479,7 +479,7 @@ See [`docs/THIRD_PARTY.md`](docs/THIRD_PARTY.md).
 
 ```
 wave_mcp/
-  server.py              # MCP server, registers all 32 tools
+  server.py              # MCP server, registers all 34 tools
   session.py             # Session / session.json / fingerprint check / definition_name
   pipeline.py            # prepare_session / prepare_static_session orchestration
   diff.py                # diff_waveforms first-divergence localization (clock-aligned sampling)

@@ -85,18 +85,40 @@ class SurverManager:
     def __init__(self, binary: str) -> None:
         self.binary = binary
         self._instances: Dict[str, SurverInstance] = {}
+        self._refs: Dict[str, int] = {}
         atexit.register(self.stop_all)
 
     def get_or_start(self, fst_paths: List[str]) -> SurverInstance:
         key = "|".join(sorted(str(Path(p).resolve()) for p in fst_paths))
         inst = self._instances.get(key)
         if inst and inst.alive():
+            self._refs[key] = self._refs.get(key, 0) + 1
             return inst
         inst = SurverInstance(self.binary, fst_paths)
         self._instances[key] = inst
+        self._refs[key] = 1
         return inst
+
+    def release(self, inst: SurverInstance) -> bool:
+        """Drop one reference; stop the process when the last one goes.
+
+        Instances are shared by identical file set, so closing one view must
+        not kill a surver another view is still streaming from. Returns True
+        if the process was actually stopped.
+        """
+        key = "|".join(sorted(inst.fst_paths))
+        if key not in self._instances:
+            return False
+        self._refs[key] = self._refs.get(key, 1) - 1
+        if self._refs[key] > 0:
+            return False
+        inst.stop()
+        self._instances.pop(key, None)
+        self._refs.pop(key, None)
+        return True
 
     def stop_all(self) -> None:
         for inst in self._instances.values():
             inst.stop()
         self._instances.clear()
+        self._refs.clear()

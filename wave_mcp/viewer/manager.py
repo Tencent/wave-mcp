@@ -6,7 +6,9 @@ and one surver instance (file-set keyed, reusable).
 """
 from __future__ import annotations
 
+import os
 import secrets
+import time
 from typing import Any, Dict, List, Optional
 
 from . import find_assets, shell_web_dir, unavailable_hint
@@ -36,6 +38,9 @@ def _fst_meta(path: str):
 class ViewManager:
     _instance: Optional["ViewManager"] = None
 
+    DEFAULT_OWNER = "local"
+    DEFAULT_MAX_VIEWS = 8
+
     @classmethod
     def instance(cls) -> "ViewManager":
         if cls._instance is None:
@@ -46,6 +51,11 @@ class ViewManager:
         self.assets = find_assets()
         self._surver_mgr: Optional[SurverManager] = None
         self._views: Dict[str, Dict[str, Any]] = {}
+        try:
+            self.max_views = int(os.environ.get("WAVE_MCP_MAX_VIEWS",
+                                                self.DEFAULT_MAX_VIEWS))
+        except ValueError:
+            self.max_views = self.DEFAULT_MAX_VIEWS
 
     @property
     def available(self) -> bool:
@@ -69,6 +79,8 @@ class ViewManager:
         diff: Optional[Dict[str, Any]] = None,
         annotations: Optional[List[Any]] = None,
         labels: Optional[List[str]] = None,
+        owner: Optional[str] = None,
+        title: Optional[str] = None,
     ) -> Dict[str, Any]:
         if not self.available:
             return unavailable_hint()
@@ -113,7 +125,15 @@ class ViewManager:
         url = f"{server.base_url}/view.html?token={surver.token}"
         self._views[view_id] = {
             "state": state, "server": server, "surver": surver, "url": url,
+            # owner is a label only: today every view belongs to the single
+            # local user. A future multi-user server mode fills it per client
+            # and scopes list/close by it, so record it from the start.
+            "owner": owner or self.DEFAULT_OWNER,
+            "title": title or "",
+            "created_at": time.time(),
+            "fst_paths": list(surver.fst_paths),
         }
+        self._evict_if_needed(keep=view_id)
         return {
             "available": True,
             "view_id": view_id,
@@ -156,3 +176,79 @@ class ViewManager:
                 "annotations": len(snap["desired"]["annotations"]),
             },
         }
+
+    def list_views(self, owner: Optional[str] = None) -> Dict[str, Any]:
+        """Inventory of open views, newest first.
+
+        ``owner`` filters by the label recorded at open time; it exists so a
+        future multi-user server mode can scope the listing per client
+        without changing this signature.
+        """
+        if not self.available:
+            return unavailable_hint()
+        items = []
+        for vid, v in self._views.items():
+            if owner is not None and v.get("owner") != owner:
+                continue
+            items.append({
+                "view_id": vid,
+                "url": v["url"],
+                "title": v.get("title", ""),
+                "owner": v.get("owner", self.DEFAULT_OWNER),
+                "fst_paths": v.get("fst_paths", []),
+                "created_at": v.get("created_at"),
+                "revision": v["state"].snapshot()["revision"],
+                "surver_alive": v["surver"].alive(),
+            })
+        items.sort(key=lambda d: d.get("created_at") or 0, reverse=True)
+        return {"available": True, "count": len(items),
+                "max_views": self.max_views, "views": items}
+
+    def close_view(self, view_id: str) -> Dict[str, Any]:
+        """Close one view and free its HTTP server and surver reference."""
+        if not self.available:
+            return unavailable_hint()
+        view = self._views.pop(view_id, None)
+        if view is None:
+            return {"available": False, "error": f"unknown view_id {view_id}",
+                    "known_views": list(self._views)}
+        errors = []
+        try:
+            view["server"].stop()
+        except Exception as exc:                       # never fail a close
+            errors.append(f"http server: {exc}")
+        surver_stopped = False
+        try:
+            surver_stopped = self._surver().release(view["surver"])
+        except Exception as exc:
+            errors.append(f"surver: {exc}")
+        out = {"available": True, "closed": view_id,
+               "surver_stopped": surver_stopped,
+               "remaining": len(self._views)}
+        if errors:
+            out["warnings"] = errors
+        return out
+
+    def close_all(self, owner: Optional[str] = None) -> Dict[str, Any]:
+        """Close every view, optionally only those of one owner."""
+        if not self.available:
+            return unavailable_hint()
+        targets = [vid for vid, v in self._views.items()
+                   if owner is None or v.get("owner") == owner]
+        closed = [vid for vid in targets
+                  if self.close_view(vid).get("closed")]
+        return {"available": True, "closed": closed, "count": len(closed),
+                "remaining": len(self._views)}
+
+    def _evict_if_needed(self, keep: Optional[str] = None) -> None:
+        """Close oldest views past max_views so long runs cannot pile up."""
+        if self.max_views <= 0:
+            return
+        while len(self._views) > self.max_views:
+            oldest = min(
+                (vid for vid in self._views if vid != keep),
+                key=lambda v: self._views[v].get("created_at") or 0,
+                default=None)
+            if oldest is None:
+                return
+            self.close_view(oldest)

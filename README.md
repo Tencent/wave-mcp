@@ -39,7 +39,7 @@ wave-mcp 用**纯开源技术栈**（pylibfst + pyslang）提供完整波形调�
 | 工具调用 | 310 万多次调用全部通过 |
 | 驱动分析 | 驱动 / 扇入 / 连通 / 追溯在生产级项目上全量验证 |
 | 超大模块 | **百万级 scope 稳定完成分析** |
-| 工具覆盖 | 32 个工具全部验证，含 viewer / diff 的单元与浏览器端到端覆盖 |
+| 工具覆盖 | 34 个工具全部验证，含 viewer / diff 的单元与浏览器端到端覆盖 |
 
 ![工具调用分布](docs/images/tool-calls-distribution.png)
 
@@ -117,10 +117,10 @@ python -m wave_mcp.server --session sessions/my_module
 
 ## CLI 模式
 
-不挂 Code Agent 时，也能在终端直接调用全部 32 个工具（与 MCP 同名同参数）：
+不挂 Code Agent 时，也能在终端直接调用全部 34 个工具（与 MCP 同名同参数）：
 
 ```bash
-wave-mcp query --list                            # 列出全部 32 个工具
+wave-mcp query --list                            # 列出全部 34 个工具
 
 wave-mcp query signal_values --session sessions/my_module \
     --full_path top.u_tx.tx_serial              # 查询信号值变化
@@ -269,7 +269,7 @@ wave-session --vcd sim/dump.vcd --top top_tb --filelist rtl.f --out sessions/mod
 | 驱动分析 | `signal_connectivity` / `signal_drivers` / `signal_loads` / `signal_fanin` / `active_drivers` / `driver_contributors` | pyslang 网表（静态精确）+ 分支条件 4 值求值选活跃驱动 |
 | 值/X 态追踪 | `trace_value` / `trace_x` | 网表 × FST 值反向遍历，跨模块下钻 |
 | 波形对比 | `diff_waveforms` | pass/fail 双波形首分歧定位：首分歧时刻 + 分歧信号排序 + 时钟对齐采样滤毛刺；分歧信号直接接 `signal_fanin`/`active_drivers` 做因果回溯 |
-| 波形查看器 | `open_wave_view` / `update_wave_view` / `get_view_state` | agent 分析完自动弹浏览器波形：嫌疑信号 + 游标钉出错时刻 + 分析说明弹窗；双波形对比视图 lockstep 联动；`get_view_state` 让 agent 感知用户当前看什么（对话式双向调试） |
+| 波形查看器 | `open_wave_view` / `update_wave_view` / `get_view_state` / `list_wave_views` / `close_wave_view` | agent 分析完自动弹浏览器波形：嫌疑信号 + 游标钉出错时刻 + 分析说明弹窗；双波形对比视图 lockstep 联动；`get_view_state` 让 agent 感知用户当前看什么（对话式双向调试）；`list_wave_views` / `close_wave_view` 管理视图生命周期，批量场景可收尾释放 |
 | 文件 | `list_files` / `find_files` / `modules_in_file` | filelist + pyslang 网表 |
 
 > 驱动分析与追踪类需要 pyslang 网表建成（`prepare_session` 时给对 filelist/incdirs/defines）。
@@ -419,7 +419,7 @@ glibc 2.17 档产物即可：`deploy/docker_build_all.sh` 自动在容器内自�
 
 ```
 wave_mcp/
-  server.py              # MCP server，注册全部 32 工具
+  server.py              # MCP server，注册全部 34 工具
   session.py             # Session / session.json / 指纹校验 / 三层 definition_name
   pipeline.py            # prepare_session / prepare_static_session 编排
   diff.py                # diff_waveforms 首分歧定位（时钟对齐采样）

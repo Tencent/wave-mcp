@@ -384,12 +384,81 @@ def test_http() -> None:
         server.stop()
 
 
+def test_lifecycle():
+    """close_view / list_views: socket release, surver refcount, LRU cap."""
+    import socket
+    import tempfile
+    from pathlib import Path
+    from wave_mcp.viewer.manager import ViewManager
+
+    # socket must be released, and stop() must be idempotent
+    server = ViewerServer(wasm_dir=tempfile.mkdtemp(prefix="wv_lc_wasm_"),
+                          shell_dir=tempfile.mkdtemp(prefix="wv_lc_web_"),
+                          surver_base="http://127.0.0.1:1",
+                          state=ViewState())
+    port = server.port
+    server.start()
+    server.stop()
+    time.sleep(0.3)
+    released = True
+    try:
+        probe = socket.socket()
+        probe.bind(("127.0.0.1", port))
+        probe.close()
+    except OSError:
+        released = False
+    check("stop() releases the listening socket", released,
+          "port still bound after stop()")
+    server.stop()
+    check("stop() is idempotent", True)
+
+    if ViewManager.instance().available is not True:
+        check("viewer assets present (lifecycle tests skipped)", True)
+        return
+
+    waves = Path(__file__).resolve().parents[1].parent / \
+        "examples/viewer_demos/waves"
+    cdc, xprop = str(waves / "cdc.fst"), str(waves / "xprop.fst")
+    if not Path(cdc).is_file():
+        check("demo waveforms present (lifecycle tests skipped)", True)
+        return
+
+    mgr = ViewManager()          # isolated instance, not the singleton
+    mgr.max_views = 2
+    a = mgr.open_view([cdc], title="a")["view_id"]
+    b = mgr.open_view([cdc], title="b")["view_id"]   # same set -> reuse
+    check("list_views reports both views",
+          mgr.list_views()["count"] == 2, str(mgr.list_views()["count"]))
+
+    r = mgr.close_view(a)
+    check("closing one sharer keeps surver alive",
+          r["surver_stopped"] is False, str(r))
+    r = mgr.close_view(b)
+    check("closing last sharer stops surver",
+          r["surver_stopped"] is True, str(r))
+    check("close_view rejects unknown id",
+          mgr.close_view("nope").get("available") is False)
+
+    # LRU: opening past max_views evicts the oldest
+    mgr.open_view([cdc], title="1")
+    mgr.open_view([xprop], title="2")
+    keep = mgr.open_view([cdc], title="3")["view_id"]
+    lv = mgr.list_views()
+    check("max_views caps open views", lv["count"] == 2, str(lv["count"]))
+    check("newest view survives eviction",
+          keep in [v["view_id"] for v in lv["views"]])
+    mgr.close_all()
+    check("close_all empties the registry",
+          mgr.list_views()["count"] == 0)
+
+
 def main() -> int:
     print("== viewer unit suite ==")
     test_state()
     test_translate()
     test_assets()
     test_http()
+    test_lifecycle()
     print(f"\n  viewer suite: {len(PASSED)} passed, {len(FAILED)} failed")
     if FAILED:
         print("  failed:", FAILED)

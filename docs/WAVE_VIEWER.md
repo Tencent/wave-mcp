@@ -160,6 +160,29 @@ get_view_state({"view_id": "a1b2c3d4"})
 
 典型用法：用户说"你看我游标这个位置的值不对"，agent 先 `get_view_state` 拿到游标时刻，再 `signal_value_at` / `active_drivers` 从那个时刻继续分析。`user_dirty` 为 true 表示用户手动调整过视图，agent 更新前可以选择尊重用户当前视角，只动 marker 和说明，不抢游标。
 
+### 4.4 list_wave_views / close_wave_view
+
+视图打开后会一直保留，直到显式关闭。交互式调试基本不用管，但批量场景（比如回归扫一批 case，每个都开一个视图）需要收尾，否则视图和后台流式进程会一直累积。
+
+```
+list_wave_views()
+→ {"count": 2, "max_views": 8,
+   "views": [{"view_id": "a1b2c3d4", "url": "...", "title": "uart case",
+              "fst_paths": ["/path/fail.fst"], "revision": 3,
+              "surver_alive": true}, ...]}
+
+close_wave_view({"view_id": "a1b2c3d4"})
+→ {"closed": "a1b2c3d4", "surver_stopped": true, "remaining": 1}
+
+close_wave_view({"all_views": true})     # 批量收尾
+```
+
+两点行为值得知道：
+
+一是流式后台按波形文件集共享。两个视图看同一份波形时只有一个后台进程，关掉其中一个不会影响另一个，只有最后一个使用者关闭时才真正停止，返回里的 `surver_stopped` 告诉你有没有停。
+
+二是有个兜底上限。默认最多同时开 8 个视图，超了会自动关掉最老的那个，避免长时间批量跑把资源耗尽。用 `WAVE_MCP_MAX_VIEWS` 调整，设 0 表示不限制。
+
 ## 5. agent 典型工作流
 
 **场景一：单波形根因呈现**

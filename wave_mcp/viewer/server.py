@@ -34,12 +34,27 @@ class ViewerServer:
         self.port = self.httpd.server_address[1]
         self._thread = threading.Thread(target=self.httpd.serve_forever,
                                         daemon=True)
+        self._stopped = False
 
     def start(self) -> None:
         self._thread.start()
 
     def stop(self) -> None:
-        self.httpd.shutdown()
+        """Stop serving and release the listening socket.
+
+        ``shutdown()`` alone only breaks the serve_forever loop; without
+        ``server_close()`` the socket stays bound and the fd leaks, which
+        matters once views are closed individually. Idempotent.
+        """
+        if self._stopped:
+            return
+        self._stopped = True
+        try:
+            self.httpd.shutdown()
+        finally:
+            self.httpd.server_close()
+            if self._thread.is_alive():
+                self._thread.join(timeout=5)
 
     @property
     def base_url(self) -> str:

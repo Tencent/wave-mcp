@@ -8,7 +8,7 @@ All notable changes to wave-mcp are documented here. Format follows
 
 Three new capabilities on top of the 0.1.x tool set: a browser wave viewer the
 agent can drive, pass/fail waveform diffing, and an FSDB input path. Tool count
-goes from 27 to 32.
+goes from 27 to 34.
 
 ### Added
 
@@ -21,6 +21,13 @@ goes from 27 to 32.
   (`pip install "wave-mcp[viewer]"`). Guides:
   [docs/WAVE_VIEWER.md](docs/WAVE_VIEWER.md),
   [docs/VIEWER_SCREENSHOTS.md](docs/VIEWER_SCREENSHOTS.md).
+- **View lifecycle management.** `list_wave_views` reports the open views
+  (id, url, title, waveform paths, revision, backend liveness) and
+  `close_wave_view` closes one or all of them, releasing the per-view HTTP
+  server. The streaming backend is shared per waveform file set and refcounted,
+  so closing one view never cuts off another still reading the same waveform.
+  A cap of 8 concurrent views (`WAVE_MCP_MAX_VIEWS`, 0 disables) evicts the
+  oldest view so long batch runs cannot pile up views and processes.
 - **`wave-view` CLI** for opening a waveform in the viewer without an MCP
   client, including `--signals` and remote-friendly port printing.
 - **`diff_waveforms`** locates the first divergence between two runs of the
@@ -58,6 +65,8 @@ goes from 27 to 32.
   the WASM entry from the assets directory.
 - `update_wave_view` emitted marker commands with the arguments transposed, so
   markers landed at the wrong time.
+- Closing a viewer HTTP server called `shutdown()` without `server_close()`,
+  leaking the listening socket and its file descriptor.
 - Viewer service worker returned `undefined` on a failed range request instead
   of an error response, stalling waveform streaming.
 - Slang lint diagnostics were misclassified as errors, and interface scope
