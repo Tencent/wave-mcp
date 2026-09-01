@@ -452,6 +452,58 @@ def test_lifecycle():
           mgr.list_views()["count"] == 0)
 
 
+def test_ports():
+    """alloc_port: ephemeral by default, windowed when a base is configured."""
+    import importlib
+    import wave_mcp.viewer as vw
+
+    saved = os.environ.get("WAVE_MCP_VIEWER_PORT_BASE")
+    try:
+        os.environ.pop("WAVE_MCP_VIEWER_PORT_BASE", None)
+        importlib.reload(vw)
+        check("no base configured -> ephemeral ports",
+              vw.port_base() is None, str(vw.port_base()))
+        check("ephemeral port is usable", vw.alloc_port() > 1024)
+
+        os.environ["WAVE_MCP_VIEWER_PORT_BASE"] = "45400"
+        importlib.reload(vw)
+        check("base is honoured", vw.port_base() == 45400,
+              str(vw.port_base()))
+        p = vw.alloc_port()
+        check("allocated port falls inside the window",
+              45400 <= p < 45400 + vw.PORT_WINDOW, str(p))
+
+        # live sockets in the window must not collide
+        import socket as _s
+        held, ports = [], []
+        for _ in range(3):
+            sk = _s.socket()
+            sk.bind(("127.0.0.1", vw.alloc_port()))
+            sk.listen(1)
+            held.append(sk)
+            ports.append(sk.getsockname()[1])
+        check("concurrent allocations do not collide",
+              len(set(ports)) == 3, str(ports))
+        for sk in held:
+            sk.close()
+
+        for bad in ("abc", "80", "70000", ""):
+            os.environ["WAVE_MCP_VIEWER_PORT_BASE"] = bad
+            importlib.reload(vw)
+            if vw.port_base() is not None or vw.alloc_port() <= 1024:
+                check(f"invalid base {bad!r} degrades to ephemeral", False,
+                      str(vw.port_base()))
+                break
+        else:
+            check("invalid bases degrade to ephemeral ports", True)
+    finally:
+        if saved is None:
+            os.environ.pop("WAVE_MCP_VIEWER_PORT_BASE", None)
+        else:
+            os.environ["WAVE_MCP_VIEWER_PORT_BASE"] = saved
+        importlib.reload(vw)
+
+
 def main() -> int:
     print("== viewer unit suite ==")
     test_state()
@@ -459,6 +511,7 @@ def main() -> int:
     test_assets()
     test_http()
     test_lifecycle()
+    test_ports()
     print(f"\n  viewer suite: {len(PASSED)} passed, {len(FAILED)} failed")
     if FAILED:
         print("  failed:", FAILED)

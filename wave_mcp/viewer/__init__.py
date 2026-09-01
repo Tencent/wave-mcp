@@ -13,10 +13,55 @@ from __future__ import annotations
 
 import os
 import shutil
+import socket
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 _CACHE_DIR = Path.home() / ".cache" / "wave-mcp" / "viewer"
+
+#: Port range size when a deterministic base is configured. Two ports are
+#: needed per view (shell HTTP server + streaming backend), so a window of 64
+#: comfortably covers the default 8-view cap.
+PORT_WINDOW = 64
+
+
+def port_base() -> Optional[int]:
+    """Deterministic viewer port base, or None for ephemeral ports.
+
+    Random high ports are fine locally, but they make ``ssh -L`` forwarding
+    painful: the port changes on every view, so no fixed rule can be set up
+    in advance. Setting ``WAVE_MCP_VIEWER_PORT_BASE`` confines the viewer to
+    ``[base, base + PORT_WINDOW)`` so one forwarding rule (or one firewall
+    hole, for a shared host) covers every view.
+    """
+    raw = os.environ.get("WAVE_MCP_VIEWER_PORT_BASE", "").strip()
+    if not raw:
+        return None
+    try:
+        base = int(raw)
+    except ValueError:
+        return None
+    return base if 1024 <= base <= 65535 - PORT_WINDOW else None
+
+
+def alloc_port(host: str = "127.0.0.1") -> int:
+    """Pick a free port, honouring the configured base when present.
+
+    Falls back to an ephemeral port if the whole configured window is taken,
+    so a busy host degrades instead of failing to open a view.
+    """
+    base = port_base()
+    if base is not None:
+        for candidate in range(base, base + PORT_WINDOW):
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                try:
+                    s.bind((host, candidate))
+                    return candidate
+                except OSError:
+                    continue
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind((host, 0))
+        return s.getsockname()[1]
 
 
 def _valid(root: Path) -> bool:

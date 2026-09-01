@@ -24,12 +24,15 @@ from .state import ViewState, ViewStateError
 
 class ViewerServer:
     def __init__(self, wasm_dir: str, shell_dir: str, surver_base: str,
-                 state: ViewState, port: int = 0) -> None:
+                 state: ViewState, port: Optional[int] = None) -> None:
         self.wasm_dir = Path(wasm_dir)
         self.shell_dir = Path(shell_dir)
         self.surver_base = surver_base.rstrip("/")
         self.state = state
         handler = _make_handler(self)
+        if port is None:
+            from . import alloc_port
+            port = alloc_port()
         self.httpd = _ThreadingHTTPServer(("127.0.0.1", port), handler)
         self.port = self.httpd.server_address[1]
         self._thread = threading.Thread(target=self.httpd.serve_forever,
