@@ -4,7 +4,7 @@ All notable changes to wave-mcp are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0] - 2026-09-01
+## [0.2.0] - 2026-09-02
 
 Three new capabilities on top of the 0.1.x tool set: a browser wave viewer the
 agent can drive, pass/fail waveform diffing, and an FSDB input path. Tool count
@@ -28,6 +28,11 @@ goes from 27 to 34.
   so closing one view never cuts off another still reading the same waveform.
   A cap of 8 concurrent views (`WAVE_MCP_MAX_VIEWS`, 0 disables) evicts the
   oldest view so long batch runs cannot pile up views and processes.
+- **Pinnable viewer ports.** Views use random high ports by default; setting
+  `WAVE_MCP_VIEWER_PORT_BASE` confines them to a 64-port window so a single
+  `ssh -L` rule keeps working across views, and several people on one host can
+  each take their own window. Allocation falls back to an ephemeral port when
+  the window is full.
 - **`wave-view` CLI** for opening a waveform in the viewer without an MCP
   client, including `--signals` and remote-friendly port printing.
 - **`diff_waveforms`** locates the first divergence between two runs of the

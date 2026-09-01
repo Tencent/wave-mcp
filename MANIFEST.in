@@ -1,0 +1,10 @@
+include README.md
+include README.en.md
+include CHANGELOG.md
+include LICENSE
+include docs/THIRD_PARTY.md
+recursive-include wave_mcp/viewer/web *.html *.js
+recursive-include docs/licenses *
+recursive-exclude tests *
+recursive-exclude dev-docs *
+global-exclude __pycache__ *.py[cod]

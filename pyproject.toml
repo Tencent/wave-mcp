@@ -45,3 +45,9 @@ wave-view = "wave_mcp.viewer.cli:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["wave_mcp*"]
+
+[tool.setuptools.package-data]
+# The viewer shell (HTML/JS/service worker) is loaded from disk at runtime by
+# ViewerServer, so it must ship inside the wheel: without this the viewer
+# tools install fine but fail to serve their own pages.
+"wave_mcp.viewer" = ["web/*.html", "web/*.js"]
