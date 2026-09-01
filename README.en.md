@@ -332,6 +332,8 @@ wave-view pass.fst fail.fst --labels pass fail
   updates are flicker-free.
 - Full guide (MCP tool parameters, two-way debug workflow, architecture,
   deployment and troubleshooting): [`docs/WAVE_VIEWER.en.md`](docs/WAVE_VIEWER.en.md).
+- Want to see it first? [`docs/VIEWER_SCREENSHOTS.md`](docs/VIEWER_SCREENSHOTS.md)
+  shows the UI across four real debug scenarios, with steps to reproduce them.
 
 ---
 
@@ -488,5 +490,6 @@ wave_mcp/
 deploy/                  # offline bundle build + install (incl. Docker one-shot pipeline)
 examples/                # example library (see table above)
 tests/                   # regression entry run_regression.py
-docs/                    # DEPLOY_AIRGAP / SIMULATOR_COMPATIBILITY / FSDB_GUIDE / XCELIUM_FST_GUIDE / THIRD_PARTY / WAVE_VIEWER
+CHANGELOG.md             # release notes
+docs/                    # DEPLOY_AIRGAP / SIMULATOR_COMPATIBILITY / FSDB_GUIDE / XCELIUM_FST_GUIDE / THIRD_PARTY / WAVE_VIEWER / VIEWER_SCREENSHOTS
 ```

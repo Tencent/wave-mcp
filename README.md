@@ -289,6 +289,7 @@ wave-view pass.fst fail.fst --labels pass fail
 - agent 典型闭环：case 挂了 → `diff_waveforms(pass, fail)` 定位首分歧 → `signal_fanin` 回溯根因 → `open_wave_view` 双波形 + 分歧 marker + 分析说明弹窗一次呈现。
 - 分析说明是可收起的 log 弹窗，说明里的时刻引用（如 `[85000ps](#t=85000ps)`）点击即跳游标，游标/视口/marker 更新为无闪刷新。
 - 完整指南（MCP 工具参数、双向调试工作流、架构原理、部署与排障）见 [`docs/WAVE_VIEWER.md`](docs/WAVE_VIEWER.md)。
+- 想先看效果，见 [`docs/VIEWER_SCREENSHOTS.md`](docs/VIEWER_SCREENSHOTS.md)：四个真实调试场景的界面截图，含一键复现步骤。
 
 ---
 
@@ -429,5 +430,6 @@ wave_mcp/
 deploy/                  # 离线 bundle 构建 + 安装（含 Docker 一键流水线）
 examples/                # 示例库（见上表）
 tests/                   # 回归套件 run_regression.py
-docs/                    # DEPLOY_AIRGAP / SIMULATOR_COMPATIBILITY / FSDB_GUIDE / XCELIUM_FST_GUIDE / THIRD_PARTY / WAVE_VIEWER
+CHANGELOG.md             # 版本变更记录
+docs/                    # DEPLOY_AIRGAP / SIMULATOR_COMPATIBILITY / FSDB_GUIDE / XCELIUM_FST_GUIDE / THIRD_PARTY / WAVE_VIEWER / VIEWER_SCREENSHOTS
 ```
