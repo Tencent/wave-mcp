@@ -152,9 +152,12 @@ def test_translate() -> None:
         "markers": [{"time": "85000", "unit": "ps"},
                     {"time": "86000", "unit": "ps"}],
     }
-    s = desired_to_sucl(d)
+    # schema times are ps; pass the matching FST timescale exponent so the
+    # raw-number conversion is exercised the way state.py drives it.
+    s = desired_to_sucl(d, -12)
     check("groups emit dividers once each",
-          s.count("divider_add G1") == 1 and s.count("divider_add G2") == 1, s)
+          s.count('divider_add "G1"') == 1
+          and s.count('divider_add "G2"') == 1, s)
     check("color follows its variable",
           "variable_add t.g1_s1;item_set_color red" in s, s)
     check("format mapped", "item_set_format Hexadecimal" in s, s)
@@ -162,7 +165,7 @@ def test_translate() -> None:
           "85000ps" not in s and "cursor_set 85000" in s, s)
     check("viewport uses zoom_to", "zoom_to 80000 90000" in s, s)
     check("markers numbered from 1",
-          "marker_set_at 1 85000" in s and "marker_set_at 2 86000" in s, s)
+          "marker_set_at 85000 1" in s and "marker_set_at 86000 2" in s, s)
     check("no GUI-only marker_add", "marker_add" not in s, s)
 
     # single source: no surver_select_file
@@ -245,6 +248,10 @@ def test_http() -> None:
     wasm = tempfile.mkdtemp(prefix="wv_wasm_")
     with open(os.path.join(web, "shell.html"), "w") as f:
         f.write("<html>shell</html>")
+    # A same-named page in shell_dir must NOT shadow the Surfer WASM entry:
+    # the viewer iframe loads /index.html and would otherwise never boot.
+    with open(os.path.join(web, "index.html"), "w") as f:
+        f.write("<html>shell-landing</html>")
     with open(os.path.join(wasm, "index.html"), "w") as f:
         f.write("<html>wasm</html>")
 

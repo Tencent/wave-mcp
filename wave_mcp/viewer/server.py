@@ -135,6 +135,12 @@ def _make_handler(owner: ViewerServer):
                    ".png": "image/png", ".ico": "image/x-icon",
                    ".svg": "image/svg+xml"}
 
+        # ``index.html`` is the Surfer WASM entry point that the shell loads in
+        # its iframe. It must always resolve to wasm_dir, otherwise a page of
+        # the same name shipped in shell_dir would shadow it and the viewer
+        # would never boot.
+        _WASM_FIRST = ("index.html",)
+
         def _static(self) -> None:
             rel = posixpath.normpath(urlparse(self.path).path.lstrip("/"))
             if rel in ("", "."):
@@ -142,7 +148,10 @@ def _make_handler(owner: ViewerServer):
             if ".." in rel.split("/"):
                 self._send(403, b"")
                 return
-            for root in (owner.shell_dir, owner.wasm_dir):
+            roots = ((owner.wasm_dir, owner.shell_dir)
+                     if rel in self._WASM_FIRST
+                     else (owner.shell_dir, owner.wasm_dir))
+            for root in roots:
                 fp = root / rel
                 if fp.is_file():
                     ctype = self._CTYPES.get(fp.suffix,
