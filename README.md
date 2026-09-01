@@ -9,7 +9,7 @@
 [English](README.en.md) | 简体中文
 
 **wave-mcp 是腾讯蓬莱实验室验证团队开源的一款 RTL 波形调试 MCP Server**，为 LLM 提供波形调试工具集：
-读 **FST 波形 + RTL 网表**，提供层次探索、信号查询、驱动分析、值/X 态追踪、波形对比与浏览器波形查看器等 **31 个 MCP 工具**。
+读 **FST 波形 + RTL 网表**，提供层次探索、信号查询、驱动分析、值/X 态追踪、波形对比与浏览器波形查看器等 **32 个 MCP 工具**。
 **MIT 开源，无需任何商用 License，支持任意并发。**
 
 > 只要你的仿真器能 dump **FST**（Verilator `--trace-fst`、Icarus，或把 VCD 转 FST），
@@ -39,7 +39,7 @@ wave-mcp 用**纯开源技术栈**（pylibfst + pyslang）提供完整波形调�
 | 工具调用 | 310 万多次调用全部通过 |
 | 驱动分析 | 驱动 / 扇入 / 连通 / 追溯在生产级项目上全量验证 |
 | 超大模块 | **百万级 scope 稳定完成分析** |
-| 工具覆盖 | 27 个分析工具全部实测；viewer/diff 4 个新工具由 113+ 项单元与浏览器端到端断言覆盖 |
+| 工具覆盖 | 32 个工具全部验证，含 viewer / diff 的单元与浏览器端到端覆盖 |
 
 ![工具调用分布](docs/images/tool-calls-distribution.png)
 
@@ -117,10 +117,10 @@ python -m wave_mcp.server --session sessions/my_module
 
 ## CLI 模式
 
-不挂 Code Agent 时，也能在终端直接调用全部 31 个工具（与 MCP 同名同参数）：
+不挂 Code Agent 时，也能在终端直接调用全部 32 个工具（与 MCP 同名同参数）：
 
 ```bash
-wave-mcp query --list                            # 列出全部 31 个工具
+wave-mcp query --list                            # 列出全部 32 个工具
 
 wave-mcp query signal_values --session sessions/my_module \
     --full_path top.u_tx.tx_serial              # 查询信号值变化
@@ -213,8 +213,8 @@ drivers:
 **驱动分析与追踪是按生产级健壮性打磨的**，不是 demo 功能：
 
 - **真实项目全量验证**：驱动/扇入/连通/追溯在生产级芯片项目上全量验证，并以 OpenTitan
-  27 个 IP + 香山 38 个 IP 按子模块层次逐一穷尽测试，功能正确性交叉验证超 1100 万项
-  （file/line 真实存在、drivers↔loads 对称、trace 树结构合法等，而非仅"返回非空"）。
+  27 个 IP + 香山 38 个 IP 按子模块层次逐一穷尽测试，覆盖功能正确性交叉校验而非仅
+  "返回非空"。
 - **精化失败不掀桌**：单个 top 精化失败（如 UVM 环境拉不到 uvm_pkg）只影响该 top，
   健康 DUT 的网表照常提取；缺 `+incdir+`/包源时从 pyslang 诊断自愈重编；仍失败则明确
   降级，值查询等其余工具不受影响，绝不静默给错结果。
@@ -225,7 +225,7 @@ drivers:
 
 如果你的仿真器只吐 VCD（如 Questa），建议先转 FST：**体积约 VCD 的 1/50，随机访问快**。
 Xcelium (xrun) 用户推荐跳过 VCD，用 fstdumper 插件直接 dump FST，见
-[Xcelium 直出 FST 指南](docs/XCELIUM_FST_GUIDE.md)（含一套经 Xcelium 25.09 实测的
+[Xcelium 直出 FST 指南](docs/XCELIUM_FST_GUIDE.md)（含一套
 Xcelium 修复补丁，见指南与仓库 `third_party/fstdumper/`）。
 转换依赖 GTKWave 附带的 `vcd2fst` 工具：
 
@@ -257,11 +257,11 @@ wave-session --vcd sim/dump.vcd --top top_tb --filelist rtl.f --out sessions/mod
 
 ---
 
-## 工具（31 个，10 大类）
+## 工具（32 个，10 大类）
 
 | 类别 | 工具 | 说明 |
 | --- | --- | --- |
-| 波形准备 | `prepare_session` / `open_static_session` / `convert_vcd_to_fst` | 波形入口 → session 一条龙；静态分析无需波形；不跑仿真器 |
+| 波形准备 | `prepare_session` / `open_static_session` / `convert_vcd_to_fst` / `convert_fsdb_to_fst` | 波形入口 → session 一条龙（`.fst` / `.fsdb` / `.vcd` 自动识别，转换带缓存）；静态分析无需波形；不跑仿真器 |
 | 会话管理 | `open_session` / `close_session` / `session_info` | `session_info` 含 netlist_health + definition_coverage |
 | 层次探索 | `list_child_instances` / `list_modules` / `instances_of_module`(`_matching`) / `scope_info` | 模块定义名三层解析：网表 → 命名推断 → 手工 scope_map |
 | 信号查询 | `list_signals` / `signal_info` | 位宽/方向/类型来自 FST（含总线聚合）；声明位置来自网表 |
@@ -329,7 +329,9 @@ wave-view pass.fst fail.fst --labels pass fail
 FSDB 和 SHM 是闭源波形格式，读取详细数据绕不开商用工具，license 成本较高，
 难以支撑未来 AI Agent 深度融入工作流后产生的高并发、海量波形分析需求。
 wave-mcp 走 FST + VCD 开源路线，正是为成千上万条波形的并发分析场景提供高性能的开源替代方案。
-FSDB 的支持（转换为 FST）已在规划中。SHM 不在计划内：Cadence Xcelium 用户
+存量 FSDB 有转换通道：自带的 `fsdb2fst` 单程转换器直接转 FST（无 VCD 中间文件，
+只需本机有 Verdi 的 FsdbReader 运行库，不占 license），见
+[FSDB 波形接入指南](docs/FSDB_GUIDE.md)。SHM 不在计划内：Cadence Xcelium 用户
 推荐直接从仿真源头产出 FST（免 license、零转换），见
 [Xcelium 直出 FST 指南](docs/XCELIUM_FST_GUIDE.md)。
 
@@ -338,9 +340,11 @@ FSDB 的支持（转换为 FST）已在规划中。SHM 不在计划内：Cadence
 
 **Q3：支持哪些仿真器？**
 任何能产出 FST 或 VCD 的仿真器：Verilator（`--trace-fst`）、Icarus（`-fst`）、
-Xcelium（[fstdumper 直出 FST](docs/XCELIUM_FST_GUIDE.md)）、VCS（VCD 转换）等。
-wave-mcp 不跑仿真器，只消费你已产出的波形。各仿真器的获取 FST 方式与
-验证状态详见 [仿真器兼容性说明](docs/SIMULATOR_COMPATIBILITY.md)。
+Xcelium（[fstdumper 直出 FST](docs/XCELIUM_FST_GUIDE.md)）、VCS（VCD 转换，
+存量 FSDB 走 [fsdb2fst](docs/FSDB_GUIDE.md)）、Questa（VCD 转换）等。
+wave-mcp 不跑仿真器，只消费你已产出的波形。四种波形接入方式（FST 直读 /
+VCD 自动转换 / FSDB 转换 / Xcelium 直出）的对比与支持状态详见
+[仿真器兼容性说明](docs/SIMULATOR_COMPATIBILITY.md)。
 
 **Q4：数据准不准？**
 准。在真实生产级芯片项目上做了 225 万信号级验证，值查询正确性 100%；
@@ -355,7 +359,7 @@ Linux x86_64 开箱即用。macOS / Windows / arm64 因 `pylibfst` 无预编译 
 
 **Q7：大波形性能如何？**
 FST + C 系读取库（pylibfst）+ 进程常驻 + 随机访问，契合 AI 点查询场景；
-实测百万级 scope 的超大模块稳定完成分析。
+百万级 scope 的超大模块可稳定完成分析。
 
 **Q8：怎么接入我的 Code Agent？**
 见 [Code Agent 集成](#code-agent-集成)，一段 `mcpServers` JSON 即可。
@@ -370,7 +374,7 @@ FST + C 系读取库（pylibfst）+ 进程常驻 + 随机访问，契合 AI 点�
 官方 pyslang wheel 要求 glibc ≥ 2.28，老机器直接 pip 装不上。用 Docker 流水线的
 glibc 2.17 档产物即可：`deploy/docker_build_all.sh` 自动在容器内自编兼容 wheel
 并组装 `wave-mcp-bundle-glibc2.17.tar.gz`，整条链路（独立 Python + wheel + vcd2fst
-+ musl 静态 surver）在 glibc ≥ 2.17 均可运行，已在 CentOS 7 容器实测验证。
++ musl 静态 surver）在 glibc ≥ 2.17 均可运行，含 CentOS 7。
 详见 [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md) 第 1.0 节与第 1c 节。
 
 ---
@@ -425,5 +429,5 @@ wave_mcp/
 deploy/                  # 离线 bundle 构建 + 安装（含 Docker 一键流水线）
 examples/                # 示例库（见上表）
 tests/                   # 回归套件 run_regression.py
-docs/                    # DEPLOY_AIRGAP / SIMULATOR_COMPATIBILITY / XCELIUM_FST_GUIDE / THIRD_PARTY / WAVE_VIEWER
+docs/                    # DEPLOY_AIRGAP / SIMULATOR_COMPATIBILITY / FSDB_GUIDE / XCELIUM_FST_GUIDE / THIRD_PARTY / WAVE_VIEWER
 ```

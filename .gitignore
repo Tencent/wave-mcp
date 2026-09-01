@@ -32,6 +32,10 @@ third_party/fstdumper/*.so
 wave-mcp-bundle*/
 *.tar.gz
 
+# Verdi on-site test package (internal harness; source of truth is
+# third_party/fsdb2fst/, this dir is a copy for machines that have Verdi)
+deploy/verdi_test/
+
 # project-level test harnesses & reports (not published)
 tests/projects/
 tests/reports/

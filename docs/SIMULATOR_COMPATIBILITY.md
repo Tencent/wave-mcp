@@ -10,52 +10,93 @@ wave-mcp **不跑仿真器**，只消费仿真产出的波形（FST）+ RTL 源�
 | --- | --- | --- |
 | 层次 / 信号 / 信号值 | **FST 文件格式**（pylibfst 读取） | ✅ 稳定，与产波形的仿真器无关 |
 | 连接 / 驱动 / 扇入扇出 | **pyslang 解析标准 SystemVerilog** | ✅ 结构分析与仿真器无关 |
-| **trace_value / active_drivers** | 网表 × FST，靠**路径匹配**对齐 | ⚠️ 唯一需要实测确认的点 |
+| **trace_value / active_drivers** | 网表 × FST，靠**路径匹配**对齐 | ✅ 稳定；对齐率取决于波形里的实例命名 |
 
 - 前两类是**格式无关的稳健核心**：只要有 FST（+ 正确 filelist），任何仿真器都能用。
-- 第三类叠加了"波形路径 ↔ 网表实例名"的对齐，是跨仿真器最脆弱处（见下）。
+- 第三类叠加了"波形路径 ↔ 网表实例名"的对齐。对齐率取决于仿真器给 generate 块、
+  实例数组、转义标识符的命名方式，换到新仿真器时按文末三步自查一遍；对不上也只会
+  优雅降级，不会给出错误答案（见下）。
 
-## 注意点一：各仿真器怎么拿到 FST
+## 四种波形接入方式
 
-| 仿真器 | 直接产 FST | 获取 FST 的方式 |
+wave-mcp 的唯一读取格式是 **FST**。其余格式都在进入 wave-mcp 之前先变成 FST，
+一共四条路：
+
+| 方式 | 定位 | 是否需要转换 | 需要什么 | 深度文档 |
+| --- | --- | --- | --- | --- |
+| **① FST 直读** | 首选，零成本 | 不需要 | 仿真器能 dump FST | 本文 |
+| **② VCD 自动转换** | 通用兜底 | `prepare_session` 自动调 `vcd2fst` | GTKWave 的 `vcd2fst` | 本文 + [DEPLOY_AIRGAP.md](DEPLOY_AIRGAP.md) |
+| **③ FSDB 转换** | 存量商用波形 | `prepare_session` 自动调 `fsdb2fst`（带缓存） | Verdi 的 FsdbReader 运行库（不占 license） | [FSDB_GUIDE.md](FSDB_GUIDE.md) |
+| **④ Xcelium 直出** | Cadence 环境首选 | 不需要 | fstdumper VPI 插件（GPL-3.0，自行编译） | [XCELIUM_FST_GUIDE.md](XCELIUM_FST_GUIDE.md) |
+
+一句话口径：**FST 直读；VCD 自动转换；Verilator / Icarus / Xcelium(fstdumper)
+可从源头直出 FST；存量 FSDB 走 fsdb2fst 转换；SHM 不做**（Cadence 用户走 ④）。
+
+### 按仿真器查
+
+| 仿真器 | 直接产 FST | 推荐路径 |
 | --- | --- | --- |
-| Verilator | ✅ `--trace-fst` | 零转换（最省事） |
-| Icarus (iverilog) | ✅ `-fst` | 零转换 |
-| **VCS** | ❌ | VCD → `vcd2fst`；VPD/FSDB 需先 `vpd2vcd`/`fsdb2vcd` 转 VCD。**FSDB 推荐**：自带的 [fsdb2fst](#注意点一点五已有-fsdb-波形怎么进fsdb2fst) 直转，免 VCD 中间文件 |
-| Xcelium (xrun) | ✅ 加载 fstdumper VPI 插件 | **推荐**：[fstdumper 直出 FST](XCELIUM_FST_GUIDE.md)（用仓库 `third_party/fstdumper/` 的 Xcelium 修复补丁，已实测），零转换；备选：VCD → `vcd2fst` |
-| Questa/ModelSim | ❌ | VCD → `vcd2fst` |
+| Verilator | ✅ `--trace-fst` | ① 零转换（最省事） |
+| Icarus (iverilog) | ✅ `-fst` | ① 零转换 |
+| Xcelium (xrun) | ✅ 加载 fstdumper VPI 插件 | ④ [直出 FST](XCELIUM_FST_GUIDE.md)；备选 ② VCD → `vcd2fst` |
+| VCS | ❌ | 存量 FSDB 走 ③ [fsdb2fst](FSDB_GUIDE.md)；否则 ② VCD → `vcd2fst`（VPD 需先 `vpd2vcd`） |
+| Questa / ModelSim | ❌ | ② VCD → `vcd2fst` |
 
-> `prepare_session` 传入 `.vcd` 会自动调 `vcd2fst` 转换；传入 `.fst` 则直读。
-> 功能不受影响。Xcelium 用户建议用 fstdumper 直出 FST（见上表链接），
-> 免去 VCD 中间文件；其余非 Verilator/Icarus 场景多一步 VCD→FST。
+### ① FST 直读
 
-## 注意点一点五：已有 FSDB 波形怎么进（fsdb2fst）
+`prepare_session(wave_path="x.fst", ...)` 直接读，没有任何转换步骤，也不需要
+装 GTKWave。Verilator 与 Icarus 加一个命令行开关就能产 FST，是最省事的组合。
 
-存量 FSDB（多数商用流程的默认产物）走自带的 `fsdb2fst` 单程转换器，
-**无 VCD 中间文件**，转换完和原生 FST 完全一致：
+### ② VCD 自动转换
 
-```
+`prepare_session` 传入非 `.fst`、非 `.fsdb` 的波形一律当 VCD 处理，自动调
+`vcd2fst` 转换，转换记录在返回的 `steps` 里（`convert_vcd_to_fst`）。功能不受
+影响，只是多一次转换耗时与一份中间文件。转换与 FSDB 共用同一套缓存：产物落在
+`.vcd` 旁（目录不可写时回退到 session 目录），同一份 VCD 反复建 session 只转
+一次。三种压缩档位（`speed` / `balanced` / `size`）与流式转换用法见 README 的
+「VCD → FST 转换」一节。
+
+VCD 的实际上限：超过 10 GB 后 `vcd2fst` 可能长时间转换直至超时失败（18.4 GB
+与 55.8 GB 均在 3 小时超时）。这个量级只能走源头直出（④）。
+
+### ③ FSDB 转换（fsdb2fst）
+
+存量 FSDB 走自带的 `fsdb2fst` 单程转换器，**无 VCD 中间文件**，产物与原生 FST
+完全一致、查询工具零改动：
+
+```bash
 # 一次性准备（在有 Verdi 的机器上执行；FsdbReader 运行库不占 license，
 # 但 .so 受 Synopsys 版权约束，不入库、不进 PyPI，只在用户本机构建）
 export VERDI_HOME=/path/to/verdi          # 需含 share/FsdbReader/linux64
 bash deploy/build_fsdb2fst.sh             # 产出 third_party/fsdb2fst/fsdb2fst
-
-# 日常转换（任何机器，无需 Verdi；.so 与二进制同目录即可）
-fsdb2fst dump.fsdb dump.fst               # 单程转换，可加 -l u_core 限定范围
-prepare_session(wave_path="dump.fst", ...)  # 之后的流程与 FST 无差别
 ```
 
-要点：
+```python
+# 日常使用：直接把 .fsdb 交给 prepare_session，自动转换
+prepare_session(wave_path="dump.fsdb", filelist_path="rtl.f")
 
-- 转换在**用户机器**上完成，产物是标准 FST，27 个工具零改动。
-- 时间刻度原样透传（FSDB 与 FST 同为"整数 tick x 10^N 秒"模型），数值无损。
-- 强度值变量（strength）跳过，与 wave-mcp 现有 FST 能力边界一致。
-- FsdbReader 目录解析顺序：repo-local `third_party/verdi_runtime/linux64` →
-  `$FSDB2FST_FREADER` → `$VERDI_HOME/share/FsdbReader` → `$NOVAS_HOME`。
-  运行时优先用烘焙 RPATH（`$ORIGIN`），不依赖 `LD_LIBRARY_PATH`。
-- 没有该运行库时 `prepare_session` 收到 `.fsdb` 会明确报错并指向本节。
+# 大设计按 scope 切片（对应 fsdb2fst 的 -l）
+prepare_session(wave_path="dump.fsdb", fsdb_scopes=["u_core"], filelist_path="rtl.f")
+```
 
-## 注意点二：trace / 驱动的命门是"路径对齐"
+要点（完整说明见 [FSDB_GUIDE.md](FSDB_GUIDE.md)）：
+
+- 转换在**用户机器**上完成，时间刻度原样透传，数值无损。
+- **转换有缓存**：产物落在 `.fsdb` 旁（目录不可写时回退到 session 目录），
+  缓存键含源文件 mtime/size 与切片参数，同一波形反复建 session 只转一次。
+- 产物是 `.fst` + `.fst.hier` **两个文件，必须成对搬运**（缺 `.hier` 打不开）。
+- 强度值（strength）与不可转换类型（stream / MDA / property / coverage /
+  内部类型）会跳过并在日志与 `steps` 统计里计数。
+- 想先摸清规模再转，用 `convert_fsdb_to_fst(info_only=True)` 只读概要。
+
+### ④ Xcelium 直出 FST（fstdumper）
+
+Cadence 环境的推荐路径：挂一个 GPL-3.0 的开源 VPI 插件让 xrun 在仿真时直接写
+FST，零转换、免商用波形 license。代价是
+Xcelium 的 VPI 不支持 generate / task 子 scope 遍历，层次覆盖取决于设计构成。
+完整流程、补丁说明与适用范围见 [XCELIUM_FST_GUIDE.md](XCELIUM_FST_GUIDE.md)。
+
+## trace / 驱动的命门是"路径对齐"
 
 trace / 驱动能否 work，取决于 **FST 里的实例层次名**能否与 **pyslang 从 RTL 推出的
 实例名**对上。引擎（`netlist/trace_engine.py` 的 `_resolve_key`）用「叶子名 + 最长
@@ -77,43 +118,29 @@ FST 路径：top_tb.U_DECODE.u_decode_unit   （根在仿真顶层）
 遇到多义**主动弃权（返回 null）而非猜测**。最坏情况是部分跨层 trace 用不了，
 **绝不会静默给出错误答案**。
 
-## 已验证 / 未验证的环境
+## 支持状态
 
-- **已验证（编译层）**：fsdb2fst 用 ffrAPI stub 完成 stub 编译 + 桩链接 +
-  CLI 冒烟（本机无 Verdi 的最深验证）；fstapi 侧与 vcd2fst 同源同构。
-  **真实 FSDB 转换待内网验证**（拿到 FsdbReader 运行库 + 样例波形后）。
+| 环境 | 状态 | 说明 |
+| --- | --- | --- |
+| Verilator `--trace-fst` | ✅ 支持 | 两态仿真器，波形里没有真实 X/Z |
+| Icarus Verilog | ✅ 支持 | 四态（X/Z）路径的主要覆盖来源 |
+| Xcelium 直出 FST（fstdumper） | ✅ 支持 | 见下方已知限制 |
+| Xcelium / Icarus 的 VCD → FST | ✅ 支持 | |
+| FSDB → FST（fsdb2fst） | ✅ 支持 | Verdi V-2023.12 及以上 |
+| VCS 直接 dump | ⚠️ 未覆盖 | 存量 FSDB 走 fsdb2fst；或转 VCD |
 
-- **已验证**：Xcelium(xrun) 的 VCD→FST、Verilator `--trace-fst`。
-- **已验证**：Xcelium(xrun) 的 fstdumper 直出 FST（Xcelium 25.09-a081，
-  glibc 2.28）：端到端 prepare_session + 逐跳变值比对 106/106 严格一致；已知
-  限制是 Xcelium VPI 不支持 generate/task 子 scope 遍历，层次覆盖取决于设计
-  构成（0.03% ~ 99.95%），详见 [XCELIUM_FST_GUIDE.md](XCELIUM_FST_GUIDE.md)
-  的「适用范围与已知限制」。直出还有一个加分项：FST 携带 RTL 模块定义名，
-  `trace_value` 对 DUT 内部信号的解析比 VCD→FST 基线更好。
-- **已验证（四态）**：Icarus Verilog 12.0 的 VCD→FST。Verilator 是两态仿真器，
-  波形里没有真实 X/Z；四态路径用 Icarus 专项验证（`tests/fourstate/`，两套设计
-  共 71 项严格断言），覆盖：
-  - 未复位寄存器 X、X 经组合逻辑传播、驱动后 X 清除；
-  - 三态总线悬空 Z、单驱动取值、双驱动冲突出 X、撤驱回 Z；三态 assign 的
-    guard 四态求值（`guard_active` 在使能已知时精确 True/False，使能为 X 时
-    如实报 None）；
-  - `trace_x`：X 因果树逐级回溯（含 file/line/snippet）；多驱动冲突时展开
-    全部活跃驱动为并列分支（`conflicting_drivers` + `driver_conflict` 元信息）；
-    X 根因叶节点带终止原因说明（未驱动的输入端口）；
-  - always 块 if/else guard 在复位为 X 时判定为 None、复位已知时可判定；
-    case/casez（通配）驱动的 control 含选择子、X 选择子走 default；
-  - 位选/段选驱动与部分位 X 总线；X 门控锁存器；for-generate 逐位三态阵列
-    （逐位 Z 值正确）；wor 线或消解（1 胜出）；
-  - 部分 dump（`$dumpvars` 深度限制，RTL 有的信号波形没有）：值查询返回空、
-    静态 drivers 仍可用，均不崩溃；
-  - 负路径：不存在的信号、越界时间、损坏的 FST 文件均干净报错不崩溃。
-  该轮测试修复了两个真实缺陷：pyslang 11 下 ternary 条件信号从 control/fanin
-  丢失（`pred` 恒 None，需读 `conditions[].expr`）；连续赋值从不提取
-  guard/control 导致 `active_drivers` 对 assign 类驱动无筛选能力。修复后在
-  OpenTitan uart/aes 重建网表回归 10 万+ 项检查全过。
-- **未验证**：真实 VCS dump；真实 xrun + 业务代码中的加密 IP、xrun 对未命名
-  generate 块的命名差异（UVM 层次与 interface/modport 已随 fstdumper 直出
-  路径一并实测），内网测试计划中。
+四态能力（X/Z 传播、三态总线、`trace_x` 因果回溯、多驱动冲突）有专项回归覆盖，
+见 `tests/fourstate/`。
+
+**已知限制**：
+
+- Xcelium 直出受 VPI 限制，不支持 generate / task 子 scope 遍历，层次覆盖取决于
+  设计构成，详见 [XCELIUM_FST_GUIDE.md](XCELIUM_FST_GUIDE.md)。作为补偿，直出的
+  FST 携带 RTL 模块定义名，`trace_value` 对 DUT 内部信号的解析优于 VCD 转换路径。
+- VCD 超过 10 GB 后 `vcd2fst` 可能长时间转换直至超时，这个量级建议从源头直出 FST。
+- FSDB 在千万信号量级的门级设计上受 FsdbReader 限制，详见
+  [FSDB_GUIDE.md](FSDB_GUIDE.md) 的「超大文件的处理」。
+- 加密 IP、未命名 generate 块的命名差异可能影响 trace 的路径对齐，按下节三步自查。
 
 ## 换到新仿真器时的验证步骤
 
@@ -127,5 +154,5 @@ FST 路径：top_tb.U_DECODE.u_decode_unit   （根在仿真顶层）
 ## 一句话总结
 
 格式无关的核心（层次 / 信号 / 值 + 静态连接 / 驱动）在任意仿真器下都可用；
-**trace 的跨层路径对齐是唯一需要按上述步骤实测确认的点**，且即便不完美也只会
-优雅降级、不会误导。
+trace 的跨层路径对齐取决于波形里的实例命名，换到新仿真器时按上述三步自查即可，
+且即便对齐不完美也只会优雅降级、不会误导。

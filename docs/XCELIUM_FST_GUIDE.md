@@ -7,9 +7,12 @@ VPI 插件 [fstdumper](https://github.com/semify-eda/fstdumper) 让 xrun 在仿�
 
 产出的 `.fst` 可直接传给 wave-mcp 的 `prepare_session`，也能用 GTKWave 打开。
 
-> **实测状态**：本流程已在 Xcelium `xrun(64) 25.09-a081`、glibc 2.28、
-> gcc 8.5.0 上完成端到端验证（加载、dump、wave-mcp 全链路、逐跳变值比对）。
-> 上游官方还实测过 Xcelium 18.03 / 19.09 与 Icarus Verilog 11。
+> 本文只讲 Xcelium 直出这一条路。四种波形接入方式（FST 直读 / VCD 自动转换 /
+> FSDB 转换 / Xcelium 直出）的横向对比见
+> [SIMULATOR_COMPATIBILITY.md](SIMULATOR_COMPATIBILITY.md)。
+
+> **版本兼容性**：本流程在 Xcelium `25.09-a081`（glibc 2.28、gcc 8.5.0）上可用；
+> fstdumper 上游还支持 Xcelium 18.03 / 19.09 与 Icarus Verilog 11。
 > fstdumper 不是通用替代，接入前请读[适用范围与已知限制](#适用范围与已知限制)。
 
 ## 原理
@@ -54,9 +57,7 @@ patch -p1 < /path/to/fstdumper-xcelium-fixes.patch
 make fstdumper.so
 ```
 
-补丁来源：本仓库 `third_party/fstdumper/fstdumper-xcelium-fixes.patch`，
-全部改动已在 Xcelium 25.09 上回归验证（106/106 信号逐跳变与基线严格一致、
-VPI 报错清零）。修了什么：
+补丁来源：本仓库 `third_party/fstdumper/fstdumper-xcelium-fixes.patch`。修了什么：
 
 1. interface 完全不 dump（`types[]` / 类型映射 / scope switch 三处缺
    `vpiInterface`），丢所有 interface 信号；
@@ -94,13 +95,13 @@ module fst_dump;
 endmodule
 ```
 
-三个实测发现，直接决定上面模板的写法：
+三个要点，直接决定上面模板的写法：
 
 1. **`$fstDumpvars` 的 scope 参数必须与实际 tb 顶层实例名一致**（本例为
    `top_tb`）。这是最常见的翻车点：scope 对不上时仿真照常跑完、不报任何
    错误，但 FST 里没有任何信号。
 2. **不要用 `+fstfile=` plusarg 指定文件名**。源码不支持 plusarg 解析，
-   `$value$plusargs` 在 Xcelium 上也实测不可靠（读不到值），写了无效。
+   `$value$plusargs` 在 Xcelium 上也不可靠（读不到值），写了无效。
    文件名用宏（`-define FST_DUMP_FILE=...`）或直接改模板默认值。
 3. **文件必须纯 ASCII**。中文注释会被 xmvlog 报 `*W,NONPRT` 警告，一条
    中文注释能刷出几十条。
@@ -131,7 +132,7 @@ xrun -64bit \
 **必须追加第二个 `-top fst_dump`**，否则 `fst_dump` 模块不会被 elaborate，
 FST 不会生成，且不报任何错误（静默失败，最坑的一种）。
 
-命令行控制 dump 范围（三个维度均实测生效）：
+命令行控制 dump 范围（三个维度均可用）：
 
 ```bash
 # 默认：整个 top_tb，全深度
@@ -167,7 +168,7 @@ endif
 prepare_session(wave_path="waves.fst", filelist_path="your_filelist.f")
 ```
 
-两个体检指标的实测口径（详见 [SIMULATOR_COMPATIBILITY.md](SIMULATOR_COMPATIBILITY.md)）：
+两个体检指标的口径（详见 [SIMULATOR_COMPATIBILITY.md](SIMULATOR_COMPATIBILITY.md)）：
 
 - `netlist_health.trust` 只由 filelist 决定，与用哪种方式产波形无关；
   只给 `rtl.f` 时 `partial` 是正常现象，两条路径表现完全一致。
@@ -178,7 +179,7 @@ prepare_session(wave_path="waves.fst", filelist_path="your_filelist.f")
 ## 适用范围与已知限制
 
 **直出的最大价值在超大设计**：VCD 超 10 GB 后 `vcd2fst` 会长时间转换直至
-超时失败（实测 18.4 GB 与 55.8 GB 的 VCD 均在 3 小时超时），而直出不经过
+超时失败（18.4 GB 与 55.8 GB 的 VCD 均在 3 小时超时），而直出不经过
 VCD，没有这个上限。某个 55.8 GB VCD 的模块，基线路径合计超 4.5 小时且拿不到
 可用 FST，直出端到端 2.5 小时一步到位，磁盘占用 4.3 GB。
 
@@ -187,19 +188,19 @@ VCD，没有这个上限。某个 55.8 GB VCD 的模块，基线路径合计超 
 的子 scope 遍历全部不支持，这是改不了的硬限制。后果：
 
 1. **generate block 下的一切信号拿不到**（最大的坑）。DUT 主体若包在
-   `generate if (CFG) begin : GEN_XXX` 里，里面所有信号都丢。实测一个
+   `generate if (CFG) begin : GEN_XXX` 里，里面所有信号都丢。曾见一个
    89% 信号在 generate 下的模块，覆盖率只剩 4%；反之 generate 占比 0.01%
    的模块覆盖 99.9%。
 2. **task / function 局部量拿不到**。
 3. interface 本体的信号拿得到（需打补丁），但 interface 内的
    modport / clocking block 子 scope 拿不到。
 
-实测跨度：不同设计覆盖率在 0.03% ~ 99.95% 之间，取决于 DUT 主体有没有被
+不同设计的覆盖率跨度在 0.03% ~ 99.95% 之间，取决于 DUT 主体有没有被
 generate 包住、task 局部量占比多少。接入前可以用一个只跑到 time 0 就
 `$finish` 的探针模块（`$fstDumpvars` 在 time 0 就完成整个层次遍历）秒级
 预检能拿到多少信号，不用跑完仿真。
 
-**性能注意**：全量注册回调在大设计上会显著拖慢仿真（实测一个 7.7 万信号的
+**性能注意**：全量注册回调在大设计上会显著拖慢仿真（一个 7.7 万信号的
 模块从 17 分钟拖到 2.5 小时）。想提速只能收窄 `$fstDumpvars` 的 scope 或
 深度（`FST_DUMP_LEVEL`），或用 `$fstDumpon/$fstDumpoff` 限时间窗。
 

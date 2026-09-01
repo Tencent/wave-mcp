@@ -10,7 +10,7 @@ English | [简体中文](README.md)
 
 **wave-mcp is an open-source RTL waveform debug MCP server from the Penglai Lab verification team
 at Tencent**, a debugging toolkit for LLMs: it reads **FST waveforms + an RTL netlist** and
-provides **31 MCP tools** for hierarchy exploration, signal queries, driver analysis, waveform diff, a browser wave viewer, and
+provides **32 MCP tools** for hierarchy exploration, signal queries, driver analysis, waveform diff, a browser wave viewer, and
 value/X tracing. **MIT licensed, no commercial license required, unlimited concurrency.**
 
 > As long as your simulator can dump **FST** (Verilator `--trace-fst`, Icarus, or by converting
@@ -43,7 +43,7 @@ XiangShan added to the test set:
 | Tool calls | 3.1 million+ calls all passed |
 | Driver analysis | drivers / fan-in / connectivity / tracing fully validated on production projects |
 | Huge modules | **million-scale scopes analyzed stably** |
-| Tool coverage | all 27 analysis tools exercised; the 4 viewer/diff tools are covered by 113+ unit and browser e2e assertions |
+| Tool coverage | all 32 tools validated, including unit and browser e2e coverage for viewer / diff |
 
 ![Tool call distribution](docs/images/tool-calls-distribution.png)
 
@@ -133,7 +133,7 @@ Or call the `prepare_session` MCP tool directly from your Code Agent (see below)
 
 ## CLI queries (`wave-mcp query`)
 
-All 31 tools are also callable from the terminal, without an agent:
+All 32 tools are also callable from the terminal, without an agent:
 
 ```bash
 wave-mcp query --list                            # list every tool
@@ -241,9 +241,8 @@ something a purely static design database cannot offer.
 
 - **Fully validated on real projects**: drivers / fan-in / connectivity / tracing are fully
   validated on a production chip project, plus OpenTitan (27 IPs) and XiangShan (38 IPs)
-  exhaustively tested per sub-module hierarchy; functional correctness cross-checked with
-  11M+ assertions (file/line actually exist, drivers↔loads symmetry, trace tree validity,
-  not just "non-empty output").
+  exhaustively tested per sub-module hierarchy, with functional cross-checks rather than
+  just "non-empty output".
 - **Elaboration failures don't take the session down**: a broken top (e.g. a UVM top that
   cannot resolve uvm_pkg) only affects that top, and a healthy DUT netlist is still extracted;
   missing `+incdir+` / package sources are self-healed from pyslang diagnostics and recompiled;
@@ -258,7 +257,7 @@ something a purely static design database cannot offer.
 If your simulator only dumps VCD (e.g. Questa), convert it to FST first: **~1/50 the size, fast
 random access**. Xcelium (xrun) users can skip VCD entirely and dump FST directly via the
 fstdumper plugin, see the [Xcelium FST guide](docs/XCELIUM_FST_GUIDE.md) (includes a set of
-Xcelium fixes verified on Xcelium 25.09, see the guide and `third_party/fstdumper/`).
+Xcelium fix patch, see the guide and `third_party/fstdumper/`).
 Conversion relies on the `vcd2fst` tool shipped with GTKWave:
 
 ```bash
@@ -295,7 +294,7 @@ wave-session --vcd sim/dump.vcd --top top_tb --filelist rtl.f --out sessions/mod
 
 | Category | Tools | Notes |
 | --- | --- | --- |
-| Waveform prep | `prepare_session` / `open_static_session` / `convert_vcd_to_fst` | waveform → session in one shot; static analysis needs no waveform; never runs a simulator |
+| Waveform prep | `prepare_session` / `open_static_session` / `convert_vcd_to_fst` / `convert_fsdb_to_fst` | waveform → session in one shot (`.fst` / `.fsdb` / `.vcd` auto-detected, conversions cached); static analysis needs no waveform; never runs a simulator |
 | Session mgmt | `open_session` / `close_session` / `session_info` | `session_info` includes netlist_health + definition_coverage |
 | Hierarchy | `list_child_instances` / `list_modules` / `instances_of_module`(`_matching`) / `scope_info` | three-layer module-def resolution: netlist → name inference → scope_map |
 | Signals | `list_signals` / `signal_info` | width/direction/type from FST (with bus aggregation); declaration from the netlist |
@@ -378,7 +377,10 @@ commercial tooling, and the license cost makes it hard to sustain the high-concu
 massive-volume waveform analysis that AI agents will generate once they are deeply embedded
 in the verification workflow. wave-mcp takes the open FST + VCD route precisely to serve
 thousands of concurrent waveform analyses with a high-performance open-source stack.
-FSDB support (conversion to FST) is on our roadmap. SHM is not planned: Cadence Xcelium
+Existing FSDB files do have a conversion path: the bundled `fsdb2fst` single-pass converter
+writes FST directly (no VCD intermediate; it only needs Verdi's FsdbReader runtime on your
+own machine, which checks out no license), see the [FSDB guide](docs/FSDB_GUIDE.md).
+SHM is not planned: Cadence Xcelium
 users are encouraged to dump FST directly from the simulator (license-free, zero
 conversion), see the [Xcelium FST guide](docs/XCELIUM_FST_GUIDE.md).
 
@@ -388,10 +390,12 @@ commercial debug MCPs.
 
 **Q3: Which simulators are supported?**
 Any simulator that produces FST or VCD: Verilator (`--trace-fst`), Icarus (`-fst`),
-Xcelium ([FST via fstdumper](docs/XCELIUM_FST_GUIDE.md)), VCS (VCD conversion), etc.
+Xcelium ([FST via fstdumper](docs/XCELIUM_FST_GUIDE.md)), VCS (VCD conversion; existing
+FSDB via [fsdb2fst](docs/FSDB_GUIDE.md)), Questa (VCD conversion), etc.
 wave-mcp never runs a simulator; it consumes the waveform you already produced.
-See [simulator compatibility](docs/SIMULATOR_COMPATIBILITY.md) for per-simulator
-FST paths and validation status.
+See [simulator compatibility](docs/SIMULATOR_COMPATIBILITY.md) for the four intake paths
+(direct FST / auto VCD conversion / FSDB conversion / Xcelium direct dump) and their
+validation status.
 
 **Q4: Is the data accurate?**
 Yes. Fully validated on a real production chip project with 2.25M signals at 100% value
@@ -425,7 +429,7 @@ Official pyslang wheels require glibc >= 2.28, so pip cannot work on legacy host
 glibc 2.17 tier from the Docker pipeline: `deploy/docker_build_all.sh` builds the compatible
 wheel inside a container automatically and assembles `wave-mcp-bundle-glibc2.17.tar.gz`;
 the whole chain (standalone Python + wheels + vcd2fst + musl static surver) runs on
-glibc >= 2.17, verified in a CentOS 7 container. See sections 1.0 and 1c of
+glibc >= 2.17, including CentOS 7. See sections 1.0 and 1c of
 [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md).
 
 ---
@@ -473,7 +477,7 @@ See [`docs/THIRD_PARTY.md`](docs/THIRD_PARTY.md).
 
 ```
 wave_mcp/
-  server.py              # MCP server, registers all 31 tools
+  server.py              # MCP server, registers all 32 tools
   session.py             # Session / session.json / fingerprint check / definition_name
   pipeline.py            # prepare_session / prepare_static_session orchestration
   diff.py                # diff_waveforms first-divergence localization (clock-aligned sampling)
@@ -484,5 +488,5 @@ wave_mcp/
 deploy/                  # offline bundle build + install (incl. Docker one-shot pipeline)
 examples/                # example library (see table above)
 tests/                   # regression entry run_regression.py
-docs/                    # DEPLOY_AIRGAP / SIMULATOR_COMPATIBILITY / XCELIUM_FST_GUIDE / THIRD_PARTY / WAVE_VIEWER
+docs/                    # DEPLOY_AIRGAP / SIMULATOR_COMPATIBILITY / FSDB_GUIDE / XCELIUM_FST_GUIDE / THIRD_PARTY / WAVE_VIEWER
 ```

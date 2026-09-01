@@ -127,7 +127,7 @@ cd /shared/wave-mcp-bundle
 
 bundle 里的 Python 依赖都是 wheel，glibc 兼容性由打包时的 `--target-glibc` 保证（末尾有自动审计）。**唯一的原生二进制是 `vcd2fst`**。三选一：
 
-1. **(推荐) 用脚本在 manylinux_2_28 容器编一个**（已验证）：
+1. **(推荐) 用脚本在 manylinux_2_28 容器编一个**：
    ```bash
    deploy/build_vcd2fst.sh --out /tmp/vcd2fst-out      # needs docker
    # output needs only GLIBC_2.14 (libz/libpthread/libc)
