@@ -9,11 +9,12 @@
 [English](README.en.md) | 简体中文
 
 **wave-mcp 是腾讯蓬莱实验室验证团队开源的一款 RTL 波形调试 MCP Server**，为 LLM 提供波形调试工具集：
-读 **FST 波形 + RTL 网表**，提供层次探索、信号查询、驱动分析、值/X 态追踪、波形对比与浏览器波形查看器等 **32 个 MCP 工具**。
+读 **FST 波形 + RTL 网表**，提供层次探索、信号查询、驱动分析、值/X 态追踪、波形对比与浏览器波形查看器等 **34 个 MCP 工具**。
 **MIT 开源，无需任何商用 License，支持任意并发。**
 
-> 只要你的仿真器能 dump **FST**（Verilator `--trace-fst`、Icarus，或把 VCD 转 FST），
-> wave-mcp 就能读它做调试。它**不跑仿真器**，你用自己的流程跑出波形，把结果交给它即可。
+> **FST 直读，VCD / FSDB 自动转 FST**：Verilator `--trace-fst`、Icarus 直接产 FST 就能读；
+> 手上只有 VCD 或 FSDB 也没关系，`prepare_session` 自动转换后再建 session（FSDB 转换不占 Verdi license）。
+> 它**不跑仿真器**，你用自己的流程跑出波形，把结果交给它即可。
 
 ---
 
@@ -68,7 +69,7 @@ wave-mcp 用**纯开源技术栈**（pylibfst + pyslang）提供完整波形调�
 | Verilator（示例） | ≥ 5 | 仅 `verilator_quickstart` 示例需要 |
 
 > **Linux x86_64 开箱即用**（以上 Python 依赖均有预编译 wheel）；
-> macOS / Windows / arm64 因 `pylibfst` 暂无预编译 wheel，需源码编译（cmake+gcc+zlib）。
+> 其他平台仅 `pylibfst` 需源码编译（cmake+gcc+zlib），波形查看器暂不支持，详见 Q6。
 
 标准环境直接 `pip install wave-mcp`。环境受限时按下表对号入座：
 
@@ -257,7 +258,7 @@ wave-session --vcd sim/dump.vcd --top top_tb --filelist rtl.f --out sessions/mod
 
 ---
 
-## 工具（32 个，10 大类）
+## 工具（34 个，10 大类）
 
 | 类别 | 工具 | 说明 |
 | --- | --- | --- |
@@ -326,18 +327,23 @@ wave-view pass.fst fail.fst --labels pass fail
 
 ## FAQ
 
-**Q1：为什么不支持 FSDB 和 SHM？**
-FSDB 和 SHM 是闭源波形格式，读取详细数据绕不开商用工具，license 成本较高，
-难以支撑未来 AI Agent 深度融入工作流后产生的高并发、海量波形分析需求。
-wave-mcp 走 FST + VCD 开源路线，正是为成千上万条波形的并发分析场景提供高性能的开源替代方案。
-存量 FSDB 有转换通道：自带的 `fsdb2fst` 单程转换器直接转 FST（无 VCD 中间文件，
-只需本机有 Verdi 的 FsdbReader 运行库，不占 license），见
-[FSDB 波形接入指南](docs/FSDB_GUIDE.md)。SHM 不在计划内：Cadence Xcelium 用户
-推荐直接从仿真源头产出 FST（免 license、零转换），见
+**Q1：支持 FSDB 和 SHM 吗？**
+支持 FSDB，不支持 SHM。
+
+FSDB 走转换通道：`prepare_session` 直接吃 `.fsdb`，自动调自带的 `fsdb2fst` 转成 FST，
+不经过 VCD 中间文件，产物与原生 FST 一致，查询工具零改动。转换只需本机有 Verdi 的
+FsdbReader 运行库，**运行时不占 license**，见 [FSDB 波形接入指南](docs/FSDB_GUIDE.md)。
+
+SHM 不在计划内。Cadence Xcelium 用户不用转存量波形，推荐直接从仿真源头产出 FST
+（fstdumper VPI 插件，免 license、零转换），见
 [Xcelium 直出 FST 指南](docs/XCELIUM_FST_GUIDE.md)。
 
 **Q2：需要商用 License 吗？**
-不需要。MIT 开源，任意并发、不限机器数。这也是它区别于商用调试 MCP 的核心点。
+不需要，MIT 开源、任意并发、不限机器数。这也是它区别于商用调试 MCP 的核心点。
+
+选择开源路线不只是省 license 费：FSDB、SHM 这类闭源波形格式，读取详细数据绕不开商用工具，
+license 成本难以支撑 AI Agent 深度融入工作流后产生的高并发、海量波形分析需求。
+wave-mcp 走 FST + VCD 开源路线，正是为成千上万条波形的并发分析场景提供高性能的开源替代方案。
 
 **Q3：支持哪些仿真器？**
 任何能产出 FST 或 VCD 的仿真器：Verilator（`--trace-fst`）、Icarus（`-fst`）、
@@ -355,8 +361,20 @@ VCD 自动转换 / FSDB 转换 / Xcelium 直出）的对比与支持状态详见
 能。`open_static_session` 只凭 RTL 源码做静态分析（仿真前可用），这是 wave-mcp 的独有能力。
 
 **Q6：支持 macOS / Windows 吗？**
-Linux x86_64 开箱即用。macOS / Windows / arm64 因 `pylibfst` 无预编译 wheel 需源码编译，
-见[系统要求](#系统要求)。
+Linux x86_64 开箱即用，其他平台没有官方支持，但可以自己适配。
+
+卡点只有一个：`pylibfst` 目前只发布 Linux x86_64 的 wheel。其余依赖都已覆盖多平台
+（`pyslang` 有 macOS arm64 / universal2 / win_amd64 / linux aarch64 官方 wheel，
+`mcp` 是纯 Python），所以装好编译环境（cmake + C 编译器 + zlib，Windows 需 MSVC）后
+`pip install pylibfst` 走 sdist 自行编译，大多能装上，之后分析类工具即可正常使用。
+
+波形查看器则确定不可用：它依赖的 `surver` 是 Linux x86-64 二进制，没有 macOS / Windows
+构建。未安装时相关工具优雅降级返回提示，不影响分析类工具。想在自己平台跑起来，需要按
+[Surfer 项目](https://surfer-project.org/)自行编译 surver 并用
+`WAVE_MCP_VIEWER_ASSETS` 指向资产目录，注意 surver 与 WASM 必须来自同一 Surfer commit，
+否则连接时会因 wellen 版本不一致拒绝加载。
+
+也可以直接在容器里跑（如 `python:3.11-slim`），绕开平台差异，这条路最省事。
 
 **Q7：大波形性能如何？**
 FST + C 系读取库（pylibfst）+ 进程常驻 + 随机访问，契合 AI 点查询场景；
@@ -365,11 +383,13 @@ FST + C 系读取库（pylibfst）+ 进程常驻 + 随机访问，契合 AI 点�
 **Q8：怎么接入我的 Code Agent？**
 见 [Code Agent 集成](#code-agent-集成)，一段 `mcpServers` JSON 即可。
 
-**Q9：目标机器只有 Python 3.8 / 3.9（隔离网 / 加密环境），能用吗？**
-能，不需要升级目标机。Docker 流水线打出的离线 bundle 自带独立 Python 3.11
-（python-build-standalone），安装时优先使用捆绑解释器，与系统 Python 完全无关。
-原生支持 3.8/3.9 不可行：`mcp` SDK 硬性要求 ≥ 3.10，官方 `pyslang` wheel 不发 cp38，
-且两版本均已 EOL。详见 [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md) 第 7 节（旧环境 QA）。
+**Q9：目标机器只有 Python 3.8 / 3.9，能用吗？**
+能，用离线 bundle 就行，不需要升级目标机。
+
+Docker 流水线打出的 bundle 自带独立 Python 3.11（python-build-standalone），安装时优先用
+捆绑的解释器，与系统自带的 Python 完全无关，所以 3.8 / 3.9 照样能跑。
+
+详见 [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md) 第 7 节。
 
 **Q10：CentOS 7 / glibc 2.17 上报 `GLIBC_2.27' not found` 怎么办？**
 官方 pyslang wheel 要求 glibc ≥ 2.28，老机器直接 pip 装不上。用 Docker 流水线的

@@ -13,9 +13,11 @@ at Tencent**, a debugging toolkit for LLMs: it reads **FST waveforms + an RTL ne
 provides **34 MCP tools** for hierarchy exploration, signal queries, driver analysis, waveform diff, a browser wave viewer, and
 value/X tracing. **MIT licensed, no commercial license required, unlimited concurrency.**
 
-> As long as your simulator can dump **FST** (Verilator `--trace-fst`, Icarus, or by converting
-> VCD to FST), wave-mcp can read it for debugging. It **does not run a simulator**: you produce
-> the waveform with your own flow and hand the result to it.
+> **Direct FST reads; VCD / FSDB convert automatically.** Verilator `--trace-fst` and Icarus
+> emit FST, which wave-mcp reads directly. If all you have is VCD or FSDB, `prepare_session`
+> converts it and then opens the session (FSDB conversion checks out no Verdi license).
+> It **does not run a simulator**: you produce the waveform with your own flow and hand the
+> result to it.
 
 ---
 
@@ -82,8 +84,8 @@ XiangShan added to the test set:
 | Verilator (examples) | >= 5 | Only needed by the `verilator_quickstart` example |
 
 > **Linux x86_64 works out of the box** (all Python deps above ship prebuilt wheels);
-> macOS / Windows / arm64 currently lack a prebuilt `pylibfst` wheel and require building from
-> source (cmake+gcc+zlib).
+> on other platforms only `pylibfst` needs building from source (cmake+gcc+zlib), and the
+> wave viewer is not supported. See Q6.
 
 On a standard environment, just `pip install wave-mcp`. For constrained environments, find your case below:
 
@@ -373,22 +375,28 @@ wave-view pass.fst fail.fst --labels pass fail
 
 ## FAQ
 
-**Q1: Why no FSDB / SHM support?**
-FSDB and SHM are closed, proprietary waveform formats: reading their full data requires
-commercial tooling, and the license cost makes it hard to sustain the high-concurrency,
-massive-volume waveform analysis that AI agents will generate once they are deeply embedded
-in the verification workflow. wave-mcp takes the open FST + VCD route precisely to serve
-thousands of concurrent waveform analyses with a high-performance open-source stack.
-Existing FSDB files do have a conversion path: the bundled `fsdb2fst` single-pass converter
-writes FST directly (no VCD intermediate; it only needs Verdi's FsdbReader runtime on your
-own machine, which checks out no license), see the [FSDB guide](docs/FSDB_GUIDE.md).
-SHM is not planned: Cadence Xcelium
-users are encouraged to dump FST directly from the simulator (license-free, zero
-conversion), see the [Xcelium FST guide](docs/XCELIUM_FST_GUIDE.md).
+**Q1: Does it support FSDB / SHM?**
+FSDB yes, SHM no.
+
+FSDB goes through the conversion path: `prepare_session` takes `.fsdb` directly and calls the
+bundled `fsdb2fst` to write FST, with no VCD intermediate. The result is identical to a native
+FST file, so every query tool works unchanged. Conversion only needs Verdi's FsdbReader runtime
+on your own machine and **checks out no license at runtime**, see the
+[FSDB guide](docs/FSDB_GUIDE.md).
+
+SHM is not planned. Cadence Xcelium users do not need to convert existing waveforms: dump FST
+straight from the simulator instead (the fstdumper VPI plugin, license-free, zero conversion),
+see the [Xcelium FST guide](docs/XCELIUM_FST_GUIDE.md).
 
 **Q2: Do I need a commercial license?**
 No. MIT licensed, unlimited concurrency, unlimited machines. This is the core difference from
 commercial debug MCPs.
+
+Going open source is not only about saving license fees. Closed formats like FSDB and SHM cannot
+be read in full detail without commercial tooling, and that license cost makes it hard to sustain
+the high-concurrency, massive-volume waveform analysis that AI agents will generate once they are
+deeply embedded in the verification workflow. wave-mcp takes the open FST + VCD route precisely
+to serve thousands of concurrent waveform analyses with a high-performance open-source stack.
 
 **Q3: Which simulators are supported?**
 Any simulator that produces FST or VCD: Verilator (`--trace-fst`), Icarus (`-fst`),
@@ -409,8 +417,25 @@ Yes. `open_static_session` does static analysis from RTL alone (before simulatio
 wave-mcp capability.
 
 **Q6: Does it support macOS / Windows?**
-Linux x86_64 works out of the box. macOS / Windows / arm64 require building `pylibfst` from
-source (see [System requirements](#system-requirements)).
+Linux x86_64 works out of the box. Other platforms are not officially supported, but you can
+adapt it yourself.
+
+There is exactly one blocker: `pylibfst` currently publishes wheels for Linux x86_64 only.
+Everything else is already covered (`pyslang` ships official macOS arm64 / universal2 /
+win_amd64 / linux aarch64 wheels, and `mcp` is pure Python), so with a build toolchain in
+place (cmake, a C compiler and zlib; MSVC on Windows) `pip install pylibfst` builds from the
+sdist and usually succeeds, after which the analysis tools work normally.
+
+The wave viewer definitely will not work: its `surver` backend is a Linux x86-64 binary with
+no macOS or Windows build. When the assets are absent the viewer tools degrade gracefully with
+a hint and the analysis tools are unaffected. To run it on your own platform you would build
+surver yourself from the [Surfer project](https://surfer-project.org/) and point
+`WAVE_MCP_VIEWER_ASSETS` at the asset directory, keeping in mind that surver and the WASM
+client must come from the same Surfer commit or the client refuses to load on a wellen
+version mismatch.
+
+Running inside a container (e.g. `python:3.11-slim`) sidesteps all of this and is the easiest
+route.
 
 **Q7: How does it perform on large waveforms?**
 FST + a C-based reader (pylibfst) + a resident process + random access, matching the AI's
@@ -419,11 +444,13 @@ point-query patterns; validated on million-scale-scope modules.
 **Q8: How do I hook it into my Code Agent?**
 See [Code Agent integration](#code-agent-integration): one `mcpServers` JSON block.
 
-**Q9: My target machine only has Python 3.8 / 3.9 (air-gapped / hardened environment). Can I still use it?**
-Yes, with no upgrade needed on the target. Offline bundles from the Docker pipeline embed a
-standalone Python 3.11 (python-build-standalone); the installer prefers the bundled interpreter
-and never touches the system Python. Native 3.8/3.9 support is not feasible: the `mcp` SDK
-requires >= 3.10, official `pyslang` wheels skip cp38, and both versions are EOL.
+**Q9: My target machine only has Python 3.8 / 3.9. Can I still use it?**
+Yes, via the offline bundle, with no upgrade needed on the target.
+
+Offline bundles from the Docker pipeline embed a standalone Python 3.11
+(python-build-standalone); the installer prefers the bundled interpreter and never touches the
+system Python, so 3.8 / 3.9 hosts run it fine.
+
 See section 7 of [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md).
 
 **Q10: I get `GLIBC_2.27' not found` on CentOS 7 / glibc 2.17. What now?**
