@@ -7,6 +7,35 @@ VPI 插件 [fstdumper](https://github.com/semify-eda/fstdumper) 让 xrun 在仿�
 
 产出的 `.fst` 可直接传给 wave-mcp 的 `prepare_session`，也能用 GTKWave 打开。
 
+## 五行速查
+
+急着跑起来就照这五步做，插件和 dump 控制模块都有现成的，不用自己写：
+
+```bash
+# ① 编插件（一次就够，产物可拷给全组用）
+bash deploy/build_fstdumper.sh          # 自动 clone 上游 + 打 Xcelium 补丁 + make
+
+# ② 在原有 xrun 命令上追加这几项，其余选项一律不动
+xrun -64bit +access+r \
+  -loadvpi third_party/fstdumper/build/fstdumper.so:vlog_startup_routines_bootstrap \
+  -f your_filelist.f \
+  examples/xcelium_fst/fst_dump_cfg.sv \
+  -top your_tb -top fst_dump \
+  -define 'FST_DUMP_TOP=your_tb' -define 'FST_DUMP_FILE="waves.fst"'
+```
+
+③ 产出的 `waves.fst` 直接喂 `prepare_session(wave_path="waves.fst", filelist_path="your_filelist.f")`。
+
+三个最容易翻车的点：**第二个 `-top fst_dump` 必须写**（漏了不生成 FST 且不报错）、
+`FST_DUMP_TOP` 必须等于真实 tb 顶层实例名（写错则波形里没有信号且不报错）、
+传宏用 `-define` 而非 `+define+`。
+
+> **先读这条再决定要不要用**：Xcelium 的 VPI 拿不到 generate block 内的信号。
+> 如果 DUT 主体包在 `generate` 里，覆盖率可能低到个位数，这时应该走 VCD 路径。
+> 判断方法与完整取舍见[适用范围与已知限制](#适用范围与已知限制)。
+
+以下是完整说明，速查跑通了就不必读。
+
 > 本文只讲 Xcelium 直出这一条路。四种波形接入方式（FST 直读 / VCD 自动转换 /
 > FSDB 转换 / Xcelium 直出）的横向对比见
 > [SIMULATOR_COMPATIBILITY.md](SIMULATOR_COMPATIBILITY.md)。
@@ -46,6 +75,17 @@ wave-mcp 仓库 `third_party/fstdumper/` 提供一套针对 Xcelium 的修复补
 
 依赖仅有 zlib（`-lz`）和 gcc，一般环境都齐备。
 
+**推荐用一键脚本**，它把下面的 clone、打补丁、make 三步收成一条命令，
+并且补丁已应用时会自动跳过（可重复执行）：
+
+```bash
+bash deploy/build_fstdumper.sh              # 产出 third_party/fstdumper/build/fstdumper.so
+bash deploy/build_fstdumper.sh --perf-opt   # 额外应用可选的性能补丁
+```
+
+没有外网时先自行 clone，再用 `FSTDUMPER_BUILD_DIR=<你的 checkout>` 指向它。
+手工流程如下，与脚本等价：
+
 ```bash
 git clone https://github.com/semify-eda/fstdumper.git
 cd fstdumper
@@ -73,7 +113,11 @@ xrun 相同的环境编译（`-64bit` 对应 64 位，glibc 版本过低的老�
 ## 第二步：编写 dump 控制模块
 
 推荐做法是**不改动现有 testbench**，新增一个独立的 top 模块专管 dump。
-用编译期宏做参数化，一份文件服务所有 case：
+用编译期宏做参数化，一份文件服务所有 case。
+
+**仓库里已有一份开箱可用的**，直接加到 xrun 命令行即可，不用自己写：
+[`examples/xcelium_fst/fst_dump_cfg.sv`](../examples/xcelium_fst/fst_dump_cfg.sv)。
+内容就是下面这段，需要改默认值时再拷走改：
 
 ```systemverilog
 // fst_dump_cfg.sv

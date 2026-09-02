@@ -66,7 +66,7 @@ RPATH_ARGS=()
 INC_ARGS+=(-I"$SRC_DIR/fst")
 if [ -n "$READER_DIR" ]; then
     [ -f "$READER_DIR/linux64/libnffr.so" ] || fail "missing $READER_DIR/linux64/libnffr.so"
-    INC_ARGS=(-I"$READER_DIR")
+    INC_ARGS+=(-I"$READER_DIR")
     LIB_ARGS=(-L"$READER_DIR/linux64" -lnffr -lnsys)
     RPATH_ARGS=(-Wl,-rpath,"$READER_DIR/linux64" -Wl,-rpath,'$ORIGIN')
     log "FsdbReader package: $READER_DIR"

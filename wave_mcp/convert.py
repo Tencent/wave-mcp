@@ -22,7 +22,11 @@ Two usage modes:
 This module also converts **FSDB** (Synopsys, closed format) through the bundled
 ``fsdb2fst`` single-pass converter (see docs/FSDB_GUIDE.md). Unlike vcd2fst,
 fsdb2fst is built locally against Verdi's FsdbReader runtime, so it is resolved
-through ``$FSDB2FST_BIN`` -> repo-local ``third_party/fsdb2fst/fsdb2fst`` -> PATH.
+through ``$FSDB2FST_BIN`` -> repo-local ``third_party/fsdb2fst/fsdb2fst`` ->
+user cache -> PATH. When none of those hold a usable binary but a FsdbReader
+runtime is reachable (``$VERDI_HOME`` / ``$NOVAS_HOME`` / ``$FSDB2FST_FREADER``),
+the converter is **built on demand** into the user cache, so setting
+``VERDI_HOME`` in the MCP config is the only setup step a user has to do.
 
 Both conversions share one **artifact cache** (``cached_fst``): a converted FST
 is reused as long as the source waveform's (path, mtime, size) and the slicing
@@ -32,6 +36,7 @@ the full cost again.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -48,6 +53,17 @@ FSDB2FST_BIN_ENV = os.environ.get("FSDB2FST_BIN")
 _REPO_FSDB2FST = os.path.normpath(os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     os.pardir, "third_party", "fsdb2fst", "fsdb2fst"))
+
+# Sources and build script for the on-demand build. Present in a git checkout;
+# absent in a pip install, where auto-build is simply skipped.
+_REPO_ROOT = os.path.normpath(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), os.pardir))
+_FSDB2FST_SRC_DIR = os.path.join(_REPO_ROOT, "third_party", "fsdb2fst")
+_FSDB2FST_BUILD_SH = os.path.join(_REPO_ROOT, "deploy", "build_fsdb2fst.sh")
+
+# Auto-build is on by default; WAVE_MCP_FSDB2FST_AUTOBUILD=0 disables it.
+_AUTOBUILD_ENABLED = os.environ.get(
+    "WAVE_MCP_FSDB2FST_AUTOBUILD", "1").strip().lower() not in ("0", "false", "no")
 
 # mode -> packing flag
 _MODE_FLAG = {
@@ -262,8 +278,139 @@ def _is_fifo(path: str) -> bool:
 # FSDB -> FST (bundled fsdb2fst; see docs/FSDB_GUIDE.md)
 # =============================================================================
 
+def _cache_root() -> str:
+    """User-level cache dir for locally built helper binaries.
+
+    Honours $XDG_CACHE_HOME; never writes inside site-packages, so a pip
+    install stays read-only and several users on one host stay independent.
+    """
+    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(
+        os.path.expanduser("~"), ".cache")
+    return os.path.join(base, "wave-mcp", "fsdb2fst")
+
+
+def resolve_fsdb_reader() -> Optional[str]:
+    """Locate a usable Verdi FsdbReader package for building fsdb2fst.
+
+    Mirrors the resolution order of deploy/build_fsdb2fst.sh, minus the
+    repo-local runtime symlink which the script handles on its own.
+    Returns the FsdbReader directory, or None when no runtime is reachable.
+    """
+    explicit = os.environ.get("FSDB2FST_FREADER")
+    if explicit and os.path.isdir(os.path.join(explicit, "linux64")):
+        return explicit
+    for var in ("VERDI_HOME", "NOVAS_HOME"):
+        home = os.environ.get(var)
+        if not home:
+            continue
+        cand = os.path.join(home, "share", "FsdbReader")
+        if os.path.isdir(os.path.join(cand, "linux64")):
+            return cand
+    repo_runtime = os.path.join(_REPO_ROOT, "third_party", "verdi_runtime", "linux64")
+    if os.path.exists(os.path.join(repo_runtime, "libnffr.so")):
+        return repo_runtime
+    return None
+
+
+def _autobuild_cache_key(reader_dir: str) -> str:
+    """Cache key over the FsdbReader location and the converter sources.
+
+    Changing Verdi version or editing fsdb2fst.cpp yields a new key, so a
+    stale binary is never reused.
+    """
+    parts = [reader_dir]
+    for name in ("fsdb2fst.cpp", "fst/fstapi.c"):
+        path = os.path.join(_FSDB2FST_SRC_DIR, name)
+        try:
+            st = os.stat(path)
+            parts.append(f"{name}:{int(st.st_mtime)}:{st.st_size}")
+        except OSError:
+            parts.append(f"{name}:missing")
+    return hashlib.sha1("|".join(parts).encode()).hexdigest()[:16]
+
+
+def _autobuild_fsdb2fst() -> Optional[str]:
+    """Build fsdb2fst once into the user cache; return the binary or None.
+
+    Silent by design: this runs on the first FSDB conversion so the user only
+    has to set VERDI_HOME. Any failure returns None and the caller raises the
+    usual actionable error, which now also reports why the build was skipped.
+    """
+    if not _AUTOBUILD_ENABLED:
+        return None
+    if not (os.path.isfile(_FSDB2FST_BUILD_SH)
+            and os.path.isfile(os.path.join(_FSDB2FST_SRC_DIR, "fsdb2fst.cpp"))):
+        return None  # pip install without sources: nothing to build from
+    reader_dir = resolve_fsdb_reader()
+    if not reader_dir:
+        return None  # no FsdbReader runtime: cannot build, and cannot convert
+    if not shutil.which("g++"):
+        return None
+
+    cache_dir = os.path.join(_cache_root(), _autobuild_cache_key(reader_dir))
+    cached_bin = os.path.join(cache_dir, "fsdb2fst")
+    if os.path.isfile(cached_bin) and os.access(cached_bin, os.X_OK):
+        return cached_bin
+
+    env = dict(os.environ)
+    env.setdefault("FSDB2FST_FREADER", reader_dir)
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+        proc = subprocess.run(
+            ["bash", _FSDB2FST_BUILD_SH],
+            env=env, capture_output=True, text=True, timeout=600)
+        built = os.path.join(_FSDB2FST_SRC_DIR, "fsdb2fst")
+        if proc.returncode != 0 or not os.path.isfile(built):
+            _record_autobuild_failure(cache_dir, proc.stderr or proc.stdout)
+            return None
+        # Keep the artifact in the cache so a read-only or shared checkout
+        # still yields a per-user binary.
+        shutil.copy2(built, cached_bin)
+        os.chmod(cached_bin, 0o755)
+        return cached_bin
+    except (OSError, subprocess.SubprocessError) as exc:
+        _record_autobuild_failure(cache_dir, str(exc))
+        return None
+
+
+def _record_autobuild_failure(cache_dir: str, detail: str) -> None:
+    """Persist the last build failure so the error message can cite it."""
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+        with open(os.path.join(cache_dir, "build-failed.log"), "w") as fh:
+            fh.write((detail or "").strip()[-4000:])
+    except OSError:
+        pass
+
+
+def _last_autobuild_failure() -> Optional[str]:
+    """Return the tail of the most recent auto-build failure, if any."""
+    root = _cache_root()
+    newest: Optional[tuple] = None
+    try:
+        for entry in os.listdir(root):
+            log = os.path.join(root, entry, "build-failed.log")
+            if os.path.isfile(log):
+                mtime = os.path.getmtime(log)
+                if newest is None or mtime > newest[0]:
+                    newest = (mtime, log)
+    except OSError:
+        return None
+    if not newest:
+        return None
+    try:
+        with open(newest[1]) as fh:
+            tail = fh.read().strip().splitlines()
+        return "\n".join(tail[-6:]) if tail else None
+    except OSError:
+        return None
+
+
 def resolve_fsdb2fst() -> Optional[str]:
-    """Locate the fsdb2fst binary: $FSDB2FST_BIN -> repo-local -> PATH.
+    """Locate the fsdb2fst binary, building it on demand when possible.
+
+    Order: ``$FSDB2FST_BIN`` -> repo-local build output -> user cache -> PATH
+    -> on-demand build (needs a reachable FsdbReader plus g++).
 
     Returns the resolved path, or None when nothing usable was found so callers
     can raise an actionable error instead of crashing.
@@ -275,25 +422,53 @@ def resolve_fsdb2fst() -> Optional[str]:
         return None  # explicitly pointed somewhere broken: do not silently fall back
     if os.path.isfile(_REPO_FSDB2FST) and os.access(_REPO_FSDB2FST, os.X_OK):
         return _REPO_FSDB2FST
+    reader_dir = resolve_fsdb_reader()
+    if reader_dir:
+        cached_bin = os.path.join(
+            _cache_root(), _autobuild_cache_key(reader_dir), "fsdb2fst")
+        if os.path.isfile(cached_bin) and os.access(cached_bin, os.X_OK):
+            return cached_bin
     found = shutil.which("fsdb2fst")
-    return os.path.abspath(found) if found else None
+    if found:
+        return os.path.abspath(found)
+    return _autobuild_fsdb2fst()
 
 
 def _fsdb2fst_missing_error() -> ConversionError:
     where = f"$FSDB2FST_BIN={FSDB2FST_BIN_ENV!r}" if FSDB2FST_BIN_ENV \
-        else "$FSDB2FST_BIN (unset), repo-local third_party/fsdb2fst/fsdb2fst, PATH"
+        else ("$FSDB2FST_BIN (unset), repo-local third_party/fsdb2fst/fsdb2fst, "
+              f"user cache {_cache_root()}, PATH")
+    # Explain why the on-demand build did not save the day, so the user gets
+    # one concrete next step instead of a menu.
+    if not _AUTOBUILD_ENABLED:
+        why = "auto-build disabled by WAVE_MCP_FSDB2FST_AUTOBUILD=0"
+    elif not os.path.isfile(_FSDB2FST_BUILD_SH):
+        why = ("auto-build unavailable: converter sources are not shipped in the "
+               "PyPI package, use a git checkout or set $FSDB2FST_BIN")
+    elif not resolve_fsdb_reader():
+        why = ("auto-build skipped: no Verdi FsdbReader runtime found. Set "
+               "VERDI_HOME (must contain share/FsdbReader/linux64) in your MCP "
+               "config, or FSDB2FST_FREADER to a copied share/FsdbReader dir")
+    elif not shutil.which("g++"):
+        why = "auto-build skipped: g++ not found in PATH"
+    else:
+        detail = _last_autobuild_failure()
+        why = ("auto-build attempted but failed"
+               + (f":\n    {detail}" if detail else ", see build-failed.log in the cache dir"))
     return ConversionError(
         f"'fsdb2fst' not found — needed to convert FSDB -> FST.\n"
         f"Searched: {where}\n"
+        f"Why not built automatically: {why}\n"
         f"Options:\n"
-        f"  * build it once on a machine with Verdi:\n"
-        f"      export VERDI_HOME=/path/to/verdi   # must contain share/FsdbReader/linux64\n"
-        f"      bash deploy/build_fsdb2fst.sh\n"
+        f"  * set VERDI_HOME in your MCP config and retry; the converter is then "
+        f"built once automatically (needs g++)\n"
+        f"  * or build it explicitly: bash deploy/build_fsdb2fst.sh\n"
         f"  * or set $FSDB2FST_BIN to an existing fsdb2fst binary\n"
         f"  * or convert manually and pass the .fst instead:\n"
         f"      fsdb2fst dump.fsdb dump.fst\n"
         f"See docs/FSDB_GUIDE.md for the full setup (the FsdbReader runtime "
         f"checks out no license).")
+
 
 
 @dataclass

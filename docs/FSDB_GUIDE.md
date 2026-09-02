@@ -8,6 +8,36 @@ FsdbReader 读 FSDB、用 fstapi 写 FST，**不经过 VCD 中间文件**，产�
 **FsdbReader 运行库（`libnffr.so` + `libnsys.so`）运行时不 checkout 任何
 license**，与打开 Verdi GUI 不同。唯一的前提是环境里得有这两个 `.so`。
 
+## 三行速查
+
+在 MCP 配置里给出 `VERDI_HOME`，然后把 `.fsdb` 丢给 `prepare_session`，没有别的步骤：
+
+```json
+{
+  "mcpServers": {
+    "wave-mcp": {
+      "command": "python",
+      "args": ["-m", "wave_mcp.server"],
+      "env": { "VERDI_HOME": "/path/to/verdi" }
+    }
+  }
+}
+```
+
+```
+prepare_session(wave_path="dump.fsdb", filelist_path="your_filelist.f")
+```
+
+首次转换时 wave-mcp 会自动编一次 `fsdb2fst`（需要 `g++`，约十几秒），产物缓存在
+`~/.cache/wave-mcp/fsdb2fst/`，之后直接复用；换 Verdi 版本会自动重编。转换结果本身
+也有缓存，同一份波形反复建 session 只转一次。
+
+超大设计（选中信号超 500 万）需要切片，传 `fsdb_scopes=["u_core"]` 收窄范围。
+其余内容按需查阅：想手工构建或用命令行看[第一步](#第一步准备-fsdbreader-并编译)与
+[命令行用法](#命令行用法)，遇到问题看[排错速查](#排错速查)。
+
+关掉自动构建用 `WAVE_MCP_FSDB2FST_AUTOBUILD=0`；已有二进制用 `FSDB2FST_BIN` 指向它。
+
 ## 许可与合规边界
 
 `fsdb2fst.cpp` 是自研代码，**MIT**，随 wave-mcp 分发。它链接的 FsdbReader
@@ -19,6 +49,9 @@ license**，与打开 Verdi GUI 不同。唯一的前提是环境里得有这两
 - 内附的 fstapi / lz4 / fastlz 来自 GTKWave（MIT），详见 [THIRD_PARTY.md](THIRD_PARTY.md)。
 
 ## 第一步：准备 FsdbReader 并编译
+
+多数情况不用手工做这步：设好 `VERDI_HOME` 后首次转换会自动完成编译（见上方速查）。
+下面适用于想显式构建、要把二进制拷到别处复用、或自动构建失败需要排查的场景。
 
 需要一台有 Verdi 安装的机器（**只需一次**，产出的二进制可拷到别处用）。
 
@@ -146,6 +179,9 @@ FsdbReader 在超大设计（千万信号量级的门级展开）上会在内部
 
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
+| 报 `fsdb2fst not found` 且提示 auto-build skipped | 没探测到 FsdbReader 运行库 | 在 MCP 配置的 `env` 里设 `VERDI_HOME`，或设 `FSDB2FST_FREADER` 指向拷来的 `share/FsdbReader` 目录 |
+| 提示 auto-build attempted but failed | 自动编译失败，报错已附原因 | 看 `~/.cache/wave-mcp/fsdb2fst/*/build-failed.log`；缺 `g++` 时装编译器，或手工构建后用 `FSDB2FST_BIN` 指定 |
+| 提示 auto-build unavailable | pip 安装包内不含转换器源码 | 用 git checkout，或在别处构建后用 `FSDB2FST_BIN` 指向二进制 |
 | 编译报 `ffrAPI.h: No such file` | `VERDI_HOME` 不对或缺 FsdbReader | `find / -name ffrAPI.h`，认准 `share/FsdbReader/` |
 | 运行报找不到 `libnffr.so` | 二进制旁没有 `.so`，RPATH 也没命中 | 把两个 `.so` 拷到二进制同目录 |
 | `cannot parse the FSDB time scale` | 刻度字符串不认识 | 把 `--info` 输出附在 issue 里反馈 |
