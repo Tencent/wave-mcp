@@ -107,7 +107,17 @@ if [[ -n "$VIEWER_SRC" ]]; then
     cp "$VIEWER_SRC" "$OUT/wheels/"
   elif [[ -d "$VIEWER_SRC" ]]; then
     echo "[*] packing viewer assets from dir: $VIEWER_SRC"
-    "$REPO_ROOT/deploy/build_viewer_assets.sh" "$VIEWER_SRC" >/dev/null
+    # Do NOT swallow this: a wellen version mismatch (or any other build
+    # failure) must surface here, otherwise the bundle step just stops with
+    # no clue (measured 2026-09-02). Capture, then replay on failure.
+    if ! VIEWER_LOG=$("$REPO_ROOT/deploy/build_viewer_assets.sh" "$VIEWER_SRC" 2>&1); then
+      echo "ERROR: failed to pack viewer assets from $VIEWER_SRC"
+      echo "$VIEWER_LOG" | sed 's/^/       /'
+      exit 1
+    fi
+    if [[ -n "${VERBOSE:-}" ]]; then
+      echo "$VIEWER_LOG" | sed 's/^/       /'
+    fi
     cp "$REPO_ROOT"/deploy/viewer-assets-build/dist/wave_mcp_viewer_assets-*.whl \
        "$OUT/wheels/"
   else

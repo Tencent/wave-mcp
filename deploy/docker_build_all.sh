@@ -36,7 +36,12 @@ PYTHON_SRC=""
 SKIP_LEGACY=0
 REBUILD=0
 PYSLANG_VER="$(grep -oP 'pyslang>=\K[0-9.]+' "$REPO_ROOT/pyproject.toml" || echo 11.0.0)"
-SURFER_REF="v0.7.0"
+# Must match the ref the bundled wasm snapshot was built from; build_surver_static.sh
+# defaults to the same value. Do NOT bump to a release tag: a tag that predates the
+# wasm snapshot yields a different wellen version, and build_viewer_assets.sh then
+# refuses the pair (measured 2026-09-02: v0.7.0 -> wellen 0.20.5 vs wasm 0.25.6,
+# which made the 2.17 bundle stage fail silently).
+SURFER_REF="86eedfd0cda70fc0a61ab200ebf37aabf97c5cde"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
