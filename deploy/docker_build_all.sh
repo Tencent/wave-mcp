@@ -36,12 +36,12 @@ PYTHON_SRC=""
 SKIP_LEGACY=0
 REBUILD=0
 PYSLANG_VER="$(grep -oP 'pyslang>=\K[0-9.]+' "$REPO_ROOT/pyproject.toml" || echo 11.0.0)"
-# Must match the ref the bundled wasm snapshot was built from; build_surver_static.sh
-# defaults to the same value. Do NOT bump to a release tag: a tag that predates the
-# wasm snapshot yields a different wellen version, and build_viewer_assets.sh then
-# refuses the pair (measured 2026-09-02: v0.7.0 -> wellen 0.20.5 vs wasm 0.25.6,
-# which made the 2.17 bundle stage fail silently).
-SURFER_REF="86eedfd0cda70fc0a61ab200ebf37aabf97c5cde"
+# SURFER_REF comes from deploy/viewer-pin.sh (single source of truth). This
+# script used to hardcode "v0.7.0", which silently overrode the pinned commit
+# and produced a wellen-mismatched surver (fixed 2026-09-02). Never reintroduce
+# a literal ref here.
+# shellcheck source=deploy/viewer-pin.sh
+source "$REPO_ROOT/deploy/viewer-pin.sh"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -58,13 +58,28 @@ mkdir -p "$CACHE" "$DIST"
 [[ "$REBUILD" == "1" ]] && rm -rf "$CACHE"/surver-static "$CACHE"/pyslang-whl
 
 # -- stage 1: musl static surver (needed by 2.17; also fallback for 2.28) --
+# The cache is keyed on the pinned ref: reusing a surver built from a different
+# commit is how a wellen mismatch sneaks in, and "the file exists" is not
+# evidence it matches the current pin. Rebuild whenever the fingerprint
+# disagrees, so bumping viewer-pin.sh needs no manual cache wipe.
 if [[ -n "$VIEWER_SRC" ]]; then
+  cached_ref=""
+  if [[ -f "$CACHE/surver-static/build-fingerprint.txt" ]]; then
+    cached_ref=$(sed -n 's/^surfer_ref=//p' \
+                 "$CACHE/surver-static/build-fingerprint.txt" | head -1)
+  fi
   if [[ ! -x "$CACHE/surver-static/surver" ]]; then
     echo "[stage1] building musl static surver ($SURFER_REF) ..."
     "$REPO_ROOT/deploy/build_surver_static.sh" "$SURFER_REF" \
         "$CACHE/surver-static"
+  elif [[ "$cached_ref" != "$SURFER_REF" ]]; then
+    echo "[stage1] cached surver was built from ref '${cached_ref:-<unknown>}'," \
+         "pin is $SURFER_REF -> rebuilding"
+    rm -rf "$CACHE/surver-static"
+    "$REPO_ROOT/deploy/build_surver_static.sh" "$SURFER_REF" \
+        "$CACHE/surver-static"
   else
-    echo "[stage1] cached musl surver OK"
+    echo "[stage1] cached musl surver OK (ref $SURFER_REF)"
   fi
 fi
 

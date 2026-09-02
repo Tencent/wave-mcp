@@ -42,6 +42,21 @@ manylinux2014 编 pyslang wheel、manylinux_2_28 / manylinux2014 分别组装两
 并跑 glibc 审计。surver 与 pyslang 产物有缓存（`deploy/.docker-build-cache/`），
 版本不变不重编；`--rebuild` 强制全量，`--skip-legacy` 只出 2.28 快速档。
 
+### viewer 资产的版本钉定
+
+surver（服务端）和 Surfer WASM（客户端）各自内嵌一个 wellen 版本，两者不一致时
+Surfer 会在连接阶段直接拒绝，用户看到的是波形一直加载不出来。所以这两个产物必须
+来自同一个上游 commit，钉定值集中在 `deploy/viewer-pin.sh` 一个文件里，其余脚本
+一律 source 它，不再各写一份。
+
+要升级 Surfer 版本，改 `deploy/viewer-pin.sh` 里的 `SURFER_REF` 和两个版本号，然后
+两侧都重建：`build_surver_static.sh` 重编 surver，wasm 侧取同一 commit 的官方 CI
+`pages_build` 产物，再用 `build_viewer_assets.sh` 重新打包。打包脚本会做两道校验，
+一是 surver 与 wasm 互校，二是与钉定值比对，任一不符直接失败；`docker_build_all.sh`
+的缓存也按 ref 判断，钉定值变了会自动重编，不需要手工清缓存。最后更新
+`deploy/viewer-assets/PROVENANCE.md`。**不要把 `SURFER_REF` 钉到 release tag**，
+tag 与 CI 发布的 wasm 快照并不同步。
+
 发布矩阵就是这两个包：glibc 向下兼容，2.17 包理论上覆盖所有机器；保留 2.28
 包是因为它全部使用官方 wheel。**用户侧完全不需要 docker**，拿到的仍是
 tarball + `install.sh`。

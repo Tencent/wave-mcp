@@ -12,14 +12,15 @@
 # Usage:
 #   deploy/build_surver_static.sh [surfer_git_ref] [out_dir]
 #
-# Default ref is PINNED to the wellen-0.25.6 main commit that our bundled
-# wasm (Surfer CI pages_build snapshot, 2026-08-29) was built from. Do not
-# bump it without rebuilding/re-pairing the wasm side and re-running the
-# wellen gate in build_viewer_assets.sh.
+# The pinned ref lives in deploy/viewer-pin.sh (single source of truth) so the
+# surver side and the wasm side cannot drift apart. Do not hardcode a ref here.
 set -euo pipefail
 
-REF=${1:-86eedfd0cda70fc0a61ab200ebf37aabf97c5cde}
 HERE=$(cd "$(dirname "$0")" && pwd)
+# shellcheck source=deploy/viewer-pin.sh
+source "$HERE/viewer-pin.sh"
+
+REF=${1:-$SURFER_REF}
 OUT=${2:-"$HERE/surver-static"}
 mkdir -p "$OUT"
 
@@ -96,7 +97,7 @@ def extract_license_file(name, ver, rel):
 
 print('# Crate licenses for surver')
 print()
-print('Generated from Cargo.lock of the Surfer build (ref %s).' % os.environ.get('SURFER_REF', 'v0.7.0'))
+print('Generated from Cargo.lock of the Surfer build (ref %s).' % os.environ.get('SURFER_REF', '<unknown>'))
 print('The surver binary is an unmodified build of the Surfer project (EUPL-1.2).')
 print('Each crate below is statically linked into the surver binary and carries its')
 print('own permissive license (mostly MIT OR Apache-2.0 dual). Full license texts are')

@@ -19,16 +19,16 @@
 set -euo pipefail
 
 ASSET_DIR=${1:?usage: build_viewer_assets.sh <asset_dir> [version]}
-VERSION=${2:-0.25.6}
 HERE=$(cd "$(dirname "$0")" && pwd)
 REPO_ROOT=$(cd "$HERE/.." && pwd)
 OUT="$HERE/viewer-assets-build"
 
-# Pinned Surfer provenance: the wellen-0.25.6 pair this repo has been
-# tested against (main commit 86eedfd0, wasm = unmodified official CI
-# pages_build snapshot). Bumping requires rebuilding BOTH sides and
-# passing the wellen gate below.
-SURFER_REF=${SURFER_REF:-86eedfd0cda70fc0a61ab200ebf37aabf97c5cde}
+# Pinned Surfer provenance comes from deploy/viewer-pin.sh (single source of
+# truth) so this script, build_surver_static.sh and docker_build_all.sh can
+# never disagree about which commit the pair was built from.
+# shellcheck source=deploy/viewer-pin.sh
+source "$HERE/viewer-pin.sh"
+VERSION=${2:-$VIEWER_ASSETS_VERSION}
 
 [[ -f "$ASSET_DIR/surver" ]] || { echo "missing $ASSET_DIR/surver"; exit 1; }
 [[ -f "$ASSET_DIR/wasm/index.html" ]] || { echo "missing $ASSET_DIR/wasm/index.html"; exit 1; }
@@ -66,7 +66,18 @@ if [[ "$WELLEN_BIN" != "$WELLEN_WASM" ]]; then
   echo "       waveform would never load. Rebuild both from the same ref."
   exit 1
 fi
-echo "wellen version match: $WELLEN_BIN (surver + wasm)"
+# Both sides agreeing is necessary but not sufficient: they can agree on a
+# version that no longer matches the pin, which means viewer-pin.sh is stale
+# and the recorded provenance would be wrong. Cross-check against the pin.
+if [[ "$WELLEN_BIN" != "$VIEWER_WELLEN_VERSION" ]]; then
+  echo "ERROR: assets are wellen $WELLEN_BIN but deploy/viewer-pin.sh expects"
+  echo "       $VIEWER_WELLEN_VERSION (SURFER_REF=$SURFER_REF)."
+  echo "       Either these assets came from a different commit, or the pin was"
+  echo "       bumped without updating VIEWER_WELLEN_VERSION. Fix the pin so the"
+  echo "       NOTICE/PROVENANCE provenance stays truthful, then rebuild."
+  exit 1
+fi
+echo "wellen version match: $WELLEN_BIN (surver + wasm, pin $SURFER_REF)"
 
 # surfer's own service worker must not be shipped: wave-mcp serves its own
 # sw.js (header restore + version handshake) from the shell directory.
@@ -102,8 +113,7 @@ fi
 
 # NOTICE: record the exact upstream provenance as EUPL art. 5 requires
 # (source availability; sources are unmodified, so pointing at the pinned
-# upstream ref is sufficient).
-SURFER_REF=${SURFER_REF:-86eedfd0cda70fc0a61ab200ebf37aabf97c5cde}
+# upstream ref is sufficient). SURFER_REF comes from deploy/viewer-pin.sh.
 cat > "$OUT/NOTICE" <<EOF
 wave-mcp-viewer-assets
 ======================
