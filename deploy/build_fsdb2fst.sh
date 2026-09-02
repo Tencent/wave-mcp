@@ -88,8 +88,12 @@ if [ -n "$READER_DIR" ] && [ -n "${FSDB2FST_LINK_RUNTIME:-}" ]; then
 fi
 
 # ---- build ------------------------------------------------------------------
-OUT="$SRC_DIR/fsdb2fst"
+# FSDB2FST_OUT lets a caller build straight to a per-user cache instead of into
+# the checkout. wave_mcp.convert uses this so that a shared or read-only
+# repository is never written to by the on-demand build.
+OUT="${FSDB2FST_OUT:-$SRC_DIR/fsdb2fst}"
 log "building $OUT ..."
+mkdir -p "$(dirname "$OUT")"
 g++ -O2 -std=c++17 -w \
     "${INC_ARGS[@]}" \
     -o "$OUT" \

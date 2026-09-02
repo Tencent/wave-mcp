@@ -354,18 +354,26 @@ def _autobuild_fsdb2fst() -> Optional[str]:
 
     env = dict(os.environ)
     env.setdefault("FSDB2FST_FREADER", reader_dir)
+    # Build straight into the per-user cache. Building into the checkout and
+    # copying afterwards would (a) dirty the git tree, (b) make every later
+    # resolve short-circuit on the repo-local level so the cache is never
+    # consulted, and (c) fail outright on a read-only or shared checkout,
+    # which is the case this cache exists for.
+    env["FSDB2FST_OUT"] = cached_bin
     try:
         os.makedirs(cache_dir, exist_ok=True)
         proc = subprocess.run(
             ["bash", _FSDB2FST_BUILD_SH],
             env=env, capture_output=True, text=True, timeout=600)
-        built = os.path.join(_FSDB2FST_SRC_DIR, "fsdb2fst")
-        if proc.returncode != 0 or not os.path.isfile(built):
+        if proc.returncode != 0 or not os.path.isfile(cached_bin):
             _record_autobuild_failure(cache_dir, proc.stderr or proc.stdout)
+            # A failed build can leave a partial file behind; drop it so the
+            # next run retries instead of trusting a broken binary.
+            try:
+                os.remove(cached_bin)
+            except OSError:
+                pass
             return None
-        # Keep the artifact in the cache so a read-only or shared checkout
-        # still yields a per-user binary.
-        shutil.copy2(built, cached_bin)
         os.chmod(cached_bin, 0o755)
         return cached_bin
     except (OSError, subprocess.SubprocessError) as exc:
