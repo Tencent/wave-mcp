@@ -1,90 +1,88 @@
-# Wave viewer screenshots
+# 波形查看器截图
 
-What the browser viewer actually looks like when an agent finishes an
-analysis and presents it. Every image below is a real capture of the four
-demo scenarios in [examples/viewer_demos](../examples/viewer_demos), not a
-mockup: signal groups, bus formatting, colors and the Analysis Log panel are
-all produced by `open_wave_view` / `update_wave_view`.
+agent 分析完一个问题、把结论呈现给你时，浏览器里实际长什么样。下面每张图都是
+[examples/viewer_demos](../examples/viewer_demos) 四个 demo 场景的真实抓图，不是效果图：
+信号分组、总线进制、颜色、分析说明弹窗，全部由 `open_wave_view` / `update_wave_view` 生成。
 
-The debug reasoning behind each scenario (which tool call found what) is
-written up in the [demo README](../examples/viewer_demos/README.md). This page
-is only about what you see.
+每个场景背后的调试推理（哪一次工具调用发现了什么）写在
+[demo README](../examples/viewer_demos/README.md) 里，本页只讲你看到的画面。
 
-## X propagation
+## X 态传播
 
-`data_out` is red and reads `xx` on every packet, while `done` keeps pulsing:
-the FSM is healthy but the datapath is poisoned. Grouping puts the symptom on
-top and the cause below, where `shreg` is shown in hex and never leaves X on
-its high byte. The Analysis Log in the corner carries the agent's conclusion
-with a confidence tag.
+`data_out` 标红、每个包都读出 `xx`，而 `done` 还在正常跳动：状态机是好的，数据通路被污染了。
+分组把症状放上面、根因放下面，`shreg` 以 hex 显示，高字节始终没脱离 X。
+右下角的分析说明弹窗里是 agent 的结论，带置信度标注。
 
-![X propagation in the wave viewer](images/viewer/xprop.png)
+![波形查看器中的 X 态传播](images/viewer/xprop.png)
 
-## FSM deadlock
+## 状态机死锁
 
-`state` flatlines at `1` (`WAIT_ACK`) while `ack_wanted` stays high and
-`rd_count` freezes at `03`. The `fsm` and `testbench` groups separate the
-stuck handshake from what the testbench expected.
+`state` 平在 `1`（`WAIT_ACK`）不动，`ack_wanted` 一直是高，`rd_count` 冻在 `03`。
+`fsm` 与 `testbench` 两个分组把卡住的握手和 testbench 的预期分开摆。
 
-![FSM deadlock in the wave viewer](images/viewer/fsm_stuck.png)
+![波形查看器中的状态机死锁](images/viewer/fsm_stuck.png)
 
-## CDC pulse loss
+## 跨时钟域丢脉冲
 
-Six pulses go out on `pulse_fast` in the fast domain, only two survive into
-`pulse_seen`, and `pulse_count` stops at `02`. Grouping by clock domain makes
-the loss obvious: the source pulse is narrower than one `clk_slow` period, so
-the slow domain simply never samples it.
+快时钟域的 `pulse_fast` 发出六个脉冲，`pulse_seen` 只收到两个，`pulse_count` 停在 `02`。
+按时钟域分组后丢失一目了然：源脉冲比一个 `clk_slow` 周期还窄，慢时钟域根本没机会采到它。
 
-![CDC pulse loss in the wave viewer](images/viewer/cdc.png)
+![波形查看器中的跨时钟域丢脉冲](images/viewer/cdc.png)
 
-## Pass/fail divergence
+## pass/fail 首分歧
 
-Two waveforms, one pane each, time-aligned. Same RTL and same stimulus, one
-CRC tap typo. `crc` tracks identically until it splits (`3` / `a` on top,
-`f` / `b` below) and `crc_err` rises only in the failing run. This is the view
-`diff_waveforms` sets up for first-divergence localization.
+两份波形上下各占一个 pane，时间轴对齐。RTL 相同、激励相同，只差一处 CRC 抽头写错。
+`crc` 一路完全一致，直到分道扬镳（上面 `3` / `a`，下面 `f` / `b`），而 `crc_err` 只在
+失败那次拉高。这正是 `diff_waveforms` 为首分歧定位铺好的视图。
 
-![Pass/fail divergence in the wave viewer](images/viewer/crc_diff.png)
+![波形查看器中的 pass/fail 首分歧](images/viewer/crc_diff.png)
 
-## Reproduce these yourself
+## 关于界面语言
 
-Everything here is reproducible from a clean clone. Build the demo waveforms
-once, then either capture the images again or open any scenario interactively.
+分析说明弹窗的内容**由 agent 自己决定用什么语言**，wave-mcp 不做任何限制，上面几张图是
+中文的效果。
 
-Prerequisites: `iverilog` and `vcd2fst` on PATH, plus the viewer extra
-(`pip install -e ".[viewer]"`, or set `WAVE_MCP_VIEWER_ASSETS`).
+信号分组名是个例外，它画在 Surfer 的 WASM 画布里，那份字体图集不含 CJK 字形，所以写中文
+会显示成方块（分组本身照常生效，只是标题不可读），建议用简短的 ASCII 词。名字里的空格由
+服务端自动转成下划线：sucl 解析器不接受带空格的参数，原样发过去整个分组标题会被静默丢弃。
+
+## 自己复现一遍
+
+本页内容都能从一份干净的 clone 复现出来。先构建 demo 波形，然后要么重新抓图，
+要么直接交互式打开任一场景。
+
+前置依赖：PATH 上有 `iverilog` 与 `vcd2fst`，以及查看器可选资产包
+（`pip install -e ".[viewer]"`，或设 `WAVE_MCP_VIEWER_ASSETS`）。
 
 ```bash
 cd examples/viewer_demos
 ./make_all.sh                 # iverilog -> vcd2fst -> build_session
 ```
 
-To regenerate every screenshot on this page (needs `playwright` and its
-chromium: `pip install playwright && playwright install chromium`):
+重新生成本页全部截图（需要 `playwright` 及其 chromium：
+`pip install playwright && playwright install chromium`）：
 
 ```bash
 python3 examples/viewer_demos/capture_screenshots.py
-python3 examples/viewer_demos/capture_screenshots.py cdc   # just one
+python3 examples/viewer_demos/capture_screenshots.py cdc   # 只抓一个
 ```
 
-Images are written to `docs/images/viewer/`. The script runs chromium headless,
-waits for the Surfer WASM canvas to paint, and skips cleanly (exit 0) when
-playwright or the viewer assets are missing.
+图片写入 `docs/images/viewer/`。脚本以 headless chromium 运行，会等到 Surfer 的 WASM
+画布真正绘制完成才截图；缺 playwright 或缺查看器资产时干净跳过（退出码 0）。
 
-To poke at a scenario by hand instead of looking at a static image, run a demo
-with `--hold` and open the URL it prints:
+想动手摆弄某个场景而不是看静态图，带 `--hold` 跑 demo，然后打开它打印的 URL：
 
 ```bash
 python3 examples/viewer_demos/demo3_cdc.py --hold
 ```
 
-Or open the prebuilt waveforms directly, without the scripted annotations:
+也可以直接打开预置波形，不带脚本里那些分析说明：
 
 ```bash
 wave-view examples/viewer_demos/waves/cdc.fst \
     --signals cdc_tb.dut.pulse_fast cdc_tb.dut.pulse_seen cdc_tb.dut.clk_slow
 ```
 
-On a remote machine, forward the port the viewer prints
-(`ssh -L 8080:127.0.0.1:<port> <host>`) and open the URL locally. See the
-[wave viewer guide](WAVE_VIEWER.md) for the full CLI and tool reference.
+在远程机器上跑时，把查看器打印的端口转发出来
+（`ssh -L 8080:127.0.0.1:<port> <host>`）再在本地打开。完整的 CLI 与工具参考见
+[波形查看器指南](WAVE_VIEWER.md)。

@@ -119,6 +119,7 @@ Returns:
 Field notes:
 
 - Each `signals` entry is `{path, color?, group?, format?, source?}`. In compare views, `source: "a"/"b"` assigns a signal to one waveform; by default it is added to both.
+- Prefer a short ASCII word for `group`. The heading is drawn in Surfer's WASM canvas, whose font carries no CJK glyphs, so a non-ASCII name renders as boxes (the grouping itself still works). Spaces are folded to underscores automatically: the sucl parser rejects a parameter containing whitespace and would silently drop the whole heading. Put prose in `annotation`, which accepts any language.
 - The `diff` parameter takes a `diff_waveforms` result reference `{source_a, source_b, first_divergence}` and automatically places a red marker at the first divergence, no manual conversion needed.
 - `labels` names each waveform, same as the CLI `--labels`.
 - If assets are missing or surver fails to start, the tool returns `{"available": false, "hint": …}` instead of raising.

@@ -11,6 +11,9 @@ Probed syntax on the pinned Surfer build (see dev-docs):
     per upstream command_parser.rs at the pinned commit); ``marker_add``
     is a GUI-only command and fails in batch mode;
   * viewport: ``zoom_to <from> <to>``; ``zoom_to_range`` is not sucl.
+  * dividers: ``divider_add <name>`` takes a SINGLE-WORD name. Quoting does
+    not help: ``divider_add "fast domain"`` is dropped silently and the group
+    heading never appears, so names are whitespace-collapsed before sending.
 """
 from __future__ import annotations
 
@@ -40,6 +43,22 @@ def _raw(obj: Dict[str, Any], timescale_exp: int = 0) -> str:
         # unknown unit or malformed value: pass the number through rather
         # than dropping the command entirely
         return str(val)
+
+
+def _divider_name(group: str) -> str:
+    """Make a group name safe for Surfer's sucl parser.
+
+    Probed on the pinned build: quoting does NOT protect a multi-word
+    parameter. ``divider_add "fast domain"`` is dropped silently, so the whole
+    group heading disappears while its signals still get added. Collapsing
+    whitespace into underscores keeps the heading visible and readable.
+
+    Non-ASCII names are left as-is: they are accepted and the divider is
+    created correctly, it just renders as tofu boxes because the WASM font
+    atlas carries no CJK glyphs. Losing the grouping would be worse than
+    showing an unreadable label.
+    """
+    return "_".join(str(group).split())
 
 
 def desired_to_sucl(desired: Dict[str, Any],
@@ -75,9 +94,9 @@ def desired_to_sucl(desired: Dict[str, Any],
     for sig in desired.get("signals", []):
         group = sig.get("group")
         if group and group != current_group:
-            # quote: multi-word group names would otherwise parse as
-            # several parameters (ExtraParameters("domain"))
-            cmds.append(f'divider_add "{group}"')
+            # Whitespace is collapsed: a quoted multi-word name is dropped by
+            # the sucl parser, taking the whole heading with it (probed).
+            cmds.append(f'divider_add "{_divider_name(group)}"')
             current_group = group
         cmds.append(f"variable_add {sig['path']}")
         if sig.get("color"):

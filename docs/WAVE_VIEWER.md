@@ -119,6 +119,7 @@ open_wave_view({
 字段要点：
 
 - `signals` 每项 `{path, color?, group?, format?, source?}`；对比视图里用 `source: "a"/"b"` 指定信号属于哪份波形，缺省两边都加。
+- `group` 建议用简短的 ASCII 词。分组标题画在 Surfer 的 WASM 画布里，字体不含 CJK 字形，写中文会显示成方块（分组本身照常生效）。名字里的空格会自动折成下划线，因为 sucl 解析器不接受带空格的参数，原样发过去整条分组标题会被静默丢弃。想写中文说明放到 `annotation` 里，那里不限语言。
 - `diff` 参数直接接 `diff_waveforms` 的结果引用 `{source_a, source_b, first_divergence}`，自动在首分歧时刻打红色 marker，不用手动换算。
 - `labels` 给每份波形起显示名，与 CLI 的 `--labels` 一致。
 - 资产缺失或 surver 启动失败时返回 `{"available": false, "hint": …}`，不抛错。

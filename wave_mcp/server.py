@@ -830,13 +830,19 @@ def open_wave_view(fst_paths: List[str],
     Args:
         fst_paths: one FST (normal view) or two (diff view, e.g. [pass, fail]).
         signals: initial signals, each {path, color?, group?, format?, source?}.
+            Prefer a short ASCII word for ``group``: the heading is drawn in the
+            waveform canvas, whose font has no CJK glyphs, so non-ASCII names
+            show as boxes (the grouping itself still works). Spaces are turned
+            into underscores automatically. Put prose in ``annotation``, which
+            renders any language correctly.
         cursor: {time, unit} to pin the cursor (e.g. the failure time).
         viewport: {from, to, unit} visible time window.
         markers: [{time, unit, label?, color?}] annotations on the timeline.
         diff: diff_waveforms result reference {source_a, source_b,
             first_divergence} — auto-adds a red marker at the divergence.
         annotation: {markdown, confidence?, evidence?} analysis note shown in
-            the log popup next to the waveform.
+            the log popup next to the waveform. Any language: written in your
+            own words, rendered as-is.
         labels: display labels per waveform (e.g. ["pass", "fail"]).
     """
     try:
@@ -859,7 +865,8 @@ def update_wave_view(view_id: str,
     """Update an open wave view in place (same URL, no reload for the user).
 
     Omitted args keep their current value; lists replace entirely except
-    annotations, which append to the analysis log popup.
+    annotations, which append to the analysis log popup. Same ``group`` and
+    ``annotation`` conventions as open_wave_view.
     """
     try:
         return _viewer().update_view(

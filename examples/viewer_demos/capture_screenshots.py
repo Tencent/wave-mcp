@@ -29,11 +29,19 @@ WAVES = HERE / "waves"
 
 # Per-scenario view spec: the signals, cursor, marker and annotation that make
 # the screenshot tell the story of that bug.
+#
+# Language note: annotation text is rendered by our own HTML log panel, which
+# uses the system font stack and handles any language. Group names are drawn
+# inside Surfer's WASM canvas, whose font atlas has no CJK glyphs, so a Chinese
+# group renders as boxes (the grouping still works). Keep groups ASCII here so
+# the published screenshots stay readable. Spaces are safe: translate.py folds
+# them to underscores, since sucl silently drops a divider whose name contains
+# whitespace.
 SCENARIOS = {
     "xprop": {
         "session": "session_xprop",
         "fst": "xprop.fst",
-        "title": "X propagation",
+        "title": "X 态传播",
         "signals": [
             {"path": "xprop_tb.dut.data_out", "color": "red", "group": "symptom"},
             {"path": "xprop_tb.dut.done", "group": "symptom"},
@@ -41,13 +49,13 @@ SCENARIOS = {
             {"path": "xprop_tb.dut.fsm_state", "group": "cause"},
             {"path": "xprop_tb.dut.rst_n", "group": "cause"},
         ],
-        "annotation": "## X propagation\n`data_out` carries X: `shreg` is never fully "
-                      "initialised before the FLUSH state drives the output.",
+        "annotation": "## X 态传播\n`data_out` 输出 X：进入 FLUSH 状态驱动输出之前，"
+                      "`shreg` 从未被完整初始化。",
     },
     "fsm_stuck": {
         "session": "session_fsm_stuck",
         "fst": "fsm_stuck.fst",
-        "title": "FSM deadlock",
+        "title": "状态机死锁",
         "signals": [
             {"path": "fsm_stuck_tb.dut.state", "color": "red", "group": "fsm"},
             {"path": "fsm_stuck_tb.dut.ack", "group": "fsm"},
@@ -55,13 +63,13 @@ SCENARIOS = {
             {"path": "fsm_stuck_tb.ack_wanted", "group": "testbench"},
             {"path": "fsm_stuck_tb.dut.rd_count", "group": "testbench"},
         ],
-        "annotation": "## FSM deadlock\nThe read FSM parks in `WAIT_ACK`: "
-                      "`ack` never returns, so `rd_count` stops advancing.",
+        "annotation": "## 状态机死锁\n读状态机停在 `WAIT_ACK`：`ack` 始终没有回来，"
+                      "于是 `rd_count` 不再往前走。",
     },
     "cdc": {
         "session": "session_cdc",
         "fst": "cdc.fst",
-        "title": "CDC pulse loss",
+        "title": "跨时钟域丢脉冲",
         "signals": [
             {"path": "cdc_tb.dut.pulse_fast", "group": "fast domain"},
             {"path": "cdc_tb.dut.clk_fast", "group": "fast domain"},
@@ -69,14 +77,14 @@ SCENARIOS = {
             {"path": "cdc_tb.dut.clk_slow", "group": "slow domain"},
             {"path": "cdc_tb.dut.pulse_count", "group": "slow domain"},
         ],
-        "annotation": "## CDC pulse loss\n`pulse_fast` is narrower than one `clk_slow` "
-                      "period, so the slow domain never samples it and `pulse_count` stalls.",
+        "annotation": "## 跨时钟域丢脉冲\n`pulse_fast` 比一个 `clk_slow` 周期还窄，"
+                      "慢时钟域根本采不到它，`pulse_count` 因此停住。",
     },
     "crc_diff": {
         "session": "session_crc_diff",
         "fst": "crc_pass.fst",
         "fst_b": "crc_fail.fst",
-        "title": "Pass/fail divergence",
+        "title": "pass/fail 首分歧",
         "signals": [
             {"path": "crc_diff_tb.dut.crc", "color": "red", "group": "crc",
              "format": "hex"},
@@ -84,8 +92,8 @@ SCENARIOS = {
             {"path": "crc_diff_tb.dut.data", "group": "stimulus"},
             {"path": "crc_diff_tb.dut.valid", "group": "stimulus"},
         ],
-        "annotation": "## First divergence\nSame stimulus, one CRC tap typo. "
-                      "The overlay shows where the pass and fail runs first differ.",
+        "annotation": "## 首个分歧点\n激励完全相同，只差一处 CRC 抽头写错。"
+                      "对比视图直接指出 pass 与 fail 两次运行最早从哪里开始不一样。",
     },
 }
 

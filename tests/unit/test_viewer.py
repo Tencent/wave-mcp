@@ -158,6 +158,25 @@ def test_translate() -> None:
     check("groups emit dividers once each",
           s.count('divider_add "G1"') == 1
           and s.count('divider_add "G2"') == 1, s)
+    # A divider name containing whitespace is silently dropped by the sucl
+    # parser (probed), which loses the whole heading. Names must be folded.
+    ws = desired_to_sucl({
+        "waveform": {"sources": [{"id": "a", "path": "/tmp/a.fst"}]},
+        "signals": [{"path": "t.a", "group": "fast domain"},
+                    {"path": "t.b", "group": "slow  domain  x"}],
+    }, -12)
+    check("multi-word group folded to underscores",
+          'divider_add "fast_domain"' in ws
+          and 'divider_add "slow_domain_x"' in ws
+          and '"fast domain"' not in ws, ws)
+    # Non-ASCII is passed through: the divider is created correctly, it just
+    # renders as boxes. Dropping it would lose the grouping entirely.
+    cjk = desired_to_sucl({
+        "waveform": {"sources": [{"id": "a", "path": "/tmp/a.fst"}]},
+        "signals": [{"path": "t.a", "group": "快时钟域"}],
+    }, -12)
+    check("non-ascii group preserved",
+          'divider_add "快时钟域"' in cjk, cjk)
     check("color follows its variable",
           "variable_add t.g1_s1;item_set_color red" in s, s)
     check("format mapped", "item_set_format Hexadecimal" in s, s)
