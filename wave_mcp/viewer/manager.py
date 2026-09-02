@@ -92,8 +92,8 @@ class ViewManager:
             return {"available": False, "feature": "wave viewer",
                     "error": str(exc),
                     "hint": "surver failed to start; check the waveform "
-                            "paths and that the surver binary runs on this "
-                            "host (glibc>=2.34, or use the musl build)"}
+                            "paths and that the surver binary is executable "
+                            "(chmod +x) and runs on this host"}
 
         state = ViewState()
         sources = []

@@ -55,8 +55,8 @@ class SurverInstance:
             if self.proc.poll() is not None:
                 raise SurverError(
                     f"surver exited early (code {self.proc.returncode}); "
-                    "check glibc>=2.34 or use the musl build from the asset "
-                    "package")
+                    "check that the binary is executable (chmod +x) and that "
+                    "the waveform files are readable and intact")
             try:
                 with urllib.request.urlopen(url, timeout=2) as r:
                     if r.status == 200:

@@ -48,7 +48,7 @@ pip install wave-mcp[viewer]
 
 一个合法的资产目录包含可执行的 `surver` 和 `wasm/index.html`。隔离网环境用 `deploy/build_offline_bundle.sh --viewer <资产目录>` 打进离线包即可，细节见 [DEPLOY_AIRGAP.md](DEPLOY_AIRGAP.md)。
 
-**系统要求**：官方 surver 二进制需要 glibc >= 2.34；老机器（CentOS 7 等）请使用 Docker 流水线产出的 musl 静态版 surver，任何 Linux 都能跑。浏览器侧只要支持 WASM 的现代浏览器即可，机房服务器本身不需要图形环境。
+**系统要求**：资产包内的 surver 是 musl 静态构建，不依赖 glibc，任何 x86-64 Linux（含 CentOS 7 这类老机器）都能直接跑。glibc 2.17 档离线 bundle 的存在原因是 `pyslang`，与 surver 无关。浏览器侧只要支持 WASM 的现代浏览器即可，机房服务器本身不需要图形环境。
 
 ## 3. CLI 用法（wave-view）
 
@@ -324,7 +324,7 @@ wave-mcp 核心（含 viewer 的 Python 编排层与前端 shell）是 MIT。Sur
 按提示 `pip install wave-mcp[viewer]`，或设置 `WAVE_MCP_VIEWER_ASSETS` 指向资产目录，或把资产放到 `~/.cache/wave-mcp/viewer/`。确认目录里有可执行的 `surver` 和 `wasm/index.html`。
 
 **surver exited early / did not become ready**
-先手动跑一下 `<资产目录>/surver --help` 看能否执行。最常见原因是 glibc 太老（官方 surver 要 >= 2.34），换 musl 静态版即可；其次检查 FST 路径是否存在、文件是否完整。
+先手动跑一下 `<资产目录>/surver --help` 看能否执行。资产包内的 surver 是静态构建、不依赖 glibc，所以执行失败通常不是库版本问题：优先检查文件是否丢了可执行位（`chmod +x`），以及是否被自建脚本换成了动态链接的版本（`file surver` 应显示 static-pie）。其次检查 FST 路径是否存在、文件是否完整。
 
 **URL 打不开（远程场景）**
 服务只监听 127.0.0.1，属预期行为。IDE 终端一般自动转发；不行就用返回的 `ssh_hint` 手动建立端口转发，再从本机浏览器访问。

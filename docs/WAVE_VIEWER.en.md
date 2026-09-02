@@ -48,7 +48,7 @@ Assets are discovered in this order (first hit wins):
 
 A valid asset directory contains an executable `surver` and `wasm/index.html`. Air-gapped environments simply build the offline bundle with `deploy/build_offline_bundle.sh --viewer <asset_dir>`; see [DEPLOY_AIRGAP.md](DEPLOY_AIRGAP.md).
 
-**System requirements**: the official surver binary needs glibc >= 2.34. On older hosts (CentOS 7 etc.) use the musl static surver produced by the Docker pipeline, which runs on any Linux. On the browser side, any modern WASM-capable browser works; the server machine itself needs no graphical environment.
+**System requirements**: the surver binary in the assets package is a musl static build with no glibc dependency, so it runs on any x86-64 Linux including legacy hosts such as CentOS 7. The glibc 2.17 offline bundle exists because of `pyslang`, not surver. On the browser side, any modern WASM-capable browser works; the server machine itself needs no graphical environment.
 
 ## 3. CLI usage (wave-view)
 
@@ -312,7 +312,7 @@ The wave-mcp core (including the viewer's Python orchestration layer and the fro
 Follow the hint: `pip install wave-mcp[viewer]`, or point `WAVE_MCP_VIEWER_ASSETS` at an asset directory, or place assets under `~/.cache/wave-mcp/viewer/`. Verify the directory contains an executable `surver` and `wasm/index.html`.
 
 **surver exited early / did not become ready**
-First run `<asset_dir>/surver --help` manually to see whether it executes at all. The most common cause is an old glibc (official surver needs >= 2.34); switch to the musl static build. Otherwise check that the FST path exists and the file is intact.
+First run `<asset_dir>/surver --help` manually to see whether it executes at all. The bundled surver is statically linked with no glibc dependency, so a failure to execute is usually not a library version problem: check first that the executable bit survived the copy (`chmod +x`), and that it was not replaced by a dynamically linked build of your own (`file surver` should report static-pie). Otherwise check that the FST path exists and the file is intact.
 
 **URL won't open (remote scenarios)**
 The service listens on 127.0.0.1 only, which is intended. IDE terminals usually auto-forward; if not, set up forwarding manually with the returned `ssh_hint` and open the URL from your local browser.

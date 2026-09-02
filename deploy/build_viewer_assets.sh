@@ -150,12 +150,15 @@ build-backend = "setuptools.build_meta"
 name = "wave-mcp-viewer-assets"
 version = "$VERSION"
 description = "Waveform viewer assets (Surfer WASM + surver) for wave-mcp"
+readme = "README.md"
 license = { text = "EUPL-1.2" }
 requires-python = ">=3.10"
 
 [tool.setuptools]
 packages = ["wave_mcp_viewer_assets"]
 license-files = ["LICENSE-EUPL-1.2.txt"]
+# Contains a platform binary, so this is not a pure-Python distribution.
+zip-safe = false
 
 [tool.setuptools.package-data]
 wave_mcp_viewer_assets = [
@@ -166,6 +169,14 @@ wave_mcp_viewer_assets = [
     "surver-crate-licenses.txt",
     "crates-license-files/**",
 ]
+
+# The package ships a Linux x86-64 ELF (surver), so it must not be published
+# as py3-none-any: pip would happily install it on macOS/Windows/arm64 and the
+# viewer would fail at runtime instead of degrading with a clear hint.
+# surver is musl static-pie with no glibc dependency, so the lowest manylinux
+# tag is honest here and keeps CentOS 7 era hosts eligible.
+[tool.distutils.bdist_wheel]
+plat-name = "manylinux_2_17_x86_64"
 EOF
 
 cat > "$OUT/README.md" <<'EOF'
