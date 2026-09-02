@@ -28,15 +28,22 @@ license**，与打开 Verdi GUI 不同。唯一的前提是环境里得有这两
 prepare_session(wave_path="dump.fsdb", filelist_path="your_filelist.f")
 ```
 
-首次转换时 wave-mcp 会自动编一次 `fsdb2fst`（需要 `g++`，约十几秒），产物缓存在
-`~/.cache/wave-mcp/fsdb2fst/`，之后直接复用；换 Verdi 版本会自动重编。转换结果本身
-也有缓存，同一份波形反复建 session 只转一次。
+首次转换时 wave-mcp 会自动编一次 `fsdb2fst`（需要 `g++`，约十几秒），之后直接复用。
 
 超大设计（选中信号超 500 万）需要切片，传 `fsdb_scopes=["u_core"]` 收窄范围。
-其余内容按需查阅：想手工构建或用命令行看[第一步](#第一步准备-fsdbreader-并编译)与
-[命令行用法](#命令行用法)，遇到问题看[排错速查](#排错速查)。
+遇到问题看[排错速查](#排错速查)；想手工构建或用命令行看[手工构建](#手工构建备选)与
+[命令行用法](#命令行用法)。
 
-关掉自动构建用 `WAVE_MCP_FSDB2FST_AUTOBUILD=0`；已有二进制用 `FSDB2FST_BIN` 指向它。
+### 两处缓存，别混淆
+
+这条路径上有两个独立的缓存，排错时先分清是哪一个：
+
+| 缓存的东西 | 位置 | 失效条件 |
+| --- | --- | --- |
+| **转换器二进制**（`fsdb2fst`） | `~/.cache/wave-mcp/fsdb2fst/<key>/` | 换 Verdi 路径或改转换器源码则重编 |
+| **转换产物**（`.fst` + `.fst.hier`） | 默认落在 `.fsdb` 旁，目录不可写时回退 session 目录 | 源波形 mtime/size 变化，或切片参数变化则重转 |
+
+前者让你只编一次转换器，后者让同一份波形反复建 session 只转一次。
 
 ## 许可与合规边界
 
@@ -45,22 +52,33 @@ prepare_session(wave_path="dump.fsdb", filelist_path="your_filelist.f")
 
 - `libnffr.so` / `libnsys.so` 不随仓库和 PyPI 分发，只在运行时探测本机的
   `VERDI_HOME`。
-- 编译产物 `fsdb2fst` 二进制是本机构建产物，不入库、不打进离线包。
+- 编译产物 `fsdb2fst` 二进制是本机构建产物，不入库、不打进离线包：自动构建落在
+  用户缓存目录，手工构建默认落在 `third_party/fsdb2fst/`（已被 `.gitignore` 排除）。
 - 内附的 fstapi / lz4 / fastlz 来自 GTKWave（MIT），详见 [THIRD_PARTY.md](THIRD_PARTY.md)。
 
-## 第一步：准备 FsdbReader 并编译
+## 转换器怎么被找到
 
-多数情况不用手工做这步：设好 `VERDI_HOME` 后首次转换会自动完成编译（见上方速查）。
-下面适用于想显式构建、要把二进制拷到别处复用、或自动构建失败需要排查的场景。
+`fsdb2fst` 按五级顺序解析，第一个命中的生效。排错时对照这个顺序就知道当前用的是哪一份：
 
-需要一台有 Verdi 安装的机器（**只需一次**，产出的二进制可拷到别处用）。
+| 顺序 | 来源 | 说明 |
+| --- | --- | --- |
+| 1 | `$FSDB2FST_BIN` | 显式指定一个现成二进制。**指向的路径不可用时直接报错，不会静默回退** |
+| 2 | repo-local `third_party/fsdb2fst/fsdb2fst` | 手工构建的默认落点 |
+| 3 | 用户缓存 `~/.cache/wave-mcp/fsdb2fst/<key>/fsdb2fst` | 自动构建的落点 |
+| 4 | `PATH` | 系统里已装的 `fsdb2fst` |
+| 5 | **按需构建** | 以上都没有且能探测到 FsdbReader 时，自动编一次到用户缓存 |
 
-```bash
-export VERDI_HOME=/path/to/verdi     # 必须含 share/FsdbReader/linux64
-bash deploy/build_fsdb2fst.sh        # 产出 third_party/fsdb2fst/fsdb2fst
-```
+自动构建需要三个条件同时满足：探测到 FsdbReader 运行库、有 `g++`、仓库里有转换器源码
+（pip 安装的包不含源码，此时这一级自动跳过）。任一不满足时，报错会指名**具体缺哪一样**，
+不会只说"找不到"。
 
-FsdbReader 目录按四级顺序探测，第一个命中的生效：
+关掉自动构建用 `WAVE_MCP_FSDB2FST_AUTOBUILD=0`。
+
+**自动构建不写仓库**：产物直接编到用户缓存，`third_party/` 全程不被写入。这样共享
+checkout 或只读 checkout 都成立，也不会让 git 工作区出现构建产物。实现上靠构建脚本的
+`FSDB2FST_OUT` 环境变量指定输出路径。
+
+FsdbReader 运行库本身也按四级顺序探测：
 
 1. repo-local `third_party/verdi_runtime/linux64/libnffr.so`
 2. `$FSDB2FST_FREADER`（显式指定一份拷贝出来的 `share/FsdbReader` 目录）
@@ -69,29 +87,33 @@ FsdbReader 目录按四级顺序探测，第一个命中的生效：
 
 注意路径是 `share/FsdbReader/`，**不是** `share/PLI/`（后者放的是 VPI dumper 库）。
 
+## 手工构建（备选）
+
+多数情况不需要这节：设好 `VERDI_HOME` 后首次转换会自动完成编译。下面适用于想显式构建、
+要把二进制拷到别处复用、或自动构建失败需要排查的场景。
+
+```bash
+export VERDI_HOME=/path/to/verdi     # 必须含 share/FsdbReader/linux64
+bash deploy/build_fsdb2fst.sh        # 默认产出 third_party/fsdb2fst/fsdb2fst
+
+# 想换个落点（自动构建走的就是这条路）
+FSDB2FST_OUT=/somewhere/fsdb2fst bash deploy/build_fsdb2fst.sh
+```
+
 **本机没有 Verdi 也能编译**：把整个 `share/FsdbReader/` 目录（头文件 + 两个
 `.so`）拷过来，`export FSDB2FST_FREADER=<该目录>` 即可。
 
 运行期不依赖 `LD_LIBRARY_PATH`：构建脚本把 RPATH（含 `$ORIGIN`）烘进二进制，
 把两个 `.so` 放在二进制旁边就能跑。
 
-## 第二步：交给 wave-mcp
+## 切片与规模预检
 
-`prepare_session` 直接吃 `.fsdb`，自动调 `fsdb2fst` 转换：
+大设计传切片参数收窄范围，切片参数参与产物缓存键，换了范围不会误用旧产物：
 
 ```
-prepare_session(wave_path="dump.fsdb", filelist_path="your_filelist.f")
+prepare_session(wave_path="dump.fsdb", fsdb_scopes=["u_core"], filelist_path="rtl.f")
+prepare_session(wave_path="dump.fsdb", fsdb_signals_file="siglist.txt", filelist_path="rtl.f")
 ```
-
-三个配套行为：
-
-- **转换有缓存**：产物默认落在 `.fsdb` 旁边（波形目录不可写时回退到 session
-  目录），缓存键含源文件的 mtime/size 与切片参数。同一份波形反复建 session
-  只转一次；源波形重新 dump 过则自动重转。
-- **可切片**：大设计传 `fsdb_scopes=["u_core"]` 或
-  `fsdb_signals_file="siglist.txt"`，切片参数参与缓存键，换了范围不会误用旧产物。
-- **转换如实记录**：返回的 `steps` 里有 `convert_fsdb_to_fst`，含耗时、
-  是否命中缓存、以及信号统计（real / strength-skipped / unsupported-type）。
 
 想先摸清文件规模再决定怎么转，用 `convert_fsdb_to_fst` 工具：
 
@@ -99,6 +121,9 @@ prepare_session(wave_path="dump.fsdb", filelist_path="your_filelist.f")
 convert_fsdb_to_fst(fsdb_path="dump.fsdb", info_only=True)   # 只看刻度与信号统计
 convert_fsdb_to_fst(fsdb_path="dump.fsdb", scopes=["u_core"]) # 手动转指定子树
 ```
+
+转换如实记录：`prepare_session` 返回的 `steps` 里有 `convert_fsdb_to_fst`，
+含耗时、是否命中缓存、以及信号统计（real / strength-skipped / unsupported-type）。
 
 ## 命令行用法
 

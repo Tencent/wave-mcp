@@ -14,12 +14,14 @@ VPI 插件 [fstdumper](https://github.com/semify-eda/fstdumper) 让 xrun 在仿�
 ```bash
 # ① 编插件（一次就够，产物可拷给全组用）
 bash deploy/build_fstdumper.sh          # 自动 clone 上游 + 打 Xcelium 补丁 + make
+#   脚本末尾会打印产物的绝对路径，下一步直接用它
 
 # ② 在原有 xrun 命令上追加这几项，其余选项一律不动
+#   注意用绝对路径：xrun 通常在你的项目目录里跑，不在 wave-mcp 仓库里
 xrun -64bit +access+r \
-  -loadvpi third_party/fstdumper/build/fstdumper.so:vlog_startup_routines_bootstrap \
+  -loadvpi /abs/path/to/fstdumper.so:vlog_startup_routines_bootstrap \
   -f your_filelist.f \
-  examples/xcelium_fst/fst_dump_cfg.sv \
+  /abs/path/to/wave-mcp/examples/xcelium_fst/fst_dump_cfg.sv \
   -top your_tb -top fst_dump \
   -define 'FST_DUMP_TOP=your_tb' -define 'FST_DUMP_FILE="waves.fst"'
 ```

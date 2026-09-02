@@ -62,32 +62,23 @@ VCD 的实际上限：超过 10 GB 后 `vcd2fst` 可能长时间转换直至超�
 ### ③ FSDB 转换（fsdb2fst）
 
 存量 FSDB 走自带的 `fsdb2fst` 单程转换器，**无 VCD 中间文件**，产物与原生 FST
-完全一致、查询工具零改动：
+完全一致、查询工具零改动。
 
-```bash
-# 一次性准备（在有 Verdi 的机器上执行；FsdbReader 运行库不占 license，
-# 但 .so 受 Synopsys 版权约束，不入库、不进 PyPI，只在用户本机构建）
-export VERDI_HOME=/path/to/verdi          # 需含 share/FsdbReader/linux64
-bash deploy/build_fsdb2fst.sh             # 产出 third_party/fsdb2fst/fsdb2fst
-```
+在 MCP 配置里给出 `VERDI_HOME`，然后直接把 `.fsdb` 交给 `prepare_session`；首次
+转换时转换器会自动编一次（需 `g++`），之后复用：
 
 ```python
-# 日常使用：直接把 .fsdb 交给 prepare_session，自动转换
 prepare_session(wave_path="dump.fsdb", filelist_path="rtl.f")
-
-# 大设计按 scope 切片（对应 fsdb2fst 的 -l）
-prepare_session(wave_path="dump.fsdb", fsdb_scopes=["u_core"], filelist_path="rtl.f")
+prepare_session(wave_path="dump.fsdb", fsdb_scopes=["u_core"], filelist_path="rtl.f")  # 大设计切片
 ```
 
-要点（完整说明见 [FSDB_GUIDE.md](FSDB_GUIDE.md)）：
+三条选路时就该知道的约束，其余细节（解析顺序、缓存、手工构建、转换语义、排错）
+见 [FSDB_GUIDE.md](FSDB_GUIDE.md)：
 
-- 转换在**用户机器**上完成，时间刻度原样透传，数值无损。
-- **转换有缓存**：产物落在 `.fsdb` 旁（目录不可写时回退到 session 目录），
-  缓存键含源文件 mtime/size 与切片参数，同一波形反复建 session 只转一次。
+- FsdbReader 运行库**运行时不占 license**，但 `.so` 受 Synopsys 版权约束，
+  不入库、不进 PyPI，只在用户本机使用。
 - 产物是 `.fst` + `.fst.hier` **两个文件，必须成对搬运**（缺 `.hier` 打不开）。
-- 强度值（strength）与不可转换类型（stream / MDA / property / coverage /
-  内部类型）会跳过并在日志与 `steps` 统计里计数。
-- 想先摸清规模再转，用 `convert_fsdb_to_fst(info_only=True)` 只读概要。
+- 千万信号量级的门级设计受 FsdbReader 自身限制，需切片，且切片未必总能绕过。
 
 ### ④ Xcelium 直出 FST（fstdumper）
 
