@@ -152,6 +152,17 @@ prepare_session({
 
 **接入配置**（stdio，各家 Agent 的 MCP 配置）：
 
+**Codex** 用 TOML，**其余 Agent 用 `mcpServers` JSON**：
+
+```toml
+# ~/.codex/config.toml（项目级用 .codex/config.toml）
+[mcp_servers.wave-mcp]
+command = "python"
+args = ["-m", "wave_mcp.server", "--session", "/abs/path/to/sessions/my_module"]
+```
+
+- **Codex**：写入 `~/.codex/config.toml`（项目级用 `.codex/config.toml`），段名是 `mcp_servers`（下划线）；也可以在终端用 `codex mcp add wave-mcp -- python -m wave_mcp.server ...` 一行加好
+
 ```json
 {
   "mcpServers": {
@@ -164,9 +175,10 @@ prepare_session({
 ```
 
 - **Claude Code**：写入 `.mcp.json`（`claude mcp add` 或手工配置）
-- **Cursor**：写入 `.cursor/mcp.json`
-- **VS Code Copilot**：写入 `.vscode/mcp.json`
-- 其余 Agent（Gemini CLI / Qwen Code / OpenHands 等）：按各自的 `mcpServers` 配置填入上述 JSON 即可
+- **Cursor**：写入 `.cursor/mcp.json`（项目级）或 `~/.cursor/mcp.json`（全局）
+- **WorkBuddy**：写入 `~/.workbuddy/mcp.json`（侧边栏「连接器 → 自定义连接器 → 配置 MCP」里粘贴同一份 JSON 也行），保存后回到 MCP 列表点「信任」才会启用；`command`、`args` 建议写绝对路径
+- **Gemini CLI**：写入 `~/.gemini/settings.json` 的 `mcpServers` 字段（项目级用 `.gemini/settings.json`）
+- 其余 Agent（Cline / Windsurf / Roo Code 等）：按各自的 `mcpServers` 配置填入上述 JSON 即可
 
 ### 无波形静态分析（仿真前即可用）
 
