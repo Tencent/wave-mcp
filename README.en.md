@@ -197,9 +197,6 @@ args = ["-m", "wave_mcp.server", "--session", "/abs/path/to/sessions/my_module"]
 
 - **Claude Code**: write to `.mcp.json` (`claude mcp add` or manual config)
 - **Cursor**: write to `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global)
-- **WorkBuddy**: write to `~/.workbuddy/mcp.json`, or paste the same JSON via
-  "Connectors → Custom connectors → Configure MCP" in the sidebar. After saving, click **Trust**
-  in the MCP list to enable it; prefer absolute paths in `command` and `args`
 - **Gemini CLI**: put it under the `mcpServers` key in `~/.gemini/settings.json`
   (or project-scoped `.gemini/settings.json`)
 - Other agents (Cline / Windsurf / Roo Code, etc.): paste the JSON above into their
