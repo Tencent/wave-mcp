@@ -9,31 +9,35 @@ agent 分析完一个问题、把结论呈现给你时，浏览器里实际长�
 
 ## X 态传播
 
-`data_out` 标红、每个包都读出 `xx`，而 `done` 还在正常跳动：状态机是好的，数据通路被污染了。
-分组把症状放上面、根因放下面，`shreg` 以 hex 显示，高字节始终没脱离 X。
-右下角的分析说明弹窗里是 agent 的结论，带置信度标注。
+`data_out` 标红、每个包都读出 `xx`，而 `fsm_state` 还在 IDLE→SHIFT→FLUSH 正常跳：状态机是好的，
+数据通路被污染了。分组把根因 `byte_cnt` 和症状 `data_out` 摆在一起，`byte_cnt` 全程是 `x`，
+X 经 `data_out[7:5]` 一路传到输出。右下角的分析说明弹窗里是 agent 的结论，带置信度标注和
+`trace_x` / `signal_drivers` 的证据。
 
 ![波形查看器中的 X 态传播](images/viewer/xprop.png)
 
 ## 状态机死锁
 
-`state` 平在 `1`（`WAIT_ACK`）不动，`ack_wanted` 一直是高，`rd_count` 冻在 `03`。
-`fsm` 与 `testbench` 两个分组把卡住的握手和 testbench 的预期分开摆。
+`req` 从 145ns 起一直是高，`ack` 再也不来，`state` 卡在 `1`（`WAIT_ACK`）不动，`rd_count` 冻在 `03`。
+两个游标分别停在最后一次完成的读（125ns）和 `req` 永久拉高的那一拍（145ns），握手信号和
+状态、计数分组摆开，卡死的位置一眼可见。
 
 ![波形查看器中的状态机死锁](images/viewer/fsm_stuck.png)
 
 ## 跨时钟域丢脉冲
 
 快时钟域的 `pulse_fast` 发出六个脉冲，`pulse_seen` 只收到两个，`pulse_count` 停在 `02`。
-按时钟域分组后丢失一目了然：源脉冲比一个 `clk_slow` 周期还窄，慢时钟域根本没机会采到它。
+按时钟域分组后丢失一目了然：游标停在 830ns 的丢失脉冲上，这个 20ns 宽的脉冲整段落在两个
+`clk_slow` 上升沿之间（慢时钟周期 50ns），慢时钟域根本没机会采到它。
 
 ![波形查看器中的跨时钟域丢脉冲](images/viewer/cdc.png)
 
 ## pass/fail 首分歧
 
-两份波形上下各占一个 pane，时间轴对齐。RTL 相同、激励相同，只差一处 CRC 抽头写错。
-`crc` 一路完全一致，直到分道扬镳（上面 `3` / `a`，下面 `f` / `b`），而 `crc_err` 只在
-失败那次拉高。这正是 `diff_waveforms` 为首分歧定位铺好的视图。
+两份波形上下各占一个 pane，时间轴对齐。RTL 相同、激励相同，只差一处 CRC 抽头写错
+（fail 版少了 `^ data[0]`）。`crc` 从第一个 valid 节拍就分道扬镳（35ns 处 `0110` vs `0111`，
+上面走 `6/9/3/0`，下面走 `7/d/c/9`），而 `crc_err` 只在失败那次于 425ns 拉高。
+两个游标分别标出首分歧和 `crc_err` 拉高的位置，这正是 `diff_waveforms` 为首分歧定位铺好的视图。
 
 ![波形查看器中的 pass/fail 首分歧](images/viewer/crc_diff.png)
 

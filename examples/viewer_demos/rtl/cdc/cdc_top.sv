@@ -3,7 +3,7 @@
 // Demo 3: CDC (clock-domain crossing) metastability
 //
 // Bug story (intentional): a pulse generated in the 50 MHz "fast" domain
-// crosses into the 25 MHz "slow" domain with NO synchronizer. Depending
+// crosses into the 20 MHz "slow" domain with NO synchronizer. Depending
 // on the phase relationship the slow domain either misses the pulse
 // entirely or samples it while it is toggling (metastable capture), so
 // pulse_seen toggles erratically and pulse_count misses pulses.
@@ -18,7 +18,7 @@ module cdc_top (
     input  wire clk_fast,     // 50 MHz domain
     input  wire rst_n,
     input  wire trigger,      // stimulus
-    input  wire clk_slow,     // 25 MHz domain
+    input  wire clk_slow,     // 20 MHz domain
     output reg  pulse_seen,   // BUG: direct crossing, no synchronizer
     output reg  [7:0] pulse_count
 );
