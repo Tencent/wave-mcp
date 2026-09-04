@@ -4,7 +4,7 @@ All notable changes to wave-mcp are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.1] - 2026-09-04
 
 ### Fixed
 
@@ -30,6 +30,8 @@ All notable changes to wave-mcp are documented here. Format follows
 - **Build scripts now absolutize `--out`.** `build_offline_bundle.sh` used
   `dirname "$OUT"` for the tarball step, and the two Docker-based builders pass
   `$OUT` as a `-v` mount source, where a relative path is rejected outright.
+- **`open_session` description no longer mentions a sim log**, which it stopped
+  loading; the tool description an agent sees now matches what it does.
 
 ## [0.2.0] - 2026-09-02
 
@@ -129,6 +131,7 @@ SystemVerilog static analysis (pyslang elaboration), covering hierarchy
 browsing, signal values, driver/load tracing, X-cause tracing and file-level
 queries.
 
+[0.2.1]: https://github.com/Tencent/wave-mcp/releases/tag/v0.2.1
 [0.2.0]: https://github.com/Tencent/wave-mcp/releases/tag/v0.2.0
 [0.1.1]: https://github.com/Tencent/wave-mcp/releases/tag/v0.1.1
 [0.1.0]: https://github.com/Tencent/wave-mcp/releases/tag/v0.1.0
