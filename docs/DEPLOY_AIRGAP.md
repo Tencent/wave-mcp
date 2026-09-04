@@ -161,7 +161,10 @@ bundle 里的 Python 依赖都是 wheel，glibc 兼容性由打包时的 `--targ
 - 回滚：客户端 `command` 指回旧 `bin/wave-mcp` 即可（旧 bundle 保留）。
 
 ## 6. 排错
-- `install.sh` 末尾 sanity check 会 import wave_mcp/pyslang/pylibfst；失败多为 Python 版本与 wheel(cp311) 不匹配 → 用 `--python` 带独立 3.11。
+- `install.sh` 的 sanity check 分两段：先 import wave_mcp/pyslang/pylibfst，再从 `/` 目录实跑一次生成的 `bin/wave-mcp`。import 失败多为 Python 版本与 wheel(cp311) 不匹配 → 用 `--python` 带独立 3.11；launcher 段失败说明脚本里有依赖 cwd 的路径，安装阶段就会拦住，不会流到客户端。
+- **客户端只报 `-32000`（连不上 MCP server）**：这是客户端对"子进程起不来"的统一报错，看不到真实原因。直接在 shell 里手动执行一次 launcher 即可拿到诊断：`cd / && /shared/wave-mcp/bin/wave-mcp query --list`。若提示解释器不存在，说明安装时 `--prefix` 用了相对路径（客户端以 stdio 拉起时子进程 cwd 是用户项目目录，不是安装目录）→ 用绝对路径重跑 `install.sh --prefix /shared/wave-mcp`。
+- **`--prefix` 一律用绝对路径**：`install.sh` 现在会自行绝对化并在开头就校验写权限，但显式给绝对路径最省事。
+- **viewer 打不开、提示 assets not found**：`WAVE_MCP_VIEWER_ASSETS` 要用绝对路径（相对值会按 `$HOME` 解析）；工具返回的 hint 会写明是路径不存在还是缺 `surver` / `wasm/index.html`。
 - 启动后连接/驱动/trace 不可用：多为该模块 pyslang elaboration 失败（filelist 不全/语法）→ 看 `prepare_session` 返回的 `build_netlist` step 的 error；其余工具不受影响（优雅降级）。
 
 ---

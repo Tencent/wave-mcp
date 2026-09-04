@@ -4,6 +4,33 @@ All notable changes to wave-mcp are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Air-gapped launcher could not find its own interpreter.** `install.sh` took
+  `--prefix` verbatim, so a relative value baked a relative `RUNTIME` into the
+  generated `bin/wave-mcp`. An MCP client spawns that launcher with the user's
+  project directory as cwd, not the install directory, so the interpreter path
+  resolved to nothing and the client reported only a bare `-32000`. The prefix
+  is now absolutized (and probed for write permission) before anything is
+  installed, the launcher anchors a relative `RUNTIME` on its bundle, and it
+  prints the missing path, the bundle, and the cwd instead of dying silently.
+  Reported from an on-site air-gapped deployment.
+- **Install-time check now covers the launcher.** The sanity check ran the venv
+  interpreter directly, which bypassed the generated launcher entirely, so any
+  cwd-dependent path in it survived install and only surfaced in the client. It
+  now also executes `bin/wave-mcp` from an unrelated cwd, reproducing how a
+  client starts it.
+- **`WAVE_MCP_VIEWER_ASSETS` silently ignored when relative.** A relative value
+  resolved against whatever cwd the client happened to use and then degraded to
+  "viewer unavailable" with a hint telling the user to set the variable they had
+  already set. Relative values now resolve against `$HOME`, and the hint names
+  the real cause (path missing, or `surver` / `wasm/index.html` absent).
+- **Build scripts now absolutize `--out`.** `build_offline_bundle.sh` used
+  `dirname "$OUT"` for the tarball step, and the two Docker-based builders pass
+  `$OUT` as a `-v` mount source, where a relative path is rejected outright.
+
 ## [0.2.0] - 2026-09-02
 
 Three new capabilities on top of the 0.1.x tool set: a browser wave viewer the

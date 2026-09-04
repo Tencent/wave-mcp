@@ -43,7 +43,8 @@ done
 
 command -v docker >/dev/null || { echo "ERROR: docker required"; exit 1; }
 mkdir -p "$OUT"
-
+# docker -v rejects a relative source path, so resolve it after mkdir.
+OUT="$(cd "$OUT" && pwd)"
 SRC_MOUNT=()
 if [[ -n "$SRC" ]]; then
   [[ -f "$SRC" ]] || { echo "ERROR: --src tarball not found: $SRC"; exit 1; }

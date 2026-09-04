@@ -49,6 +49,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ -z "$OUT" ]] && { echo "ERROR: --out <dir> required"; exit 1; }
+# Absolutize --out: step 6 does `tar -C "$(dirname "$OUT")"`, which degrades to
+# "." for a bare name and would silently depend on the caller's cwd.
+mkdir -p "$(dirname "$OUT")" 2>/dev/null || true
+OUT="$(cd "$(dirname "$OUT")" && pwd)/$(basename "$OUT")"
 case "$TARGET_GLIBC" in
   2.28|2.17) ;;
   *) echo "ERROR: --target-glibc must be 2.28 or 2.17"; exit 1;;

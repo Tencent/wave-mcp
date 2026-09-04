@@ -28,6 +28,8 @@ done
 
 command -v docker >/dev/null || { echo "ERROR: docker required"; exit 1; }
 mkdir -p "$OUT"
+# docker -v rejects a relative source path, so resolve it after mkdir.
+OUT="$(cd "$OUT" && pwd)"
 echo "[*] building pyslang $PYSLANG_VER (cp$PYTAG, manylinux2014) in $IMAGE -> $OUT"
 
 docker run --rm -v "$OUT":/out "$IMAGE" bash -lc "

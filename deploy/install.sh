@@ -21,6 +21,21 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# 0) normalize the install prefix ------------------------------------------
+# The launcher generated in step 3 bakes RUNTIME in as a literal string, and an
+# MCP client spawns that launcher with its own cwd (the user's project dir),
+# not the install dir. A relative --prefix would therefore produce a launcher
+# that cannot find its own interpreter, which clients only report as -32000.
+# Resolve it here so the baked path is absolute by construction.
+# Creating bin/ up front doubles as a write-permission probe: a bad --prefix
+# now fails in seconds instead of after the whole wheelhouse install.
+if ! mkdir -p "$PREFIX/bin" 2>/dev/null; then
+  echo "ERROR: cannot create $PREFIX/bin (check the path and write permission)"
+  exit 1
+fi
+PREFIX="$(cd "$PREFIX" && pwd)"
+echo "[*] install prefix: $PREFIX"
+
 # 1) pick a python interpreter ---------------------------------------------
 # Priority: --python arg > bundled standalone python > user-selected env
 # (VIRTUAL_ENV / PYTHON) > python3 on PATH > versioned python3.X cascade.
@@ -110,17 +125,29 @@ echo "[*] installing wave-mcp + deps from offline wheelhouse ..."
 "$RUNTIME/bin/python" -m pip install --no-index --no-deps "$HERE"/wheels/*.whl
 
 # 3) generate launcher ------------------------------------------------------
-mkdir -p "$PREFIX/bin"
 sed -e "s#@RUNTIME@#$RUNTIME#g" -e "s#@BUNDLE@#$HERE#g" "$HERE/wave-mcp.template" > "$PREFIX/bin/wave-mcp"
 chmod +x "$PREFIX/bin/wave-mcp"
 
 # 4) sanity check -----------------------------------------------------------
-echo "[*] sanity check ..."
+# Check the import surface first, then the launcher itself. The launcher check
+# runs from a DIFFERENT cwd on purpose: an MCP client starts it from the user's
+# project dir, so any path in it that depends on cwd must fail here, at install
+# time, rather than in the client as a bare -32000.
+echo "[*] sanity check: imports ..."
 "$RUNTIME/bin/python" - <<'PY'
 import wave_mcp, pylibfst, pyslang
 from wave_mcp import server
 print("   wave_mcp", wave_mcp.__version__, "| pyslang", pyslang.__version__, "| OK")
 PY
+
+echo "[*] sanity check: launcher (from an unrelated cwd) ..."
+if ! LAUNCH_OUT=$(cd / && "$PREFIX/bin/wave-mcp" query --help 2>&1); then
+  echo "ERROR: the generated launcher failed to start from cwd '/'."
+  echo "       This is exactly how an MCP client will start it, so fix it now:"
+  echo "$LAUNCH_OUT" | sed 's/^/       /'
+  exit 1
+fi
+echo "   launcher OK"
 
 echo
 echo "[done] launcher: $PREFIX/bin/wave-mcp"

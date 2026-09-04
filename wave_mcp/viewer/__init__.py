@@ -67,15 +67,38 @@ def alloc_port(host: str = "127.0.0.1") -> int:
 def _valid(root: Path) -> bool:
     return (root / "surver").is_file() and (root / "wasm" / "index.html").is_file()
 
+#: Why an explicitly configured WAVE_MCP_VIEWER_ASSETS was rejected, if it was.
+#: Kept so the degradation hint can name the real cause instead of telling a
+#: user who did configure the env var to "set WAVE_MCP_VIEWER_ASSETS".
+_env_miss: Optional[str] = None
+
+def _record_env_miss(raw: str, resolved: Path) -> None:
+    global _env_miss
+    detail = f"WAVE_MCP_VIEWER_ASSETS={raw!r}"
+    if str(resolved) != raw:
+        detail += f" (resolved to {resolved})"
+    if not resolved.is_dir():
+        detail += " does not exist"
+    else:
+        detail += " is missing surver and/or wasm/index.html"
+    _env_miss = detail
+
 
 def find_assets() -> Optional[Dict[str, Any]]:
     """Locate viewer assets; return {root, surver, wasm, origin} or None."""
     # 1. explicit env (air-gapped bundle)
     env = os.environ.get("WAVE_MCP_VIEWER_ASSETS")
     if env:
-        root = Path(env)
+        # An MCP client starts the server from the user's project dir, so a
+        # relative value here would resolve against a cwd nobody intended and
+        # then silently degrade to "viewer unavailable". Anchor it on $HOME
+        # (a stable, user-owned base) and keep the reason retrievable.
+        root = Path(env).expanduser()
+        if not root.is_absolute():
+            root = Path.home() / root
         if _valid(root):
             return _hit(root, "env")
+        _record_env_miss(env, root)
 
     # 2. pip assets package
     try:
@@ -104,15 +127,24 @@ def _hit(root: Path, origin: str) -> Dict[str, Any]:
 
 def unavailable_hint() -> Dict[str, Any]:
     """Uniform degradation payload, style-aligned with _no_waveform."""
+    if _env_miss:
+        hint = (
+            f"viewer assets not found: {_env_miss}. Point "
+            "WAVE_MCP_VIEWER_ASSETS at a directory containing `surver` and "
+            "`wasm/index.html` (use an absolute path), or install with "
+            "`pip install wave-mcp[viewer]`. Analysis tools are unaffected."
+        )
+    else:
+        hint = (
+            "viewer assets not found; install with `pip install "
+            "wave-mcp[viewer]`, or set WAVE_MCP_VIEWER_ASSETS to an asset "
+            "directory (absolute path; offline bundles ship one), or place "
+            f"assets under {_CACHE_DIR}. Analysis tools are unaffected."
+        )
     return {
         "available": False,
         "feature": "wave viewer",
-        "hint": (
-            "viewer assets not found; install with `pip install "
-            "wave-mcp[viewer]`, or set WAVE_MCP_VIEWER_ASSETS to an asset "
-            "directory (offline bundles ship one), or place assets under "
-            f"{_CACHE_DIR}. Analysis tools are unaffected."
-        ),
+        "hint": hint,
     }
 
 

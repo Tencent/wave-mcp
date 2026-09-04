@@ -8,6 +8,33 @@ set -euo pipefail
 BUNDLE="@BUNDLE@"
 RUNTIME="@RUNTIME@"
 
+# An MCP client spawns this launcher with its own cwd (usually the project
+# directory), not the install directory. A relative RUNTIME would then resolve
+# to a path that does not exist and the process would die before starting,
+# which the client only surfaces as -32000. Anchor it on the bundle.
+if [[ "$RUNTIME" != /* ]]; then
+  RUNTIME="$BUNDLE/$RUNTIME"
+fi
+
+PY="$RUNTIME/bin/python"
+
+# Fail loudly instead of letting exec die with a bare "No such file or
+# directory". In stdio mode the client usually hides our stderr and shows only
+# a generic -32000, so spell out what is missing and how to reproduce it.
+if [[ ! -x "$PY" ]]; then
+  {
+    echo "wave-mcp: cannot start, python interpreter not found or not executable"
+    echo "  expected : $PY"
+    echo "  bundle   : $BUNDLE"
+    echo "  cwd      : $(pwd)"
+    echo "  fix      : re-run install.sh on the bundle, e.g."
+    echo "             $BUNDLE/install.sh --prefix <absolute_install_dir>"
+    echo "  note     : if your MCP client only reports -32000, run this"
+    echo "             launcher directly in a shell to see this message."
+  } >&2
+  exit 127
+fi
+
 # make the bundled vcd2fst (+ its libs) discoverable for VCD->FST conversion
 if [[ -x "$BUNDLE/bin/vcd2fst" ]]; then
   export PATH="$BUNDLE/bin:$PATH"
@@ -19,7 +46,7 @@ fi
 # server; `wave-mcp query ...` runs the terminal tool surface; any other
 # args go to the server parser (e.g. --transport http).
 if [[ $# -eq 0 ]]; then
-  exec "$RUNTIME/bin/python" -m wave_mcp.cli.main --transport stdio
+  exec "$PY" -m wave_mcp.cli.main --transport stdio
 else
-  exec "$RUNTIME/bin/python" -m wave_mcp.cli.main "$@"
+  exec "$PY" -m wave_mcp.cli.main "$@"
 fi
