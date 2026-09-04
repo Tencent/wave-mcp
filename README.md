@@ -351,7 +351,7 @@ wave-view pass.fst fail.fst --labels pass fail
     "wave-mcp": {
       "command": "wave-mcp",
       "env": {
-        "VERDI_HOME": "/path/to/verdi",
+        "VERDI_HOME": "/tools/synopsys/verdi/T-2022.06-SP1",
         "WAVE_MCP_SESSION_ROOT": "~/wave-sessions"
       }
     }
@@ -361,9 +361,10 @@ wave-view pass.fst fail.fst --labels pass fail
 
 | 变量 | 要配吗 | 作用 | 默认值 |
 | --- | --- | --- | --- |
-| `VERDI_HOME` / `NOVAS_HOME` | 读 `.fsdb` 时必配 | 定位 Verdi FsdbReader 运行库（须含 `share/FsdbReader/linux64`） | 空。不配则 FSDB 输入不可用，其余功能正常 |
+| `VERDI_HOME` | 读 `.fsdb` 时必配 | Verdi **安装根目录**（不是可执行文件所在的 `bin/`）。程序在其下找 `share/FsdbReader/linux64`，用法与排错见 [FSDB 波形接入指南](docs/FSDB_GUIDE.md) | 空。不配则 FSDB 输入不可用，其余功能正常 |
 | `WAVE_MCP_SESSION_ROOT` | 多人共用主机建议配 | Session 落点根目录。配了之后 `out_dir` 一律落在该目录下，位置由部署决定，不受 Agent 影响 | 空。按传入的 `out_dir` 原样落盘 |
 | `WAVE_MCP_VIEWER_PORT_BASE` | 多人共用主机建议配 | 把视图端口限制在 `[base, base+64)`，便于固定一条 `ssh -L` 转发规则；每人分一段互不重叠 | 空。每次随机取高位端口 |
+| `NOVAS_HOME` | 不用配 | 同 `VERDI_HOME`，仅为老版本 Verdi 保留；两个都设时优先用 `VERDI_HOME` | 空 |
 | `FSDB2FST_FREADER` | 不用配 | 直接指向拷来的 `share/FsdbReader` 目录，用于只拷了运行库、没装完整 Verdi 的机器 | 空。自动读 `VERDI_HOME` / `NOVAS_HOME` |
 | `FSDB2FST_BIN` | 不用配 | 指定已编译好的 `fsdb2fst` | 空。自动探测，首次转换时按需就地编译 |
 | `WAVE_MCP_FSDB2FST_AUTOBUILD` | 不用配 | 设 `0` 关闭首次自动编译 | `1`（开启） |

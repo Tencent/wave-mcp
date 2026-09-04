@@ -18,11 +18,21 @@ license**，与打开 Verdi GUI 不同。唯一的前提是环境里得有这两
     "wave-mcp": {
       "command": "python",
       "args": ["-m", "wave_mcp.server"],
-      "env": { "VERDI_HOME": "/path/to/verdi" }
+      "env": { "VERDI_HOME": "/tools/synopsys/verdi/T-2022.06-SP1" }
     }
   }
 }
 ```
+
+`VERDI_HOME` 填 Verdi 的**安装根目录**，不是 `verdi` 可执行文件所在的 `bin/`。
+填对的判据只有一条，跑这行能列出东西就对了：
+
+```bash
+ls $VERDI_HOME/share/FsdbReader/linux64      # 应看到 libnffr.so、libnsys.so
+```
+
+`which verdi` 给出的是 `<根目录>/bin/verdi`，去掉末尾的 `/bin/verdi` 即为该填的值。
+老版本安装里这个变量叫 `NOVAS_HOME`，两者含义相同，都设时优先用 `VERDI_HOME`。
 
 ```
 prepare_session(wave_path="dump.fsdb", filelist_path="your_filelist.f")

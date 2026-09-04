@@ -404,7 +404,7 @@ inherit your interactive shell's environment.
     "wave-mcp": {
       "command": "wave-mcp",
       "env": {
-        "VERDI_HOME": "/path/to/verdi",
+        "VERDI_HOME": "/tools/synopsys/verdi/T-2022.06-SP1",
         "WAVE_MCP_SESSION_ROOT": "~/wave-sessions"
       }
     }
@@ -414,9 +414,10 @@ inherit your interactive shell's environment.
 
 | Variable | Configure? | Purpose | Default |
 | --- | --- | --- | --- |
-| `VERDI_HOME` / `NOVAS_HOME` | required for `.fsdb` | Locates the Verdi FsdbReader runtime (must contain `share/FsdbReader/linux64`) | empty. FSDB input unavailable, everything else works |
+| `VERDI_HOME` | required for `.fsdb` | Verdi **installation root** (not the `bin/` directory holding the executable). `share/FsdbReader/linux64` is resolved under it; see the [FSDB guide](docs/FSDB_GUIDE.md) for usage and troubleshooting | empty. FSDB input unavailable, everything else works |
 | `WAVE_MCP_SESSION_ROOT` | recommended on a shared host | Root for session directories. Once set, every `out_dir` lands inside it, so the deployment decides the location instead of the agent | empty. `out_dir` is used as given |
 | `WAVE_MCP_VIEWER_PORT_BASE` | recommended on a shared host | Confines view ports to `[base, base+64)` so one `ssh -L` rule keeps working; give each user a non-overlapping window | empty. A random high port per view |
+| `NOVAS_HOME` | no | Same meaning as `VERDI_HOME`, kept for older Verdi installs; `VERDI_HOME` wins when both are set | empty |
 | `FSDB2FST_FREADER` | no | Points straight at a copied `share/FsdbReader` directory, for machines with the runtime but no full Verdi install | empty. Read from `VERDI_HOME` / `NOVAS_HOME` |
 | `FSDB2FST_BIN` | no | Use a prebuilt `fsdb2fst` binary | empty. Auto-detected, built on demand at first conversion |
 | `WAVE_MCP_FSDB2FST_AUTOBUILD` | no | Set to `0` to disable the first-run auto build | `1` (enabled) |
