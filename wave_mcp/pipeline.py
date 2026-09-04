@@ -30,6 +30,40 @@ from . import convert
 from .netlist import build_netlist
 
 
+def _session_root() -> Optional[str]:
+    """Deployment-configured root directory for sessions, or None if unset.
+
+    Set ``WAVE_MCP_SESSION_ROOT`` (typically in the ``env`` block of the MCP
+    client config, next to ``VERDI_HOME``) to pin where sessions land.
+    """
+    raw = os.environ.get("WAVE_MCP_SESSION_ROOT", "").strip()
+    return os.path.abspath(os.path.expanduser(raw)) if raw else None
+
+
+def resolve_out_dir(out_dir: str) -> str:
+    """Resolve a client-supplied ``out_dir`` against the configured root.
+
+    Without ``WAVE_MCP_SESSION_ROOT`` the path is honoured as given, so the
+    default behaviour is unchanged. With it configured, the root becomes
+    authoritative: a bare name or relative path lands inside it, a path already
+    inside it is kept as-is, and a path pointing anywhere else is remapped in by
+    basename. That last case is the point of this function: the caller is an
+    LLM, so the session location cannot depend on the prompt staying on script.
+
+    Remapping is silent rather than an error because callers chain on the
+    returned ``session_path``; failing here would only push the model into
+    retry loops (same graceful-degradation rule as the conversion cache
+    falling back off a read-only waveform dir).
+    """
+    root = _session_root()
+    if not root:
+        return out_dir
+    p = os.path.abspath(os.path.expanduser(out_dir))
+    if p == root or p.startswith(root + os.sep):
+        return p
+    return os.path.join(root, os.path.basename(p.rstrip(os.sep)) or "session")
+
+
 def _sha1(path: str, limit: int = 1 << 20) -> Optional[str]:
     if not path or not os.path.exists(path):
         return None
@@ -229,6 +263,7 @@ def prepare_static_session(out_dir: str, *,
     Reuses an existing fresh ``netlist/maps.json`` instead of re-elaborating.
     """
     steps: List[StepResult] = []
+    out_dir = resolve_out_dir(out_dir)
     os.makedirs(out_dir, exist_ok=True)
 
     files = list(filelist or [])
@@ -308,6 +343,7 @@ def prepare_session(out_dir: str, wave_path: str, *,
     Never runs a simulator. Does NOT open the session (the server does that so the
     session is registered in its SessionManager)."""
     steps: List[StepResult] = []
+    out_dir = resolve_out_dir(out_dir)
     os.makedirs(out_dir, exist_ok=True)
 
     lowered = wave_path.lower()
