@@ -148,7 +148,7 @@ def _no_waveform(feature: str) -> dict[str, Any]:
 def open_session(session_path: str, session_id: Optional[str] = None) -> dict[str, Any]:
     """Open a debug session from a session directory or session.json manifest.
 
-    Opens the FST waveform, the sim log and the RTL netlist maps (if built).
+    Opens the FST waveform and the RTL netlist maps (if built).
     Does NOT consume any license and supports unlimited concurrent sessions.
     """
     sid = SESSIONS.open(session_path, session_id)
