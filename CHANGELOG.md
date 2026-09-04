@@ -23,6 +23,17 @@ All notable changes to wave-mcp are documented here. Format follows
 
 ### Fixed
 
+- **Viewer backends outlived the process that started them.** `SurverManager`
+  relied solely on an `atexit` hook, which Python skips on `SIGTERM`, so
+  `kill`-ing a `wave-view` CLI or an MCP server left one `surver` per open view
+  running indefinitely, holding memory and a listening port. Found in the field
+  with four backends still alive 23 hours after their servers were abandoned.
+  Both entry points now install `SIGTERM` / `SIGINT` / `SIGHUP` handlers that
+  close views explicitly, and `surver` children additionally set
+  `PR_SET_PDEATHSIG` so the kernel reaps them even when the parent is
+  `SIGKILL`ed or crashes, which no in-process handler can cover. The server-side
+  cleanup inspects `sys.modules` instead of importing the viewer, so installs
+  without the optional assets are unaffected.
 - **Air-gapped launcher could not find its own interpreter.** `install.sh` took
   `--prefix` verbatim, so a relative value baked a relative `RUNTIME` into the
   generated `bin/wave-mcp`. An MCP client spawns that launcher with the user's
