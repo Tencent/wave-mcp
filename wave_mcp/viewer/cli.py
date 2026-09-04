@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import signal
 import sys
 import time
 
@@ -65,11 +66,29 @@ def main(argv=None) -> int:
               "terminals auto-forward localhost ports)", flush=True)
 
     print("Press Ctrl-C to stop.", flush=True)
+
+    def _shutdown(signum, _frame):
+        # SIGTERM does not run atexit hooks, so surver children would leak
+        # (a stale process holding a port). Clean up explicitly, then exit.
+        try:
+            mgr.close_all()
+        finally:
+            sys.exit(128 + signum)
+
+    for _sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        try:
+            signal.signal(_sig, _shutdown)
+        except (ValueError, AttributeError, OSError):
+            pass
+
     try:
         while True:
             time.sleep(3600)
-    except KeyboardInterrupt:
-        return 0
+    except (KeyboardInterrupt, SystemExit):
+        pass
+    finally:
+        mgr.close_all()
+    return 0
 
 
 if __name__ == "__main__":

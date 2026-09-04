@@ -16,6 +16,8 @@ isolated sessions; in stdio mode it defaults to the one open session.
 from __future__ import annotations
 
 import argparse
+import signal
+import sys
 from typing import Any, List, Optional
 
 from mcp.server.mcpserver import MCPServer
@@ -200,7 +202,12 @@ def prepare_session(out_dir: str, wave_path: str,
     use the query tools (signal_values, list_child_instances, ...).
 
     Args:
-        out_dir: directory to hold the session (session.json, fst).
+        out_dir: directory to hold the session (session.json, netlist maps).
+            Pass the SAME out_dir for a given module across calls so the static
+            and waveform sessions share one netlist instead of re-elaborating.
+            When the deployment sets WAVE_MCP_SESSION_ROOT, out_dir resolves
+            inside that root; check ``session_path`` in the reply for the
+            actual location and use that value in later calls.
         wave_path: waveform file to analyze — ``.fst`` (read directly), ``.fsdb``
             (auto-converted via bundled fsdb2fst) or ``.vcd`` (auto-converted via
             vcd2fst). This is a file the sim already dumped.
@@ -258,6 +265,10 @@ def open_static_session(out_dir: str,
 
     Args:
         out_dir: directory to hold the session (session.json, netlist maps).
+            Reuse this same out_dir when you later call prepare_session for the
+            module, so the netlist built here is reused. When the deployment
+            sets WAVE_MCP_SESSION_ROOT, out_dir resolves inside that root; the
+            reply's ``session_path`` is the actual location.
         top: top module name for elaboration.
         filelist / filelist_path: RTL source list. A .f filelist is parsed for
             +incdir+/+define+/-y automatically.
@@ -934,6 +945,24 @@ def close_wave_view(view_id: Optional[str] = None,
 # =============================================================================
 # entrypoint
 # =============================================================================
+def _reap_viewers() -> None:
+    """Stop any surver children before exit.
+
+    The viewer is an optional extra, so this must not import it: touching
+    ViewManager here would spin up machinery just to tear it down (and raise
+    on installs without the assets). Only clean up if a view was ever opened.
+    """
+    mod = sys.modules.get("wave_mcp.viewer.manager")
+    if mod is None:
+        return
+    try:
+        mgr = mod.ViewManager.instance()
+        if getattr(mgr, "available", False):
+            mgr.close_all()
+    except Exception:
+        pass
+
+
 def main():
     parser = argparse.ArgumentParser(description="wave-mcp: open-source xrun waveform debug MCP server")
     parser.add_argument("--transport", choices=["stdio", "http"], default="stdio")
@@ -945,11 +974,30 @@ def main():
     if args.session:
         SESSIONS.open(args.session)
 
-    if args.transport == "stdio":
-        mcp.run(transport="stdio")
-    else:
-        # mcp SDK v2: transport options moved from settings to run() kwargs.
-        mcp.run(transport="streamable-http", host=args.host, port=args.port)
+    def _shutdown(signum, _frame):
+        # SIGTERM/SIGHUP skip atexit hooks, so surver children would outlive
+        # the server (stale processes holding ports). Reap them explicitly.
+        try:
+            _reap_viewers()
+        finally:
+            sys.exit(128 + signum)
+
+    for _sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        try:
+            signal.signal(_sig, _shutdown)
+        except (ValueError, AttributeError, OSError):
+            pass
+
+    try:
+        if args.transport == "stdio":
+            mcp.run(transport="stdio")
+        else:
+            # mcp SDK v2: transport options moved from settings to run() kwargs.
+            mcp.run(transport="streamable-http", host=args.host, port=args.port)
+    except (KeyboardInterrupt, SystemExit):
+        pass
+    finally:
+        _reap_viewers()
 
 
 if __name__ == "__main__":

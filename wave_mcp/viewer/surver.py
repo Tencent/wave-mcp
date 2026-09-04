@@ -20,6 +20,24 @@ class SurverError(RuntimeError):
     pass
 
 
+def _die_with_parent() -> None:
+    """Ask the kernel to SIGTERM this child when its parent dies.
+
+    Signal handlers cannot cover SIGKILL or a hard crash of the owning
+    process, which would leave surver running forever holding a port. Linux
+    PR_SET_PDEATHSIG closes that gap. Best effort: silently skipped on
+    non-Linux or if prctl is unavailable.
+    """
+    try:
+        import ctypes
+
+        PR_SET_PDEATHSIG = 1
+        libc = ctypes.CDLL("libc.so.6", use_errno=True)
+        libc.prctl(PR_SET_PDEATHSIG, 15, 0, 0, 0)
+    except Exception:
+        pass
+
+
 def _free_port() -> int:
     from . import alloc_port
     return alloc_port()
@@ -37,6 +55,7 @@ class SurverInstance:
             [binary, "--port", str(self.port), "--bind-address", "127.0.0.1",
              "--token", self.token, *self.fst_paths],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            preexec_fn=_die_with_parent,
         )
         self._wait_ready()
 
