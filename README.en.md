@@ -387,6 +387,44 @@ wave-view pass.fst fail.fst --labels pass fail
   If docker is not an option, the step-by-step `deploy/build_offline_bundle.sh` still works.
   See [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md) (vcd2fst compatibility options + troubleshooting).
 
+## Environment variables
+
+Every variable below can go in the `env` block of your MCP client config, which is the
+recommended place: the agent spawns the server as a child process, so it does not inherit
+what you `export` in an interactive shell.
+
+```json
+{
+  "mcpServers": {
+    "wave-mcp": {
+      "command": "wave-mcp",
+      "env": {
+        "VERDI_HOME": "/path/to/verdi",
+        "WAVE_MCP_SESSION_ROOT": "~/wave-sessions"
+      }
+    }
+  }
+}
+```
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `WAVE_MCP_SESSION_ROOT` | Root for session directories. Once set, every `out_dir` resolves inside it, so the deployment decides where sessions land instead of the model | unset: `out_dir` is used as given |
+| `VERDI_HOME` / `NOVAS_HOME` | Locates the Verdi FsdbReader runtime needed to read `.fsdb` (must contain `share/FsdbReader/linux64`) | unset: FSDB input unavailable, everything else works |
+| `FSDB2FST_FREADER` | Points straight at a copied `share/FsdbReader` directory instead of a full Verdi tree | falls back to `VERDI_HOME` / `NOVAS_HOME` |
+| `FSDB2FST_BIN` | Use a prebuilt `fsdb2fst` binary | auto-detected, built on first conversion if needed |
+| `WAVE_MCP_FSDB2FST_AUTOBUILD` | Set to `0` to disable the first-run auto build | enabled |
+| `VCD2FST_BIN` | Path to the GTKWave `vcd2fst` executable | `vcd2fst` from `PATH` |
+| `WAVE_MCP_VIEWER_ASSETS` | Viewer asset directory (must contain `surver` and `wasm/index.html`) | pip assets package, then `~/.cache/wave-mcp/viewer/` |
+| `WAVE_MCP_VIEWER_PORT_BASE` | Confines view ports to `[base, base+64)` so one `ssh -L` rule keeps working; give each user their own window on a shared host | random high ports |
+| `WAVE_MCP_MAX_VIEWS` | Cap on concurrent views, evicting the oldest; `0` disables the cap | 8 |
+| `XDG_CACHE_HOME` | Cache root (`fsdb2fst` build output, viewer assets) | `~/.cache` |
+
+**Session directory convention**: keep sessions under `~/wave-sessions/<project>_<module>/` and
+reuse one `out_dir` per module so the static and waveform sessions share a netlist. Avoid `/tmp`
+(lost on reboot, forcing re-elaboration) and shared drives (users collide on one directory).
+Setting `WAVE_MCP_SESSION_ROOT` enforces this without relying on the agent's prompt.
+
 ## FAQ
 
 **Q1: Does it support FSDB / SHM?**

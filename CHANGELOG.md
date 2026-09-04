@@ -6,6 +6,21 @@ All notable changes to wave-mcp are documented here. Format follows
 
 ## [0.2.1] - 2026-09-04
 
+### Added
+
+- **`WAVE_MCP_SESSION_ROOT` pins where sessions land.** `out_dir` is chosen by
+  the calling model, so a drifted prompt could scatter sessions across `/tmp`,
+  the cwd, or a shared regression directory, where two users with different
+  filelists can collide on one directory and silently inherit each other's
+  netlist. Set this variable and every `out_dir` resolves inside it: a bare name
+  or relative path lands in the root, a path already inside it is kept, and a
+  path pointing elsewhere is remapped in by basename. Unset, behaviour is
+  unchanged. The reply's `session_path` is always the real location.
+- **Environment variables are documented in one place.** Both READMEs now carry
+  the full table (session root, Verdi/FSDB, vcd2fst, viewer, cache) and state
+  that these belong in the `env` block of the MCP client config, since an
+  agent-spawned server does not inherit an interactive shell's exports.
+
 ### Fixed
 
 - **Air-gapped launcher could not find its own interpreter.** `install.sh` took
