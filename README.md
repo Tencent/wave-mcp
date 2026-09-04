@@ -338,8 +338,12 @@ wave-view pass.fst fail.fst --labels pass fail
 
 ## 环境变量
 
-全部变量都可以写在 MCP 客户端配置的 `env` 里，**推荐这样配**：Agent 以子进程方式拉起 Server，
-继承不到你交互式 shell 里 `export` 的变量，写进 `env` 才稳定生效。
+**多数人一个都不用配**：装完直接用，读 FST/VCD、静态分析、波形查看器全都开箱可用。
+只有两种情况需要配：要读 `.fsdb`（配 `VERDI_HOME`），或者多人共用一台主机想统一管理
+（配 `WAVE_MCP_SESSION_ROOT`）。其余变量都是特殊环境下的微调开关，按需再查。
+
+要配的话，写在 MCP 客户端配置的 `env` 里，**不要用 shell 的 `export`**：Agent 以子进程
+方式拉起 Server，继承不到你交互式 shell 里的变量，写进 `env` 才稳定生效。
 
 ```json
 {
@@ -355,18 +359,18 @@ wave-view pass.fst fail.fst --labels pass fail
 }
 ```
 
-| 变量 | 作用 | 缺省行为 |
-| --- | --- | --- |
-| `WAVE_MCP_SESSION_ROOT` | Session 落点根目录。设置后 `out_dir` 一律解析到该目录下，落点由部署决定而非由模型自由选择 | 不限制，按传入的 `out_dir` 落盘 |
-| `VERDI_HOME` / `NOVAS_HOME` | 定位 Verdi FsdbReader 运行库，读 `.fsdb` 所需（须含 `share/FsdbReader/linux64`） | 不设则 FSDB 输入不可用，其余功能正常 |
-| `FSDB2FST_FREADER` | 直接指向拷来的 `share/FsdbReader` 目录，替代 `VERDI_HOME` | 回落到 `VERDI_HOME` / `NOVAS_HOME` |
-| `FSDB2FST_BIN` | 指定已编译好的 `fsdb2fst` | 自动探测，必要时首次转换就地编译 |
-| `WAVE_MCP_FSDB2FST_AUTOBUILD` | 设 `0` 关闭首次自动编译 | 开启 |
-| `VCD2FST_BIN` | 指定 GTKWave `vcd2fst` 可执行文件 | 从 `PATH` 找 `vcd2fst` |
-| `WAVE_MCP_VIEWER_ASSETS` | 波形查看器资产目录（须含 `surver` 与 `wasm/index.html`） | 依次找 pip 资产包、`~/.cache/wave-mcp/viewer/` |
-| `WAVE_MCP_VIEWER_PORT_BASE` | 把视图端口限制在 `[base, base+64)`，便于固定一条 `ssh -L` 转发规则；多人共用一台主机时各取一段 | 随机高端口 |
-| `WAVE_MCP_MAX_VIEWS` | 并发视图上限，超出淘汰最旧的视图；`0` 关闭上限 | 8 |
-| `XDG_CACHE_HOME` | 缓存根目录（`fsdb2fst` 构建产物、viewer 资产） | `~/.cache` |
+| 变量 | 要配吗 | 作用 | 默认值 |
+| --- | --- | --- | --- |
+| `VERDI_HOME` / `NOVAS_HOME` | 读 `.fsdb` 时必配 | 定位 Verdi FsdbReader 运行库（须含 `share/FsdbReader/linux64`） | 空。不配则 FSDB 输入不可用，其余功能正常 |
+| `WAVE_MCP_SESSION_ROOT` | 多人共用主机建议配 | Session 落点根目录。配了之后 `out_dir` 一律落在该目录下，位置由部署决定，不受 Agent 影响 | 空。按传入的 `out_dir` 原样落盘 |
+| `WAVE_MCP_VIEWER_PORT_BASE` | 多人共用主机建议配 | 把视图端口限制在 `[base, base+64)`，便于固定一条 `ssh -L` 转发规则；每人分一段互不重叠 | 空。每次随机取高位端口 |
+| `FSDB2FST_FREADER` | 不用配 | 直接指向拷来的 `share/FsdbReader` 目录，用于只拷了运行库、没装完整 Verdi 的机器 | 空。自动读 `VERDI_HOME` / `NOVAS_HOME` |
+| `FSDB2FST_BIN` | 不用配 | 指定已编译好的 `fsdb2fst` | 空。自动探测，首次转换时按需就地编译 |
+| `WAVE_MCP_FSDB2FST_AUTOBUILD` | 不用配 | 设 `0` 关闭首次自动编译 | `1`（开启） |
+| `VCD2FST_BIN` | 不用配 | 指定 GTKWave `vcd2fst` 可执行文件 | `vcd2fst`（从 `PATH` 查找） |
+| `WAVE_MCP_VIEWER_ASSETS` | 不用配 | 波形查看器资产目录（须含 `surver` 与 `wasm/index.html`），离线包安装时自动设好 | 空。依次找 pip 资产包、`~/.cache/wave-mcp/viewer/` |
+| `WAVE_MCP_MAX_VIEWS` | 不用配 | 并发视图上限，超出则关掉最旧的；设 `0` 取消上限 | `8` |
+| `XDG_CACHE_HOME` | 不用配 | 缓存根目录（`fsdb2fst` 构建产物、viewer 资产） | `~/.cache` |
 
 **Session 目录约定**：建议统一放 `~/wave-sessions/<项目>_<模块>/`，同一模块的静态分析与波形分析
 复用同一个 `out_dir` 以复用网表；不要用 `/tmp`（重启即丢，网表需重新精化）或共享盘（多人撞目录）。
