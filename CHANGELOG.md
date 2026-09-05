@@ -55,6 +55,26 @@ All notable changes to wave-mcp are documented here. Format follows
   that never paints. The token is now served alongside the view state and the
   page falls back to it, so the bare URL works. Each server still serves one
   view on localhost only.
+- **Views intermittently failed to start.** Opening a view takes two ports, one
+  for the shell and one for surver, and both were picked by binding a socket,
+  reading the port, then closing it and binding again later. In between, the
+  port belongs to nobody and any other process on the host can take it, so the
+  second bind fails with the port already in use. It only reproduced under
+  load, such as a full regression run starting many viewers in quick
+  succession, where it surfaced as a random "surver failed to start". The shell
+  server now receives an already-listening socket, so picking and binding are
+  one operation. surver is a separate binary that only gets a port number, so
+  it cannot inherit a socket and instead retires the port and retries on
+  another one when the child fails to come up.
+
+### Added
+
+- `tests/unit/test_dut_root.py`, pinning the DUT-rooted netlist case above on a
+  synthetic waveform written by pylibfst, so it needs no simulator and cannot be
+  masked by a stale checked-in file. It asserts the conditions that make the bug
+  reachable rather than only the outcome, so a later change cannot quietly turn
+  it into a test of the leaf-name match. Reverting the fix fails 5 of its 8
+  assertions.
 
 ## [0.2.2] - 2026-09-05
 
