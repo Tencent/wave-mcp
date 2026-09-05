@@ -15,7 +15,7 @@ import os
 import shutil
 import socket
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Sequence
 
 _CACHE_DIR = Path.home() / ".cache" / "wave-mcp" / "viewer"
 
@@ -44,24 +44,71 @@ def port_base() -> Optional[int]:
     return base if 1024 <= base <= 65535 - PORT_WINDOW else None
 
 
-def alloc_port(host: str = "127.0.0.1") -> int:
+def alloc_port(host: str = "127.0.0.1",
+               exclude: Optional[Sequence[int]] = None) -> int:
     """Pick a free port, honouring the configured base when present.
 
     Falls back to an ephemeral port if the whole configured window is taken,
     so a busy host degrades instead of failing to open a view.
+
+    Note: this only *probes*. The returned port is unbound again by the time
+    the caller receives it, so on a busy host another process can take it
+    before the caller binds. Prefer :func:`alloc_port_socket`, which holds
+    the port; this one remains for callers that cannot use a socket, such as
+    handing a port number to a child process. ``exclude`` skips ports already
+    known to be unusable, so a retry can move on instead of repeating one.
     """
+    skip = set(exclude or ())
     base = port_base()
     if base is not None:
         for candidate in range(base, base + PORT_WINDOW):
+            if candidate in skip:
+                continue
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 try:
                     s.bind((host, candidate))
                     return candidate
                 except OSError:
                     continue
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind((host, 0))
-        return s.getsockname()[1]
+    for _ in range(64):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind((host, 0))
+            port = s.getsockname()[1]
+        if port not in skip:
+            return port
+    raise OSError("could not find a free port outside the excluded set")
+
+
+def alloc_port_socket(host: str = "127.0.0.1") -> socket.socket:
+    """Reserve a free port and return it *already bound and listening*.
+
+    Probing a port and binding it later is a TOCTOU race: between the two,
+    any other process on the host can take the port, and the bind then fails
+    with EADDRINUSE. Under a full regression run, which starts many viewers
+    and survers in quick succession, that showed up as an intermittent
+    "surver failed to start".
+
+    Returning a listening socket closes the window: the kernel keeps the
+    port reserved for as long as this socket is open. Callers either use it
+    directly (HTTP server) or keep it open until a child has bound the port.
+    """
+    base = port_base()
+    if base is not None:
+        for candidate in range(base, base + PORT_WINDOW):
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                s.bind((host, candidate))
+                s.listen(1)
+                return s
+            except OSError:
+                s.close()
+                continue
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.bind((host, 0))
+    s.listen(1)
+    return s
 
 
 def _valid(root: Path) -> bool:

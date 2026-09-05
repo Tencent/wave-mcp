@@ -37,10 +37,21 @@ class ViewerServer:
         # alongside the state makes the page work from the bare URL too.
         self.token = token
         handler = _make_handler(self)
+        # Reserve the port up front rather than probing it and binding later.
+        # A probe releases the port before we get to bind it, so on a host
+        # running several viewers another process can take it in between and
+        # the bind fails with EADDRINUSE. Handing the already-listening socket
+        # to the server makes bind and use the same operation.
         if port is None:
-            from . import alloc_port
-            port = alloc_port()
-        self.httpd = _ThreadingHTTPServer(("127.0.0.1", port), handler)
+            from . import alloc_port_socket
+            self._reserved = alloc_port_socket()
+            self.httpd = _ThreadingHTTPServer(
+                ("127.0.0.1", 0), handler, bind_and_activate=False)
+            self.httpd.socket = self._reserved
+            self.httpd.server_address = self._reserved.getsockname()
+        else:
+            self._reserved = None
+            self.httpd = _ThreadingHTTPServer(("127.0.0.1", port), handler)
         self.port = self.httpd.server_address[1]
         self._thread = threading.Thread(target=self.httpd.serve_forever,
                                         daemon=True)

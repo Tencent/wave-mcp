@@ -13,7 +13,7 @@ import subprocess
 import time
 import urllib.request
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence
 
 
 class SurverError(RuntimeError):
@@ -38,9 +38,9 @@ def _die_with_parent() -> None:
         pass
 
 
-def _free_port() -> int:
+def _free_port(exclude: Optional[Sequence[int]] = None) -> int:
     from . import alloc_port
-    return alloc_port()
+    return alloc_port(exclude=exclude)
 
 
 class SurverInstance:
@@ -49,15 +49,72 @@ class SurverInstance:
             if not Path(p).is_file():
                 raise SurverError(f"waveform not found: {p}")
         self.fst_paths = [str(Path(p).resolve()) for p in fst_paths]
-        self.port = _free_port()
         self.token = secrets.token_urlsafe(12)
-        self.proc = subprocess.Popen(
-            [binary, "--port", str(self.port), "--bind-address", "127.0.0.1",
-             "--token", self.token, *self.fst_paths],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            preexec_fn=_die_with_parent,
-        )
+        # surver is a separate binary, so it cannot inherit a reserved socket;
+        # it only receives a port number. Probing a port and letting the child
+        # bind it later races with every other process on the host, and under a
+        # full regression run that surfaced as an intermittent "surver failed
+        # to start". We cannot hold the port for the child either: a listening
+        # socket makes the child's own bind fail with EADDRINUSE. So the race
+        # is handled where it actually materialises: if the child fails to
+        # come up, retire that port and retry on a different one.
+        proc, port = self._spawn_with_retry(binary)
+        self.port = port
+        self.proc = proc
         self._wait_ready()
+
+    def _spawn_with_retry(self, binary: str, attempts: int = 4):
+        """Start surver, retrying on a fresh port when a spawn fails.
+
+        Only a failure to *bind* is worth retrying; other causes (missing
+        file, non-executable binary) are deterministic and would just be
+        retried to the same outcome, so those surface on the first try.
+        """
+        retired = []
+        last_exc = None
+        for i in range(attempts):
+            port = _free_port(exclude=retired)
+            try:
+                proc = subprocess.Popen(
+                    [binary, "--port", str(port), "--bind-address", "127.0.0.1",
+                     "--token", self.token, *self.fst_paths],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    preexec_fn=_die_with_parent,
+                )
+            except OSError as exc:
+                last_exc = exc
+                retired.append(port)
+                continue
+            # Ask surver itself, via its token-authenticated status endpoint.
+            # Merely being able to connect is not proof that *our* surver is
+            # up: the port may have been taken by an unrelated listener that
+            # accepts connections while our own child has already died.
+            deadline = time.time() + 2.0
+            while time.time() < deadline:
+                if proc.poll() is not None:
+                    break
+                if self._surver_ready(port):
+                    return proc, port
+                time.sleep(0.05)
+            if proc.poll() is not None:
+                last_exc = SurverError(
+                    f"surver exited early (code {proc.returncode}) "
+                    f"on port {port}")
+                retired.append(port)
+                continue
+            # still running but not answering yet: let _wait_ready give it
+            # the full timeout rather than restarting on a fresh port
+            return proc, port
+        raise last_exc or SurverError("could not start surver on any port")
+
+    def _surver_ready(self, port: int) -> bool:
+        """True only when the token endpoint of *our* surver answers."""
+        url = f"http://127.0.0.1:{port}/{self.token}/get_status"
+        try:
+            with urllib.request.urlopen(url, timeout=0.5) as r:
+                return r.status == 200
+        except OSError:
+            return False
 
     @property
     def base_url(self) -> str:
