@@ -78,10 +78,21 @@ class TraceEngine:
                     tie = True
             if best is not None and not tie:
                 return best[0], best[1]
-        # 3. FST component field (usually empty for VCD->FST, but honour it)
+        # 3. FST scope metadata. ``module_name`` is empty for VCD->FST (VCD
+        #    carries no module type), but ``definition_name`` is filled in by
+        #    resolve_definitions()'s anchor pass, which already derived e.g.
+        #    ``top_tb.U_DECODE`` -> ``decode`` from the netlist. Honour it:
+        #    without this the DUT *root* scope never resolves (its FST instance
+        #    name differs from the netlist root key), so every signal declared
+        #    directly on the DUT top reports "unresolved_path" even though the
+        #    netlist has its drivers. Children still resolve via the leaf
+        #    index, which is why only the root looked broken.
         sc = self.fst.scopes.get(instance_path) if self.fst else None
-        if sc and sc.module_name in self.modules:
-            return sc.module_name, None
+        if sc:
+            for name in (getattr(sc, "module_name", ""),
+                         getattr(sc, "definition_name", "")):
+                if name and name in self.modules:
+                    return name, None
         return None, None
 
     def resolve_module(self, instance_path: str) -> Optional[str]:

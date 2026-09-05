@@ -40,6 +40,7 @@ class RtlSource:
         self.maps: dict = {}
         self.engine: Optional[TraceEngine] = None
         self.fst = fst
+        self._maps_dir: Optional[str] = None
         if maps_path and os.path.exists(maps_path):
             self._load_maps(maps_path)
 
@@ -50,12 +51,88 @@ class RtlSource:
         except (OSError, ValueError):
             self.maps = {}
             return
+        self._maps_dir = os.path.dirname(os.path.abspath(maps_path))
+        self._normalize_map_paths()
         if self.maps.get("modules"):
             self.engine = TraceEngine(self.maps, self.fst)
             # backfill files from netlist if filelist empty
             if not self.files:
-                fs = {m.get("file") for m in self.maps["modules"].values() if m.get("file")}
+                fs = {self.resolve_file(m.get("file"))
+                      for m in self.maps["modules"].values() if m.get("file")}
                 self.files = sorted(f for f in fs if f)
+
+    # -- path resolution ------------------------------------------------
+
+    def _path_bases(self) -> List[str]:
+        """Candidate base dirs for the relative paths stored in a netlist.
+
+        A netlist records whatever path the elaborator saw: absolute in some
+        builds, relative to the build cwd in others (``examples/sample/x.sv``).
+        The build cwd is not recoverable from the file alone, so try the
+        recorded ``build_root``, then the maps.json directory and its
+        ancestors, since netlists are usually built from a project root that
+        sits a few levels above the maps file.
+        """
+        bases: List[str] = []
+        root = self.maps.get("build_root")
+        if root:
+            bases.append(root)
+        if self._maps_dir:
+            bases.append(self._maps_dir)
+            cur = self._maps_dir
+            for _ in range(8):
+                parent = os.path.dirname(cur)
+                if not parent or parent == cur:
+                    break
+                bases.append(parent)
+                cur = parent
+        cwd = os.getcwd()
+        if cwd not in bases:
+            bases.append(cwd)
+        return bases
+
+    def _normalize_map_paths(self) -> None:
+        """Rewrite every ``file`` entry in the loaded netlist to a real path.
+
+        Done once at load time rather than at each call site: ``file`` is
+        surfaced by drivers/loads/fanin/trace records, port and signal
+        declarations and ``modules_in_file``, all of which flow through
+        different code paths (including ``TraceEngine``, which never sees this
+        class). Normalising the map is the single choke point that makes every
+        one of them hand back a path the caller can open.
+        """
+        cache: dict = {}
+
+        def fix(node):
+            if isinstance(node, dict):
+                f = node.get("file")
+                if isinstance(f, str) and f:
+                    if f not in cache:
+                        cache[f] = self.resolve_file(f)
+                    node["file"] = cache[f]
+                for v in node.values():
+                    fix(v)
+            elif isinstance(node, list):
+                for v in node:
+                    fix(v)
+
+        fix(self.maps.get("modules"))
+
+    def resolve_file(self, f: Optional[str]) -> Optional[str]:
+        """Map a netlist file entry onto an existing absolute path.
+
+        Returns the raw entry when nothing resolves, so callers still report
+        a location instead of silently dropping it.
+        """
+        if not f:
+            return None
+        if os.path.isabs(f):
+            return f
+        for base in self._path_bases():
+            cand = os.path.normpath(os.path.join(base, f))
+            if os.path.exists(cand):
+                return cand
+        return f
 
     @property
     def has_netlist(self) -> bool:
@@ -175,8 +252,12 @@ class RtlSource:
     def modules_in_file(self, full_file_path: str) -> List[str]:
         ap = os.path.abspath(full_file_path)
         if self.has_netlist:
-            return [name for name, m in self.maps["modules"].items()
-                    if m.get("file") and os.path.abspath(m["file"]) == ap]
+            out = []
+            for name, m in self.maps["modules"].items():
+                resolved = self.resolve_file(m.get("file"))
+                if resolved and os.path.abspath(resolved) == ap:
+                    out.append(name)
+            return out
         return []
 
     # -- declarations (2.5 / 3-line) ---------------------------------------
@@ -184,7 +265,8 @@ class RtlSource:
         m = self.maps.get("modules", {}).get(module_name)
         if not m:
             return None
-        return {"file": m.get("file"), "line": m.get("line"), "module": module_name}
+        return {"file": self.resolve_file(m.get("file")),
+                "line": m.get("line"), "module": module_name}
 
     def signal_declaration(self, signal_leaf: str,
                            candidate_files: Optional[List[str]] = None) -> Optional[dict]:
@@ -194,7 +276,8 @@ class RtlSource:
         for m in self.maps["modules"].values():
             loc = m.get("loc", {}).get(signal_leaf)
             if loc and loc.get("line"):
-                return {"file": loc["file"], "line": loc["line"]}
+                return {"file": self.resolve_file(loc["file"]),
+                        "line": loc["line"]}
         return None
 
     # -- helpers -----------------------------------------------------------
@@ -210,8 +293,57 @@ class RtlSource:
         mod, inst, leaf, _recs = self.engine.resolve_path(full_path)
         return inst, leaf, mod
 
+    # -- cross-hierarchy helpers -----------------------------------------
+
+    #: how many hierarchy hops to follow when a net has no local driver
+    _MAX_HOPS = 4
+
+    def _port_direction(self, module_def: Optional[str],
+                        port: str) -> Optional[str]:
+        """Declared direction of ``port`` on the instantiated module."""
+        m = self.maps.get("modules", {}).get(module_def or "")
+        if not m:
+            return None
+        return (m.get("ports", {}) or {}).get(port, {}).get("direction")
+
+    def _peer_paths(self, full_path: str, want: str = "drivers") -> List[str]:
+        """Connected signals, filtered to one direction across the hierarchy.
+
+        ``want="drivers"`` returns what can drive ``full_path`` (same-module
+        fan-in plus sub-module **output** ports). ``want="loads"`` returns what
+        it drives (loads plus **input** ports).
+
+        Direction matters: an input port is driven *by* this signal, so
+        following it while hunting a driver walks away from the answer, and
+        ``top.rst_n`` would be reported as driven by the flip-flop it feeds.
+        Ports whose direction is unknown are still followed, since a missing
+        port map should cost recall, not the whole feature.
+        """
+        inst, leaf, mod = self._resolve(full_path)
+        if not mod or mod not in self.maps["modules"]:
+            return []
+        m = self.maps["modules"][mod]
+        upstream = (want == "drivers")
+        peers = set(m.get("fanin" if upstream else "loads", {}).get(leaf, []))
+        out = [self._full(inst, s) for s in sorted(peers)]
+        want_dir = "output" if upstream else "input"
+        for ins in m.get("instances", []):
+            for port, sig in ins.get("conns", {}).items():
+                if sig != leaf:
+                    continue
+                d = self._port_direction(ins.get("def"), port)
+                if d is None or d == want_dir:
+                    out.append(f"{self._full(inst, ins['name'])}.{port}")
+        seen, res = set(), []
+        for p in out:
+            if p not in seen:
+                seen.add(p)
+                res.append(p)
+        return res
+
     # -- category 5: connectivity / drivers / loads / fan-in ---------------
-    def drivers(self, full_path: str) -> dict:
+    def drivers(self, full_path: str, _depth: int = 0,
+                _seen: Optional[set] = None) -> dict:
         if not self.has_netlist:
             return Unavailable("signal_drivers", "netlist not built").to_dict()
         mod, _leaf, recs = self.engine.module_drivers(full_path)
@@ -221,6 +353,13 @@ class RtlSource:
             return {"available": True, "signal": full_path, "drivers": [],
                     "reason": reason, "hint": hint}
         if not recs:
+            # A net with no local driver is often just a wire to a sub-module
+            # (``top.count`` driven by ``top.u_counter.count``). ``loads``
+            # already followed these connections; do the same here instead of
+            # reporting a misleading "undriven".
+            cross = self._drivers_via_peers(full_path, _depth, _seen)
+            if cross:
+                return cross
             inst, leaf = self.engine.split(full_path)
             reason, hint = self.engine.classify_empty(inst, leaf, mod, "drivers")
             return {"available": True, "signal": full_path, "module": mod,
@@ -231,6 +370,9 @@ class RtlSource:
             d = {**{k: r[k] for k in ("kind", "file", "line", "snippet")},
                         "rhs": [self._full(inst, s) for s in r["rhs"]],
                         "control": [self._full(inst, s) for s in r["control"]]}
+            # netlist file entries may be relative to the build cwd; hand back
+            # something the caller can actually open
+            d["file"] = self.resolve_file(d.get("file"))
             # Include port_ref for instance_port drivers so callers can trace
             # cross-module connections without a separate active_drivers call.
             if r.get("port_ref"):
@@ -246,6 +388,29 @@ class RtlSource:
                 d["guard"] = r["guard"]
             out.append(d)
         return {"available": True, "signal": full_path, "module": mod, "drivers": out}
+
+    def _drivers_via_peers(self, full_path: str, depth: int,
+                           seen: Optional[set]) -> Optional[dict]:
+        """Follow connections out of ``full_path`` looking for a real driver."""
+        if depth >= self._MAX_HOPS:
+            return None
+        seen = set() if seen is None else seen
+        seen.add(full_path)
+        for peer in self._peer_paths(full_path):
+            if peer in seen:
+                continue
+            sub = self.drivers(peer, _depth=depth + 1, _seen=seen)
+            if sub.get("drivers"):
+                return {
+                    "available": True,
+                    "signal": full_path,
+                    "module": sub.get("module"),
+                    "drivers": sub["drivers"],
+                    "resolved_via": peer,
+                    "note": (f"no driver in this module; followed the "
+                             f"connection to {peer}"),
+                }
+        return None
 
     def loads(self, full_path: str) -> dict:
         if not self.has_netlist:
@@ -277,6 +442,14 @@ class RtlSource:
                         return {"available": True, "signal": full_path,
                                 "loads": lds}
         if not lds:
+            # Downstream across the hierarchy: this signal feeds sub-module
+            # input ports (top.rst_n -> top.u_counter.rst_n). Those peers *are*
+            # the loads, so no recursion is needed here.
+            peers = self._peer_paths(full_path, "loads")
+            if peers:
+                return {"available": True, "signal": full_path,
+                        "loads": peers}
+        if not lds:
             reason, hint = self.engine.classify_empty(inst, leaf, mod, "loads")
             return {"available": True, "signal": full_path,
                     "loads": [], "reason": reason, "hint": hint}
@@ -305,11 +478,41 @@ class RtlSource:
                 stack.extend(fmap.get(s, []))
             res = sorted(seen)
         if not res:
+            # Same asymmetry as drivers(): a net whose cone lives in a
+            # sub-module must follow the connection instead of reporting
+            # "undriven".
+            cross = self._fanin_via_peers(signal_path, transitive,
+                                          max_signals, 0, None)
+            if cross:
+                return cross
             reason, hint = self.engine.classify_empty(inst, leaf, mod, "fanin")
             return {"available": True, "signal": signal_path,
                     "fan_in": [], "reason": reason, "hint": hint}
         return {"available": True, "signal": signal_path,
                 "fan_in": [self._full(inst, s) for s in res]}
+
+    def _fanin_via_peers(self, signal_path: str, transitive: bool,
+                         max_signals: int, depth: int,
+                         seen: Optional[set]) -> Optional[dict]:
+        if depth >= self._MAX_HOPS:
+            return None
+        seen = set() if seen is None else seen
+        seen.add(signal_path)
+        for peer in self._peer_paths(signal_path):
+            if peer in seen:
+                continue
+            sub = self.fan_in(peer, transitive=transitive,
+                              max_signals=max_signals)
+            if sub.get("fan_in"):
+                return {
+                    "available": True,
+                    "signal": signal_path,
+                    "fan_in": sub["fan_in"],
+                    "resolved_via": peer,
+                    "note": (f"no fan-in in this module; followed the "
+                             f"connection to {peer}"),
+                }
+        return None
 
     def connectivity(self, full_path: str) -> dict:
         if not self.has_netlist:

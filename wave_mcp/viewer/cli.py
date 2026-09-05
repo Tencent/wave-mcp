@@ -15,6 +15,7 @@ import time
 
 from . import try_open_browser
 from .manager import ViewManager
+from ..timeutil import VALID_UNITS
 
 _TIME_RE = re.compile(r"^(\d+)([a-z]+)$")
 
@@ -24,7 +25,15 @@ def _parse_time(text: str):
     if not m:
         raise argparse.ArgumentTypeError(
             f"bad time {text!r}; expected e.g. 1523400ps / 12ns")
-    return {"time": m.group(1), "unit": m.group(2)}
+    unit = m.group(2)
+    # Without this the regex happily accepts "12nanoseconds" or "100furlong",
+    # which used to reach the viewer and silently land the cursor on a raw
+    # number in the waveform's own timescale.
+    if unit not in VALID_UNITS:
+        raise argparse.ArgumentTypeError(
+            f"unknown time unit {unit!r} in {text!r}; "
+            f"expected one of {list(VALID_UNITS)} (e.g. 1523400ps / 12ns)")
+    return {"time": m.group(1), "unit": unit}
 
 
 def main(argv=None) -> int:

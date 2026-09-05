@@ -17,32 +17,37 @@ Probed syntax on the pinned Surfer build (see dev-docs):
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 # NOTE: schema times carry a unit; the FST timescale for our sessions is
 # ps in all validated flows. v1 passes the raw value through and documents
 # ps as the canonical schema unit; revisit if a non-ps timescale shows up.
 
 
-def _raw(obj: Dict[str, Any], timescale_exp: int = 0) -> str:
+def _raw(obj: Dict[str, Any], timescale_exp: int = 0) -> Optional[str]:
     """Convert a schema time {time, unit} into waveform-native units.
 
     Schema times carry a unit (default ps); Surfer's batch commands take
     RAW NUMBERS in the waveform's own timescale, so passing ``830s``
     straight through makes it fail with InvalidParameter. Reuse the
     project-wide time parser so viewer and analysis tools agree.
+
+    Returns ``None`` for an unknown unit or malformed value: the caller then
+    drops that one command. Emitting the bare number instead would move the
+    cursor or marker to an arbitrary time and look like a rendering bug, so
+    an omitted command is both safer and self-evident in the command string.
     """
-    from ..timeutil import time_to_fst_units
+    from ..timeutil import time_to_fst_units, VALID_UNITS
 
     val = str(obj["time"])
     unit = str(obj.get("unit") or "ps")
+    if unit.lower() not in VALID_UNITS:
+        return None
     text = val if val.endswith(unit) else f"{val}{unit}"
     try:
         return str(time_to_fst_units(text, int(timescale_exp)))
     except ValueError:
-        # unknown unit or malformed value: pass the number through rather
-        # than dropping the command entirely
-        return str(val)
+        return None
 
 
 def _divider_name(group: str) -> str:
@@ -112,20 +117,28 @@ def desired_to_sucl(desired: Dict[str, Any],
     vp = desired.get("viewport")
     if vp:
         vunit = vp.get("unit", "ps")
-        cmds.append(
-            f"zoom_to "
-            f"{_raw({'time': vp['from'], 'unit': vunit}, timescale_exp)} "
-            f"{_raw({'time': vp['to'], 'unit': vunit}, timescale_exp)}")
+        lo = _raw({"time": vp["from"], "unit": vunit}, timescale_exp)
+        hi = _raw({"time": vp["to"], "unit": vunit}, timescale_exp)
+        if lo is not None and hi is not None:
+            cmds.append(f"zoom_to {lo} {hi}")
     elif desired.get("signals"):
         cmds.append("zoom_fit")
 
     cur = desired.get("cursor")
     if cur:
         t = _raw(cur, timescale_exp)
-        cmds.append(f"cursor_set {t}")
-        cmds.append(f"goto_time {t}")
+        if t is not None:
+            cmds.append(f"cursor_set {t}")
+            cmds.append(f"goto_time {t}")
 
-    for i, mk in enumerate(desired.get("markers", []), start=1):
-        cmds.append(f"marker_set_at {_raw(mk, timescale_exp)} {i}")
+    # number markers over the *accepted* ones only, so a rejected time cannot
+    # shift every subsequent marker onto the wrong id
+    nxt = 1
+    for mk in desired.get("markers", []):
+        t = _raw(mk, timescale_exp)
+        if t is None:
+            continue
+        cmds.append(f"marker_set_at {t} {nxt}")
+        nxt += 1
 
     return ";".join(cmds)

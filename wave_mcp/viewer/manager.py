@@ -118,6 +118,7 @@ class ViewManager:
             shell_dir=shell_web_dir(),
             surver_base=surver.base_url,
             state=state,
+            token=surver.token,
         )
         server.start()
 

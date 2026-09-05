@@ -93,12 +93,17 @@ def _parse_filelist(path: str) -> Tuple[List[str], List[str], List[str]]:
       * ``-incdir <dir>`` / ``-y <dir>`` / ``-I<dir>``
       * ``+define+NAME[=VAL]`` and ``-define NAME``
       * ``-f <other.f>`` recursion
+      * ``$VAR`` / ``${VAR}`` environment expansion. Real filelists are full
+        of these (``-F $PROJ_FE/rtl/foo.f``). An undefined variable leaves the
+        token untouched, so it simply drops out as a missing file; export the
+        variable (or replace it with a literal path) to pick those files up.
     Plain tokens are treated as source files (relative to the .f location).
     Unknown ``-``/``+`` options are ignored (not treated as files).
     """
     base = os.path.dirname(os.path.abspath(path))
 
     def _abs(p: str) -> str:
+        p = os.path.expandvars(p)
         return p if os.path.isabs(p) else os.path.normpath(os.path.join(base, p))
 
     files: List[str] = []

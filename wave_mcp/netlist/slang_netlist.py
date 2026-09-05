@@ -239,6 +239,23 @@ def _named_values(node) -> List[str]:
     return res
 
 
+def _abs_source(f: Optional[str]) -> Optional[str]:
+    """Absolute path for a file name reported by pyslang.
+
+    pyslang echoes back whatever path it was handed. Absolute entries are
+    taken as-is; relative ones are resolved against the cwd, and only kept
+    when that file really exists. Otherwise the raw value survives and
+    ``RtlSource.resolve_file`` retries it against ``build_root`` or the
+    maps.json ancestors, so a netlist stays usable after the tree moves.
+    """
+    if not f:
+        return None
+    if os.path.isabs(f):
+        return f
+    ap = os.path.abspath(f)
+    return ap if os.path.exists(ap) else f
+
+
 class _Loc:
     def __init__(self, sm):
         self.sm = sm
@@ -248,7 +265,7 @@ class _Loc:
         try:
             f = self.sm.getFileName(location)
             ln = self.sm.getLineNumber(location)
-            return f, ln
+            return _abs_source(f), ln
         except Exception:
             return None, None
 
@@ -1090,6 +1107,9 @@ def build_netlist(files: List[str], top: Optional[str] = None,
     result = {
         "tool": "pyslang",
         "version": getattr(ps, "__version__", "?"),
+        # cwd the netlist was built from: the fallback base for any relative
+        # source path that survived _abs_source().
+        "build_root": os.getcwd(),
         "top": top or (list(instance_tree)[0] if instance_tree else None),
         "diagnostics": len(diags),
         "diagnostics_summary": diag_summary,

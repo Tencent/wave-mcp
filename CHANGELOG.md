@@ -4,6 +4,58 @@ All notable changes to wave-mcp are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2026-09-05
+
+### Fixed
+
+- **Signals declared on the DUT top level reported `unresolved_path`.** Scope
+  resolution tried three levels: an exact netlist key, a leaf-name match, then
+  the FST `component` field. The last level was dead code, because that field is
+  empty for every waveform we produce, both Verilator's native FST and
+  VCD-derived ones, so it never resolved anything. Historical sessions never
+  noticed, since their netlist was elaborated from the testbench top and its
+  root key matched the FST root, which let level one absorb every lookup. A
+  DUT-rooted netlist breaks that: the root key is the DUT (`decode`) while the
+  FST root is the testbench (`top_tb.U_DECODE`), so levels one and two both miss
+  and the root falls through to the branch that never works. Level three now
+  also accepts `definition_name`, which the anchor pass derives from the
+  netlist, so the root resolves and its direct signals become traceable.
+- **Cross-hierarchy tracing only worked in one direction.** `loads()` already
+  descended into sub-modules; `drivers()` did not, so the same wire returned a
+  connection from `signal_connectivity` and `undriven_signal` from
+  `signal_drivers`. Both directions now walk peers, filtered by port direction:
+  upstream takes same-level fan-in plus sub-module **output** ports, downstream
+  takes same-level loads plus sub-module **input** ports. Direction filtering is
+  what keeps a source like a top-level reset from being reported as driven by
+  the flops it feeds. Resolved results say which hop they came from.
+- **Source paths from the netlist could not be opened.** `modules_in_file`
+  always returned 0 and `signal_drivers` handed back paths such as
+  `examples/sample/counter.sv` that resolve against nothing, because paths were
+  stored relative to the elaboration cwd but looked up against the cwd at query
+  time. Netlist builds now record the cwd they ran from and prefer absolute
+  paths; every remaining relative path is rewritten once when the netlist loads,
+  resolved against the build root, the netlist directory and its ancestors. One
+  normalisation point, because these paths reach callers through drivers, loads,
+  fan-in, trace results and declarations alike.
+- **Filelists ignored environment variables.** `-F $PROJ_FE/rtl/foo.f` was taken
+  literally, so an entire file group silently dropped out of elaboration as
+  missing files. Tokens now pass through `os.path.expandvars`, and an undefined
+  variable is left untouched so it still fails as a missing file rather than
+  turning into a path that exists by accident.
+- **A misspelled time unit silently moved the cursor.** `--cursor 1000nanoseconds`
+  was accepted and landed at an arbitrary time with no warning, because the
+  converter fell back to emitting the bare number when unit parsing failed,
+  which means something entirely different from converting it. Unknown units are
+  now rejected at the CLI and dropped from the generated command batch, and
+  remaining markers are renumbered so one bad entry cannot shift the rest onto
+  the wrong ids. Accepted units come from a single list in `timeutil`.
+- **The viewer stayed blank in IDE-embedded browsers.** The page receives the
+  backend token in the URL query string, and some embedded browsers drop the
+  query on navigation, leaving the shell requesting a URL that 404s and a canvas
+  that never paints. The token is now served alongside the view state and the
+  page falls back to it, so the bare URL works. Each server still serves one
+  view on localhost only.
+
 ## [0.2.2] - 2026-09-05
 
 ### Added

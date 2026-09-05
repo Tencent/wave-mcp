@@ -24,11 +24,18 @@ from .state import ViewState, ViewStateError
 
 class ViewerServer:
     def __init__(self, wasm_dir: str, shell_dir: str, surver_base: str,
-                 state: ViewState, port: Optional[int] = None) -> None:
+                 state: ViewState, port: Optional[int] = None,
+                 token: str = "") -> None:
         self.wasm_dir = Path(wasm_dir)
         self.shell_dir = Path(shell_dir)
         self.surver_base = surver_base.rstrip("/")
         self.state = state
+        # Surver token for this view. The page normally receives it in the
+        # query string, but some embedded browsers drop the query on
+        # navigation, which used to leave the shell with an empty token, a
+        # /surver/ URL that 404s and a permanently blank viewer. Serving it
+        # alongside the state makes the page work from the bare URL too.
+        self.token = token
         handler = _make_handler(self)
         if port is None:
             from . import alloc_port
@@ -197,6 +204,9 @@ def _make_handler(owner: ViewerServer):
                     snap = owner.state.wait_change(int(since[0]))
                 else:
                     snap = owner.state.snapshot()
+                # let the page recover the token when the query string was
+                # dropped by the embedding browser
+                snap["token"] = owner.token
                 self._json(200, snap)
             else:
                 self._static()

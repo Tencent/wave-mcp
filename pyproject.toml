@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wave-mcp"
-version = "0.2.2"
+version = "0.2.3"
 description = "Open-source, license-free MCP server for RTL waveform debug (FST + SystemVerilog static analysis), an Indago/Verisium Debug MCP alternative."
 readme = "README.md"
 requires-python = ">=3.10"

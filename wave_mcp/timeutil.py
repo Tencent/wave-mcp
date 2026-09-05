@@ -21,6 +21,10 @@ _UNIT_EXP = {
     "fs": -15,
 }
 
+#: Units accepted by the time parsers. Single source of truth so the viewer
+#: schema, the sucl translator and the CLI all reject the same set.
+VALID_UNITS = tuple(_UNIT_EXP)
+
 _TIME_RE = re.compile(r"^\s*([0-9]*\.?[0-9]+)\s*([a-zA-Z]*)\s*$")
 
 

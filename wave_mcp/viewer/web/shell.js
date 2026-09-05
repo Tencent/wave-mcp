@@ -201,6 +201,11 @@
   }
 
   function applySnapshot(snap) {
+    // Some embedded browsers (IDE preview panes) drop the query string on
+    // navigation, which used to leave the shell with an empty token, a
+    // /surver/ URL that 404s and a permanently blank viewer. The server
+    // reports the token with the state, so recover it here.
+    if (!token && snap.token) { token = snap.token; }
     var desired = snap.desired || {};
     var sigKey = signalsKey(desired);
     var nKey = navKey(desired);
