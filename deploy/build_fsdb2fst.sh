@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Build fsdb2fst : Synopsys FSDB -> FST single-pass converter.
 #
-# Layout (standalone binary, no external build system required):
+# Layout (mirrors the public TraceWeave FsdbReader setup, adapted for a
+# standalone binary with no external build system; MIT, Copyright (c) 2025
+# gokeshenzhen, https://github.com/gokeshenzhen/TraceWeave, see
+# docs/THIRD_PARTY.md):
 #   third_party/fsdb2fst/fsdb2fst.cpp   converter source (MIT, tracked in git)
 #   third_party/fsdb2fst/fst/           fstapi + lz4 + fastlz (MIT, vendored)
 #   third_party/fsdb2fst/ffrAPI_stub*   offline compile-check stubs (not used

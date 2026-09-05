@@ -12,6 +12,11 @@
  * must use the genuine $VERDI_HOME/share/FsdbReader/ffrAPI.h; this stub
  * never ships in that build and is harmless if the include order picks it
  * only when -DFFRAPI_STUB is passed.
+ *
+ * Attribution: the same subset is exercised by the public TraceWeave wrapper,
+ * which served as a reference when shaping these signatures (MIT, Copyright
+ * (c) 2025 gokeshenzhen, https://github.com/gokeshenzhen/TraceWeave). See
+ * docs/THIRD_PARTY.md for the full notice.
  */
 #ifndef FFR_API_STUB_H
 #define FFR_API_STUB_H
@@ -37,7 +42,7 @@ typedef int     fsdbRC;
 typedef uint32_t fsdbVarIdcode;
 typedef uint32_t fsdbSeqNum;
 /* real ffrAPI: fsdbXTag is layout-identical to fsdbTag64 (the converter
- * casts between them) */
+ * casts between them; the public TraceWeave wrapper relies on the same) */
 typedef struct fsdbTag64 { uint_T H; uint_T L; } fsdbTag64;
 typedef fsdbTag64 fsdbXTag;
 
