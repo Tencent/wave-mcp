@@ -67,6 +67,8 @@ def main():
                        [PY, os.path.join(HERE, "unit", "smoke_test.py")]))
     results.append(run("unit/definition_name",
                        [PY, os.path.join(HERE, "unit", "test_definition_name.py")]))
+    results.append(run("unit/dut_root",
+                       [PY, os.path.join(HERE, "unit", "test_dut_root.py")]))
     results.append(run("unit/diff",
                        [PY, os.path.join(HERE, "unit", "test_diff.py")]))
     results.append(run("unit/viewer",
