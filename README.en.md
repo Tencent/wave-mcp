@@ -519,6 +519,28 @@ the whole chain (standalone Python + wheels + vcd2fst + musl static surver) runs
 glibc >= 2.17, including CentOS 7. See sections 1.0 and 1c of
 [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md).
 
+**Q11: How does the FSDB converter relate to TraceWeave?**
+FSDB support is the newest part of wave-mcp (added 2026-08-31) and the only place where we
+learned from a public implementation instead of starting from scratch, so credit is due and
+the boundary is worth stating.
+
+`ParseScaleFs` in `fsdb2fst.cpp`, which turns an FSDB scale string (`1ns`, `100fs`, ...) into
+femtoseconds per tick, was written with the public TraceWeave implementation as a reference:
+we kept its error contract (an unparseable scale yields 0 and the caller aborts rather than
+assuming a unit) and its unit table. The offline `ffrAPI` stub mirrors the subset of ffrAPI
+that TraceWeave exercises, and its build layout follows the same setup. Everything else, the
+conversion pipeline, the FST writer path, and the pass-through tick time model, is ours.
+
+We got the attribution wrong once and have corrected it: the comments naming the project came
+in with the converter on 2026-08-31 and were dropped on 2026-09-01 during a broader cleanup
+of vendor references, which left the file described as `original code`. That description was
+inaccurate. Source, license, and thanks are now recorded in `THIRD_PARTY.md` and in the
+headers of both source files.
+
+The core of wave-mcp (the pyslang static netlist, the trace engine, and the MCP tool surface)
+was developed independently and predates the FSDB work by more than six weeks. See the
+Attribution section of [`docs/THIRD_PARTY.md`](docs/THIRD_PARTY.md) for the full notice.
+
 ---
 
 ## Architecture

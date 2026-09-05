@@ -17,6 +17,14 @@
  * redistributed here; the binary is a local artifact and never enters the
  * public repo or PyPI (see docs/THIRD_PARTY.md).
  *
+ * Attribution: the FSDB scale parser below (ParseScaleFs) was written with
+ * the public TraceWeave implementation as a reference (MIT, Copyright (c)
+ * 2025 gokeshenzhen, https://github.com/gokeshenzhen/TraceWeave). We kept its
+ * error contract, unparseable -> 0 with the caller aborting rather than
+ * assuming a unit, and its unit table. The rest of this converter, the ffrAPI
+ * load path, the FST writer path, and the pass-through tick time model, is
+ * ours. See docs/THIRD_PARTY.md for the full notice.
+ *
  * Time model (fail-loud, pass-through like vcd2fst):
  *   FSDB stores tick counts; true_time = tick * scale, scale comes from
  *   ffrGetScaleUnit() (e.g. "1ns"). FST time values are likewise raw counts
@@ -119,7 +127,9 @@ void vinfo(const char *fmt, ...) {  /* printed regardless of verbosity */
 }
 
 /* ---------- FSDB scale string ("1ns", "100fs", ...) -> fs per tick ----------
- * Contract: unparseable -> 0, callers must abort rather than assume a unit. */
+ * Contract: unparseable -> 0, callers must abort rather than assume a unit.
+ * The contract and the unit table follow the public TraceWeave wrapper (MIT,
+ * https://github.com/gokeshenzhen/TraceWeave); see docs/THIRD_PARTY.md. */
 
 unsigned long long ParseScaleFs(const char *s) {
     if (!s || !*s) return 0;

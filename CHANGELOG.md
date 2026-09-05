@@ -4,6 +4,53 @@ All notable changes to wave-mcp are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-09-05
+
+### Added
+
+- **`WAVE_MCP_SESSION_ROOT` confines where session directories land.** `out_dir`
+  is chosen by the calling model, so a drifted prompt could scatter sessions
+  across `/tmp`, the cwd, or a shared regression directory, where two users with
+  different filelists collide on one directory and silently inherit each other's
+  netlist. Set this variable and every `out_dir` resolves inside it: a bare name
+  or relative path lands in the root, a path already inside it is kept, and one
+  pointing elsewhere is remapped in by basename. Unset, behaviour is unchanged.
+  The reply's `session_path` is always the real location.
+- **Environment variables documented in one table.** Both READMEs now carry the
+  full set (session root, Verdi/FSDB, vcd2fst, viewer, cache) and state that
+  these belong in the `env` block of the MCP client config, since an
+  agent-spawned server does not inherit an interactive shell's exports.
+  `VERDI_HOME` is now explicit about pointing at the install root rather than a
+  subdirectory.
+
+### Fixed
+
+- **Viewer backends outlived the process that started them.** `SurverManager`
+  relied solely on an `atexit` hook, which Python skips on `SIGTERM`, so
+  killing a `wave-view` CLI or an MCP server left one `surver` per open view
+  running indefinitely, holding memory and a listening port. Found in the field
+  with four backends still alive 23 hours after their servers were abandoned.
+  Both entry points now install `SIGTERM` / `SIGINT` / `SIGHUP` handlers that
+  close views explicitly, and `surver` children additionally set
+  `PR_SET_PDEATHSIG` so the kernel reaps them even when the parent is
+  `SIGKILL`ed or crashes, which no in-process handler can cover. The
+  server-side cleanup inspects `sys.modules` instead of importing the viewer,
+  so installs without the optional assets are unaffected.
+
+### Changed
+
+- **FSDB converter attribution made accurate.** `fsdb2fst` is the newest part of
+  wave-mcp and the only place where prior public work was consulted rather than
+  starting from scratch: `ParseScaleFs` (FSDB scale string to femtoseconds per
+  tick) keeps the error contract and unit table of the public TraceWeave
+  implementation, and the offline `ffrAPI` stub mirrors the subset of ffrAPI it
+  exercises. Comments naming the project came in with the converter on
+  2026-08-31 and were dropped on 2026-09-01 during a broader cleanup of vendor
+  references, which left the file described as `original code`. That
+  description was inaccurate. `docs/THIRD_PARTY.md` and the headers of both
+  source files now carry the project name, author, MIT license, link, and our
+  thanks.
+
 ## [0.2.1] - 2026-09-04
 
 ### Added
@@ -157,6 +204,7 @@ SystemVerilog static analysis (pyslang elaboration), covering hierarchy
 browsing, signal values, driver/load tracing, X-cause tracing and file-level
 queries.
 
+[0.2.2]: https://github.com/Tencent/wave-mcp/releases/tag/v0.2.2
 [0.2.1]: https://github.com/Tencent/wave-mcp/releases/tag/v0.2.1
 [0.2.0]: https://github.com/Tencent/wave-mcp/releases/tag/v0.2.0
 [0.1.1]: https://github.com/Tencent/wave-mcp/releases/tag/v0.1.1

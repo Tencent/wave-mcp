@@ -10,6 +10,13 @@
  *
  * The script runner is intentionally tiny; it exists to reproduce and verify
  * the tree-callback and value-chunking behaviour we saw on the Verdi machine.
+ *
+ * Attribution: the signatures stubbed here mirror the subset of ffrAPI that
+ * the public TraceWeave wrapper exercises, and the FsdbReader build layout
+ * follows its setup (MIT, Copyright (c) 2025 gokeshenzhen,
+ * https://github.com/gokeshenzhen/TraceWeave), so that offline stub builds
+ * behave like the Verdi-backed build. The script engine and the fake-FSDB
+ * behaviour are ours. See docs/THIRD_PARTY.md for the full notice.
  */
 #include <cstdio>
 #include <cstdlib>

@@ -47,7 +47,7 @@ vendored FST writer are:
 
 | Component | License | Source |
 | --- | --- | --- |
-| fsdb2fst.cpp (this repo) | MIT (wave-mcp) | original code |
+| fsdb2fst.cpp (this repo) | MIT (wave-mcp) | original code; FSDB timescale parsing and the ffrAPI stub signatures were informed by the public TraceWeave implementation, see below |
 | fstapi / libfst | MIT | https://github.com/gtkwave/libfst (via gtkwave 3.3.121) |
 | LZ4 | BSD-2-Clause (Yann Collet) | via gtkwave 3.3.121 |
 | FastLZ | MIT (Ariya Hidayat) | via gtkwave 3.3.121 |
@@ -61,7 +61,45 @@ git, PyPI, and the offline bundle (`third_party/verdi_runtime/` is
 gitignored). Runtime use of the FsdbReader libraries performs no Synopsys
 license checkout (verify in your own environment, e.g. with `lmstat`).
 
-## fstdumper patches (not distributed; users build it themselves)
+### Attribution: TraceWeave
+
+FSDB support is the newest part of wave-mcp. It was added on 2026-08-31 and is
+the one area where we learned from prior public work rather than starting from
+a blank page. Credit is due here, and earlier commits under-stated it.
+
+| Item | Detail |
+| --- | --- |
+| Project | TraceWeave |
+| Author | gokeshenzhen (一辉) |
+| License | MIT, Copyright (c) 2025 gokeshenzhen |
+| Link | https://github.com/gokeshenzhen/TraceWeave |
+
+What we consulted, and how far it goes:
+
+- `ParseScaleFs()` in `fsdb2fst.cpp` turns an FSDB scale string such as `1ns`
+  or `100fs` into femtoseconds per tick. It was written with the public
+  TraceWeave wrapper as a reference: we adopted its error contract (an
+  unparseable scale yields 0 and the caller aborts instead of assuming a
+  unit) and its unit table. The surrounding conversion pipeline, the FST
+  writer path, and the tick pass-through time model are ours.
+- The stub in `ffrAPI_stub_impl.cpp` mirrors the subset of ffrAPI that
+  TraceWeave exercises, and its build layout follows the TraceWeave
+  FsdbReader setup, so offline stub builds behave like the Verdi-backed build.
+
+Everything else in wave-mcp, in particular the pyslang static netlist, the
+trace engine, and the MCP tool surface, was developed independently and
+predates our FSDB work by more than six weeks. TraceWeave's own pyslang
+backend, its Source Graph, arrived later still, and its author describes it as
+a fallback used when the Verdi NPI backend is unavailable.
+
+TraceWeave is MIT-licensed, so reading and reusing it is permitted. MIT also
+requires that attribution travel with the code, and we got this wrong for a
+few days: comments naming the project came in with the converter on
+2026-08-31, then were dropped on 2026-09-01 during a broader cleanup of
+vendor references, which left the file described as `original code`. That
+description was inaccurate. It is corrected above and in the two source file
+headers, and our thanks go to the TraceWeave author for the work we could
+read and build on.
 
 `third_party/fstdumper/` carries patch files for the upstream
 [fstdumper](https://github.com/semify-eda/fstdumper) project (GPL-3.0), a VPI

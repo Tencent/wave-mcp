@@ -450,6 +450,15 @@ glibc 2.17 档产物即可：`deploy/docker_build_all.sh` 自动在容器内自�
 + musl 静态 surver）在 glibc ≥ 2.17 均可运行，含 CentOS 7。
 详见 [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md) 第 1.0 节与第 1c 节。
 
+**Q11：FSDB 转换器和 TraceWeave 是什么关系？**
+FSDB 支持是 wave-mcp 里最晚加的部分（2026-08-31），也是唯一一处参考了公开实现而非从零写的地方，我们在此致谢并说明边界。
+
+`fsdb2fst.cpp` 里的 `ParseScaleFs` 把 FSDB 刻度字符串（如 `1ns`、`100fs`）解析为每 tick 的飞秒数，它参考了 TraceWeave 的公开实现，沿用了其错误契约（解析不出就返回 0，由调用方中止而非猜测单位）与单位表；`ffrAPI` 离线 stub 的签名与构建布局也参考了它的做法。除此之外，转换管线、FST 写出路径、tick 直通的时间模型均为自研。
+
+归属上我们出过一次错并已更正：相关注释随转换器于 2026-08-31 写入，2026-09-01 在一次清理 vendor 引用的改动中被一并删除，导致第三方说明里该文件被标为 `original code`。这个表述不准确，现已在 `THIRD_PARTY.md` 与两个源文件头部补齐来源、许可与致谢。
+
+主体能力（pyslang 静态网表、trace 引擎、MCP 工具层）为独立开发，早于 FSDB 部分六个多星期。完整声明见 [`docs/THIRD_PARTY.md`](docs/THIRD_PARTY.md) 的 Attribution 一节。
+
 ---
 
 ## 架构
