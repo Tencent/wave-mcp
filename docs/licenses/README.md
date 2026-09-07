@@ -9,6 +9,7 @@ builds work in containers without network access.
 | --- | --- | --- | --- |
 | `LGPL-2.1.txt` | LGPL-2.1 | `jrb` (libfdr) linked into the bundled `vcd2fst` binary | https://www.gnu.org/licenses/old-licenses/lgpl-2.1.txt |
 | `EUPL-1.2.txt` | EUPL-1.2 | Surfer WASM + `surver` in the viewer assets package | https://gitlab.com/surfer-project/surfer/-/raw/v0.7.0/LICENSE-EUPL-1.2.txt |
+| `TraceWeave-MIT.txt` | MIT (Copyright (c) 2025 gokeshenzhen) | parts of `third_party/fsdb2fst` written with TraceWeave as a reference; see [THIRD_PARTY.md](../THIRD_PARTY.md) | https://github.com/gokeshenzhen/TraceWeave |
 
 Copy rules (enforced by the packaging scripts):
 

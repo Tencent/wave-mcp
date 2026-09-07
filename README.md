@@ -56,6 +56,8 @@ wave-mcp 用**纯开源技术栈**（pylibfst + pyslang）提供完整波形调�
 - **波形查看器**：`open_wave_view` 让 agent 分析完直接弹浏览器波形，嫌疑信号 + 游标钉在出错时刻 + 分析说明弹窗；双波形 lockstep 对比；`get_view_state` 反向感知用户在看什么。
 - **部署友好**：stdio（一人一进程，零运维）/ HTTP 多会话 / 离线自包含包（隔离网）。
 
+FSDB 转换器（`third_party/fsdb2fst`）中的部分实现参考了 TraceWeave（MIT），`diff_waveforms` 的功能优先级亦受其影响，详见 [`docs/THIRD_PARTY.md`](docs/THIRD_PARTY.md)。
+
 ## 系统要求
 
 | 依赖 | 版本要求 | 说明 |
@@ -451,13 +453,13 @@ glibc 2.17 档产物即可：`deploy/docker_build_all.sh` 自动在容器内自�
 详见 [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md) 第 1.0 节与第 1c 节。
 
 **Q11：FSDB 转换器和 TraceWeave 是什么关系？**
-FSDB 支持是 wave-mcp 里最晚加的部分（2026-08-31），也是唯一一处参考了公开实现而非从零写的地方，我们在此致谢并说明边界。
+wave-mcp 在 FSDB 支持这部分功能参考了 [TraceWeave](https://github.com/gokeshenzhen/TraceWeave)（MIT，Copyright (c) 2025 gokeshenzhen），主要是时间刻度解析、`ffrAPI` 离线 stub 的接口子集与构建布局、以及 FSDB 位序和时间标签结构的核对。此外，`diff_waveforms`（pass/fail 波形首个分歧点定位）的代码为独立编写、未复用其代码，这个功能原本排在我们的开发规划中，TraceWeave 的 `diff_first_divergence` 出现得更早，我们在排功能优先级时参考过它，这一点一并致谢。
 
-`fsdb2fst.cpp` 里的 `ParseScaleFs` 把 FSDB 刻度字符串（如 `1ns`、`100fs`）解析为每 tick 的飞秒数，它参考了 TraceWeave 的公开实现，沿用了其错误契约（解析不出就返回 0，由调用方中止而非猜测单位）与单位表；`ffrAPI` 离线 stub 的签名与构建布局也参考了它的做法。除此之外，转换管线、FST 写出路径、tick 直通的时间模型均为自研。
+归属上我们出过错：相关注释 2026-08-31 随转换器写入，9-01 清理 vendor 引用时被一并删掉，声明里一度把该文件写成 `original code`，后来补回时范围也偏窄。两处均已更正。
 
-归属上我们出过一次错并已更正：相关注释随转换器于 2026-08-31 写入，2026-09-01 在一次清理 vendor 引用的改动中被一并删除，导致第三方说明里该文件被标为 `original code`。这个表述不准确，现已在 `THIRD_PARTY.md` 与两个源文件头部补齐来源、许可与致谢。
+参考的具体范围、独立实现与设计影响的边界、以及这次更正的完整说明，见 [`docs/THIRD_PARTY.md`](docs/THIRD_PARTY.md) 的 Attribution 一节；TraceWeave 的 MIT 许可全文另存于 [`docs/licenses/TraceWeave-MIT.txt`](docs/licenses/TraceWeave-MIT.txt)。
 
-主体能力（pyslang 静态网表、trace 引擎、MCP 工具层）为独立开发，早于 FSDB 部分六个多星期。完整声明见 [`docs/THIRD_PARTY.md`](docs/THIRD_PARTY.md) 的 Attribution 一节。
+wave-mcp 项目的主体核心能力（pyslang 静态网表、trace 引擎、MCP 工具层）为独立开发。
 
 ---
 

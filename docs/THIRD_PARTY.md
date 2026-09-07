@@ -47,7 +47,7 @@ vendored FST writer are:
 
 | Component | License | Source |
 | --- | --- | --- |
-| fsdb2fst.cpp (this repo) | MIT (wave-mcp) | original code; FSDB timescale parsing and the ffrAPI stub signatures were informed by the public TraceWeave implementation, see below |
+| fsdb2fst.cpp (this repo) | MIT (wave-mcp) | written by us, with specific parts informed by the public TraceWeave implementation: the FSDB timescale parser, the ffrAPI stub signature subset, the FSDB bit-array ordering, and the time-tag struct layout. See the attribution section below for the exact scope |
 | fstapi / libfst | MIT | https://github.com/gtkwave/libfst (via gtkwave 3.3.121) |
 | LZ4 | BSD-2-Clause (Yann Collet) | via gtkwave 3.3.121 |
 | FastLZ | MIT (Ariya Hidayat) | via gtkwave 3.3.121 |
@@ -63,9 +63,10 @@ license checkout (verify in your own environment, e.g. with `lmstat`).
 
 ### Attribution: TraceWeave
 
-FSDB support is the newest part of wave-mcp. It was added on 2026-08-31 and is
-the one area where we learned from prior public work rather than starting from
-a blank page. Credit is due here, and earlier commits under-stated it.
+wave-mcp's FSDB support was written with reference to TraceWeave. It was added
+on 2026-08-31 and is the area where we drew on prior public work rather than
+starting from a blank page. Credit is due here, and earlier commits under-stated
+it.
 
 | Item | Detail |
 | --- | --- |
@@ -73,33 +74,63 @@ a blank page. Credit is due here, and earlier commits under-stated it.
 | Author | gokeshenzhen (一辉) |
 | License | MIT, Copyright (c) 2025 gokeshenzhen |
 | Link | https://github.com/gokeshenzhen/TraceWeave |
+| License text | [`licenses/TraceWeave-MIT.txt`](licenses/TraceWeave-MIT.txt) |
 
-What we consulted, and how far it goes:
+Two different kinds of influence are worth separating, because they are not the
+same thing: code we wrote with reference to TraceWeave's public implementation,
+and a feature whose priority its work influenced. Writing code independently and
+being influenced in design are not mutually exclusive, so both are listed below.
 
-- `ParseScaleFs()` in `fsdb2fst.cpp` turns an FSDB scale string such as `1ns`
-  or `100fs` into femtoseconds per tick. It was written with the public
-  TraceWeave wrapper as a reference: we adopted its error contract (an
-  unparseable scale yields 0 and the caller aborts instead of assuming a
-  unit) and its unit table. The surrounding conversion pipeline, the FST
-  writer path, and the tick pass-through time model are ours.
-- The stub in `ffrAPI_stub_impl.cpp` mirrors the subset of ffrAPI that
-  TraceWeave exercises, and its build layout follows the TraceWeave
-  FsdbReader setup, so offline stub builds behave like the Verdi-backed build.
+**1. Implementation-level references (FSDB converter only)**
 
-Everything else in wave-mcp, in particular the pyslang static netlist, the
-trace engine, and the MCP tool surface, was developed independently and
-predates our FSDB work by more than six weeks. TraceWeave's own pyslang
-backend, its Source Graph, arrived later still, and its author describes it as
-a fallback used when the Verdi NPI backend is unavailable.
+- `ParseScaleFs()` in `fsdb2fst.cpp` was implemented with reference to
+  TraceWeave's `_ParseScaleFs`, including the time-unit conversion table and
+  the convention for handling a parse failure (an unparseable scale yields 0
+  and the caller aborts rather than assuming a unit).
+- The stub in `ffrAPI_stub_impl.cpp` and `ffrAPI_stub.h` mirrors the subset of
+  ffrAPI that the public TraceWeave wrapper exercises, and its FsdbReader
+  build layout follows the same setup, so offline stub builds behave like the
+  Verdi-backed build.
+- The FSDB per-bit array ordering (MSB-first, `vc[i] -> s[i]`) was confirmed
+  against TraceWeave's verified wrapper. An earlier commit stated this
+  explicitly; the reference was dropped on 2026-09-01 and is restored.
+- The time-tag struct layout (`fsdbXTag` being layout-compatible with
+  `fsdbTag64`, which the converter casts between) was likewise cross-checked
+  against the same wrapper.
+
+The surrounding conversion pipeline, the ffrAPI load path, the FST writer
+path, the pass-through tick time model, and the scriptable offline stub engine
+are ours.
+
+**2. Design-level influence**
+
+- `diff_waveforms` (`wave_mcp/diff.py`) was written independently and reuses no
+  code from TraceWeave. Locating the first divergence between a pass and a fail
+  waveform was already on our development roadmap. TraceWeave's
+  `diff_first_divergence` came earlier, and we referred to it when prioritising
+  the feature, which we credit here. Our implementation differs in that the
+  diverging signals feed into the netlist tools (`signal_fanin` /
+  `active_drivers` / `signal_drivers`) for causal backtracking, and into
+  `open_wave_view` for a dual-waveform diff view.
+- This is the only design-level influence we are aware of. The broader feature
+  set and tool organisation of wave-mcp were shaped by the capability set of
+  established commercial waveform debug tools, not by TraceWeave.
+
+**3. What was developed independently**
+
+The core of wave-mcp, in particular the pyslang static netlist, the trace
+engine, and the MCP tool surface, was written independently and predates our
+FSDB work by more than six weeks. This is a statement about code, not a claim
+that no design influence existed anywhere.
 
 TraceWeave is MIT-licensed, so reading and reusing it is permitted. MIT also
-requires that attribution travel with the code, and we got this wrong for a
-few days: comments naming the project came in with the converter on
-2026-08-31, then were dropped on 2026-09-01 during a broader cleanup of
-vendor references, which left the file described as `original code`. That
-description was inaccurate. It is corrected above and in the two source file
-headers, and our thanks go to the TraceWeave author for the work we could
-read and build on.
+requires that attribution travel with the code, and we got this wrong: comments
+naming the project came in with the converter on 2026-08-31, then were dropped
+on 2026-09-01 during a broader cleanup of vendor references, which left the
+file described as `original code`. That description was inaccurate, and the
+scope stated in later commits was narrower than what had actually been
+consulted. Both are corrected above and in the source file headers, and our
+thanks go to the TraceWeave author for the work we could read and build on.
 
 `third_party/fstdumper/` carries patch files for the upstream
 [fstdumper](https://github.com/semify-eda/fstdumper) project (GPL-3.0), a VPI

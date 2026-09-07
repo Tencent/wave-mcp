@@ -4,6 +4,41 @@ All notable changes to wave-mcp are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **TraceWeave attribution completed, with implementation reference and design
+  influence stated separately.** A closer review of our own commit history showed
+  that the earlier notices, while accurate as far as they went, described a
+  narrower scope than what had actually been consulted, and that two different
+  kinds of influence were being collapsed into one sentence. Both are now
+  separated:
+  - Code-level references, all within the FSDB converter: `ParseScaleFs` was
+    implemented with reference to TraceWeave's `_ParseScaleFs` (unit conversion
+    plus the parse-failure convention); the `ffrAPI` stub mirrors the subset it
+    exercises and follows the same FsdbReader build layout; the FSDB per-bit
+    MSB-first ordering (`vc[i] -> s[i]`) and the `fsdbXTag`/`fsdbTag64` layout
+    compatibility were cross-checked against its verified wrapper. The last two
+    were stated in the original 2026-08-31 commit, dropped on 2026-09-01, and
+    are restored.
+  - Design-level influence: `diff_waveforms` was written independently and reuses
+    no code. First-divergence localization was already on our development roadmap.
+    `diff_first_divergence` came earlier, and we referred to it when prioritising
+    the feature; that is now credited in `wave_mcp/diff.py` and the notice. It is
+    the only design-level influence we are aware of; the broader feature set and
+    tool organisation follow the capability set of established commercial waveform
+    debug tools.
+  - Wording such as "the only place" and "from scratch" is scoped to code, so the
+    code-level and design-level relationships are stated separately rather than
+    collapsed into one claim.
+- **TraceWeave MIT license text vendored** at
+  `docs/licenses/TraceWeave-MIT.txt`, with its original copyright line intact and
+  linked from `docs/THIRD_PARTY.md`, so attribution travels with any
+  redistribution.
+- **Attribution surfaced in both READMEs**, as a one-line note after the feature
+  list linking to the full notice, instead of living only in the FAQ.
+
 ## [0.2.3] - 2026-09-05
 
 ### Fixed
@@ -112,16 +147,17 @@ All notable changes to wave-mcp are documented here. Format follows
 ### Changed
 
 - **FSDB converter attribution made accurate.** `fsdb2fst` is the newest part of
-  wave-mcp and the only place where prior public work was consulted rather than
-  starting from scratch: `ParseScaleFs` (FSDB scale string to femtoseconds per
-  tick) keeps the error contract and unit table of the public TraceWeave
-  implementation, and the offline `ffrAPI` stub mirrors the subset of ffrAPI it
-  exercises. Comments naming the project came in with the converter on
+  wave-mcp and the place where prior public work was consulted at the code level
+  rather than starting from scratch: `ParseScaleFs` (FSDB scale string to
+  femtoseconds per tick) keeps the error contract and unit table of the public
+  TraceWeave implementation, and the offline `ffrAPI` stub mirrors the subset of
+  ffrAPI it exercises. Comments naming the project came in with the converter on
   2026-08-31 and were dropped on 2026-09-01 during a broader cleanup of vendor
   references, which left the file described as `original code`. That
   description was inaccurate. `docs/THIRD_PARTY.md` and the headers of both
   source files now carry the project name, author, MIT license, link, and our
-  thanks.
+  thanks. (The scope stated here was still narrower than what had actually been
+  consulted; see 0.2.4 for the complete account.)
 
 ## [0.2.1] - 2026-09-04
 

@@ -9,6 +9,13 @@ The diverging signals feed directly into the netlist tools (signal_fanin /
 active_drivers / signal_drivers) for causal backtracking, and into
 open_wave_view for a dual-waveform diff view with an auto marker.
 
+Attribution: this code was written independently and reuses nothing from
+TraceWeave. First-divergence localization was already on our development
+roadmap. TraceWeave's diff_first_divergence came earlier, and we referred
+to it when prioritising this feature (MIT, Copyright (c) 2025
+gokeshenzhen, https://github.com/gokeshenzhen/TraceWeave). See
+docs/THIRD_PARTY.md for the full notice.
+
 Pure data tool: no viewer assets required.
 """
 from __future__ import annotations

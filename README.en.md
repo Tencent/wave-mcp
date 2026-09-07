@@ -71,6 +71,10 @@ XiangShan added to the test set:
 - **Deployment-friendly**: stdio (one process per user, zero ops) / HTTP multi-session /
   self-contained offline bundle (air-gapped networks).
 
+Parts of the FSDB converter (`third_party/fsdb2fst`) were written with TraceWeave (MIT) as a
+reference, and it also influenced how we prioritised `diff_waveforms`; see
+[`docs/THIRD_PARTY.md`](docs/THIRD_PARTY.md).
+
 ## System requirements
 
 | Dependency | Version | Notes |
@@ -520,26 +524,27 @@ glibc >= 2.17, including CentOS 7. See sections 1.0 and 1c of
 [`docs/DEPLOY_AIRGAP.md`](docs/DEPLOY_AIRGAP.md).
 
 **Q11: How does the FSDB converter relate to TraceWeave?**
-FSDB support is the newest part of wave-mcp (added 2026-08-31) and the only place where we
-learned from a public implementation instead of starting from scratch, so credit is due and
-the boundary is worth stating.
+wave-mcp's FSDB support was written with reference to
+[TraceWeave](https://github.com/gokeshenzhen/TraceWeave) (MIT, Copyright (c) 2025 gokeshenzhen):
+specifically the timescale parsing, the `ffrAPI` offline stub's interface subset and build
+layout, and cross-checks on the FSDB bit ordering and time-tag struct layout. Separately,
+`diff_waveforms` (locating the first divergence between a pass and a fail waveform) was written
+independently with no code reused. The feature was already on our development roadmap.
+TraceWeave's `diff_first_divergence` came earlier, and we referred to it when prioritising the
+feature, which we credit here.
 
-`ParseScaleFs` in `fsdb2fst.cpp`, which turns an FSDB scale string (`1ns`, `100fs`, ...) into
-femtoseconds per tick, was written with the public TraceWeave implementation as a reference:
-we kept its error contract (an unparseable scale yields 0 and the caller aborts rather than
-assuming a unit) and its unit table. The offline `ffrAPI` stub mirrors the subset of ffrAPI
-that TraceWeave exercises, and its build layout follows the same setup. Everything else, the
-conversion pipeline, the FST writer path, and the pass-through tick time model, is ours.
+We got the attribution wrong: the comments naming the project went in with the converter on
+2026-08-31, were dropped on 2026-09-01 during a cleanup of vendor references, which left the
+file described as `original code`, and the scope stated when we restored it was still too
+narrow. Both are corrected.
 
-We got the attribution wrong once and have corrected it: the comments naming the project came
-in with the converter on 2026-08-31 and were dropped on 2026-09-01 during a broader cleanup
-of vendor references, which left the file described as `original code`. That description was
-inaccurate. Source, license, and thanks are now recorded in `THIRD_PARTY.md` and in the
-headers of both source files.
+For the exact scope of what we consulted, the boundary between independent implementation and
+design influence, and the full account of this correction, see the Attribution section of
+[`docs/THIRD_PARTY.md`](docs/THIRD_PARTY.md). The full TraceWeave MIT license text is kept at
+[`docs/licenses/TraceWeave-MIT.txt`](docs/licenses/TraceWeave-MIT.txt).
 
-The core of wave-mcp (the pyslang static netlist, the trace engine, and the MCP tool surface)
-was developed independently and predates the FSDB work by more than six weeks. See the
-Attribution section of [`docs/THIRD_PARTY.md`](docs/THIRD_PARTY.md) for the full notice.
+The core capabilities of the wave-mcp project (the pyslang static netlist, the trace engine, and
+the MCP tool surface) were developed independently.
 
 ---
 
