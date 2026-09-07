@@ -157,7 +157,7 @@ All notable changes to wave-mcp are documented here. Format follows
   description was inaccurate. `docs/THIRD_PARTY.md` and the headers of both
   source files now carry the project name, author, MIT license, link, and our
   thanks. (The scope stated here was still narrower than what had actually been
-  consulted; see 0.2.4 for the complete account.)
+  consulted; see [Unreleased](#unreleased) for the complete account.)
 
 ## [0.2.1] - 2026-09-04
 

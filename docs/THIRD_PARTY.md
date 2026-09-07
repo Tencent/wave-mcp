@@ -47,7 +47,7 @@ vendored FST writer are:
 
 | Component | License | Source |
 | --- | --- | --- |
-| fsdb2fst.cpp (this repo) | MIT (wave-mcp) | written by us, with specific parts informed by the public TraceWeave implementation: the FSDB timescale parser, the ffrAPI stub signature subset, the FSDB bit-array ordering, and the time-tag struct layout. See the attribution section below for the exact scope |
+| fsdb2fst.cpp (this repo) | MIT, including TraceWeave source and copyright notices; see below | written by us, with specific parts informed by the public TraceWeave implementation: the FSDB timescale parser, the ffrAPI stub signature subset and FsdbReader build layout, the FSDB bit-array ordering, and the time-tag struct layout. See the attribution section below for the exact scope |
 | fstapi / libfst | MIT | https://github.com/gtkwave/libfst (via gtkwave 3.3.121) |
 | LZ4 | BSD-2-Clause (Yann Collet) | via gtkwave 3.3.121 |
 | FastLZ | MIT (Ariya Hidayat) | via gtkwave 3.3.121 |
@@ -95,8 +95,8 @@ being influenced in design are not mutually exclusive, so both are listed below.
   against TraceWeave's verified wrapper. An earlier commit stated this
   explicitly; the reference was dropped on 2026-09-01 and is restored.
 - The time-tag struct layout (`fsdbXTag` being layout-compatible with
-  `fsdbTag64`, which the converter casts between) was likewise cross-checked
-  against the same wrapper.
+  `fsdbTag64`, as used in the converter's time-tag conversion) was likewise
+  cross-checked against the same wrapper.
 
 The surrounding conversion pipeline, the ffrAPI load path, the FST writer
 path, the pass-through tick time model, and the scriptable offline stub engine
@@ -108,20 +108,22 @@ are ours.
   code from TraceWeave. Locating the first divergence between a pass and a fail
   waveform was already on our development roadmap. TraceWeave's
   `diff_first_divergence` came earlier, and we referred to it when prioritising
-  the feature, which we credit here. Our implementation differs in that the
-  diverging signals feed into the netlist tools (`signal_fanin` /
-  `active_drivers` / `signal_drivers`) for causal backtracking, and into
-  `open_wave_view` for a dual-waveform diff view.
+  the feature, which we credit here. Our implementation feeds the diverging
+  signals into wave-mcp's own netlist tools (`signal_fanin` /
+  `active_drivers` / `signal_drivers`) and dual-waveform viewer
+  (`open_wave_view`).
 - This is the only design-level influence we are aware of. The broader feature
   set and tool organisation of wave-mcp were shaped by the capability set of
   established commercial waveform debug tools, not by TraceWeave.
 
 **3. What was developed independently**
 
-The core of wave-mcp, in particular the pyslang static netlist, the trace
-engine, and the MCP tool surface, was written independently and predates our
-FSDB work by more than six weeks. This is a statement about code, not a claim
-that no design influence existed anywhere.
+The early core architecture of wave-mcp, including the initial pyslang static
+netlist, trace engine, and MCP tool layer, was developed independently and is
+present in our 2026-07-16 repository commit, more than six weeks before FSDB
+support was added on 2026-08-31. This timeline refers to that early architecture,
+not to the completion of all tools available today. Independent code development
+does not imply the absence of design influence.
 
 TraceWeave is MIT-licensed, so reading and reusing it is permitted. MIT also
 requires that attribution travel with the code, and we got this wrong: comments

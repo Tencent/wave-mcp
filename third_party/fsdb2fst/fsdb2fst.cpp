@@ -12,18 +12,27 @@
  *       -lnffr -lnsys -lz -lpthread -ldl \
  *       -Wl,-rpath,'$ORIGIN'
  *
- * License: this file is MIT (wave-mcp). It links at build time against the
- * Verdi FsdbReader libraries (libnffr.so / libnsys.so), which are NOT
- * redistributed here; the binary is a local artifact and never enters the
- * public repo or PyPI (see docs/THIRD_PARTY.md).
+ * License: MIT, with TraceWeave source and copyright notices retained below
+ * and in docs/THIRD_PARTY.md. It links at build time against the Verdi
+ * FsdbReader libraries (libnffr.so / libnsys.so), which are NOT redistributed
+ * here; the binary is a local artifact and never enters the public repo
+ * or PyPI.
  *
- * Attribution: the FSDB scale parser below (ParseScaleFs) was written with
- * the public TraceWeave implementation as a reference (MIT, Copyright (c)
- * 2025 gokeshenzhen, https://github.com/gokeshenzhen/TraceWeave). We kept its
- * error contract, unparseable -> 0 with the caller aborting rather than
- * assuming a unit, and its unit table. The rest of this converter, the ffrAPI
- * load path, the FST writer path, and the pass-through tick time model, is
- * ours. See docs/THIRD_PARTY.md for the full notice.
+ * Attribution: parts of this FSDB converter were written with reference to
+ * the public TraceWeave implementation (MIT, Copyright (c) 2025 gokeshenzhen,
+ * https://github.com/gokeshenzhen/TraceWeave):
+ * - ParseScaleFs references TraceWeave's _ParseScaleFs, including time-unit
+ *   conversion and the parse-failure convention (unparseable -> 0, with
+ *   the caller aborting rather than assuming a unit).
+ * - The offline ffrAPI stub signatures mirror the subset exercised by its
+ *   wrapper; the FsdbReader build layout follows the same setup.
+ * - FSDB per-bit array ordering (MSB-first, vc[i] -> s[i]) and the
+ *   fsdbXTag/fsdbTag64 time-tag layout compatibility were cross-checked
+ *   against its verified wrapper.
+ * The surrounding conversion pipeline, ffrAPI load path, FST writer path,
+ * pass-through tick time model, and scriptable offline stub engine are
+ * ours. See docs/THIRD_PARTY.md for the full notice and
+ * docs/licenses/TraceWeave-MIT.txt for the original license text.
  *
  * Time model (fail-loud, pass-through like vcd2fst):
  *   FSDB stores tick counts; true_time = tick * scale, scale comes from
@@ -127,9 +136,10 @@ void vinfo(const char *fmt, ...) {  /* printed regardless of verbosity */
 }
 
 /* ---------- FSDB scale string ("1ns", "100fs", ...) -> fs per tick ----------
- * Contract: unparseable -> 0, callers must abort rather than assume a unit.
- * The contract and the unit table follow the public TraceWeave wrapper (MIT,
- * https://github.com/gokeshenzhen/TraceWeave); see docs/THIRD_PARTY.md. */
+ * Implemented with reference to TraceWeave's _ParseScaleFs, including
+ * time-unit conversion and the parse-failure convention: unparseable -> 0,
+ * with callers aborting rather than assuming a unit (MIT,
+ * https://github.com/gokeshenzhen/TraceWeave; see docs/THIRD_PARTY.md). */
 
 unsigned long long ParseScaleFs(const char *s) {
     if (!s || !*s) return 0;
@@ -822,8 +832,9 @@ int main(int argc, char **argv) {
             return;
         }
         if (!vc) return;
-        /* fsdbXTag is layout-compatible with fsdbTag64 in the 64-bit API;
-         * assert at compile time. */
+        /* fsdbXTag/fsdbTag64 layout compatibility was cross-checked against
+         * the public TraceWeave wrapper (see docs/THIRD_PARTY.md). Check
+         * the size at compile time before copying the time tag. */
         static_assert(sizeof(fsdbXTag) == sizeof(fsdbTag64),
                       "unexpected fsdbXTag size; revisit the tag conversion");
         fsdbTag64 tag;
