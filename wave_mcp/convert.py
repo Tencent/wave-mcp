@@ -40,6 +40,7 @@ import hashlib
 import json
 import os
 import shutil
+import signal
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -520,6 +521,14 @@ def _parse_fsdb_stats(out: str) -> dict:
         stats.update(signals=int(m.group(1)), real=int(m.group(2)),
                      strength_skipped=int(m.group(3)),
                      unsupported_type=int(m.group(4)))
+    m = re.search(r"census:\s*(\d+) total-vars, (\d+) unique-paths, "
+                  r"(\d+) convertible", out)
+    if m:
+        stats.update(total_vars=int(m.group(1)), unique_paths=int(m.group(2)),
+                     convertible=int(m.group(3)))
+    m = re.search(r"selected:\s*(\d+) signals", out)
+    if m:
+        stats["selected"] = int(m.group(1))
     m = re.search(r"(\d+) vars, (\d+) transitions", out)
     if m:
         stats.update(vars_written=int(m.group(1)),
@@ -530,6 +539,36 @@ def _parse_fsdb_stats(out: str) -> dict:
     return stats
 
 
+def _fsdb_failure(binary: str, returncode: int, out: str, *,
+                  info_only: bool = False) -> ConversionError:
+    """Distinguish converter/reader crashes from dynamic-loader failures."""
+    detail = out.strip()
+    operation = "fsdb2fst --info" if info_only else "fsdb2fst"
+    if returncode == -signal.SIGSEGV:
+        return ConversionError(
+            f"{operation} crashed with SIGSEGV (rc={returncode}); the converter "
+            f"or FsdbReader runtime crashed, not necessarily a missing library.\n"
+            f"{detail}\n"
+            f"Large file-wide VAR metadata is a known risk even with -l/-L "
+            f"or fsdb_scopes; filters reduce selected value data, not that "
+            f"metadata. Other runtime/file problems can also cause SIGSEGV.\n"
+            f"Rebuild fsdb2fst from current source for the file-wide precheck. "
+            f"Run fsdb2fst --info in the same environment and share sanitized "
+            f"counts and the FsdbReader version, not the confidential FSDB. "
+            f"Re-dump fewer scopes into separate files and avoid merging full "
+            f"hierarchies; time-only splitting may retain the same VAR count. "
+            f"See docs/FSDB_GUIDE.md.")
+    if ("error while loading shared libraries:" in detail
+            or "cannot open shared object file" in detail):
+        return ConversionError(
+            f"fsdb2fst could not load the Verdi FsdbReader runtime:\n"
+            f"  {detail}\n"
+            f"Copy libnffr.so and libnsys.so next to {binary} (its RPATH "
+            f"searches $ORIGIN), or rebuild with deploy/build_fsdb2fst.sh "
+            f"on a machine with $VERDI_HOME set. See docs/FSDB_GUIDE.md.")
+    return ConversionError(f"{operation} failed (rc={returncode}): {detail}")
+
+
 def convert_fsdb(fsdb_path: str, fst_path: Optional[str] = None,
                  scopes: Optional[List[str]] = None,
                  signals_file: Optional[str] = None,
@@ -538,7 +577,8 @@ def convert_fsdb(fsdb_path: str, fst_path: Optional[str] = None,
     """Convert an FSDB waveform to FST via the bundled fsdb2fst (single pass).
 
     ``scopes`` maps to ``-l`` (OR over substrings) and ``signals_file`` to
-    ``-L``; both slice a huge design down to a convertible subset.
+    ``-L``; both reduce selected value data, not the file-wide VAR metadata.
+    The converter's file-wide safety guard applies even to tiny subsets.
 
     fsdb2fst writes the hierarchy as a ``<fst>.hier`` sidecar, and pylibfst
     cannot open the FST without it, so the sidecar is validated here rather
@@ -582,22 +622,7 @@ def convert_fsdb(fsdb_path: str, fst_path: Optional[str] = None,
     out = (proc.stderr or "") + (proc.stdout or "")
 
     if proc.returncode != 0 or not os.path.exists(fst_path):
-        detail = (proc.stderr or proc.stdout or "").strip()
-        # A loader failure means the binary is fine but the Synopsys runtime is
-        # not reachable, so name that case explicitly.
-        if "libnffr" in detail or "libnsys" in detail \
-                or "shared object" in detail or "cannot open shared" in detail:
-            raise ConversionError(
-                f"fsdb2fst could not load the Verdi FsdbReader runtime:\n"
-                f"  {detail}\n"
-                f"Copy libnffr.so and libnsys.so next to {binary} (its RPATH "
-                f"searches $ORIGIN), or rebuild with deploy/build_fsdb2fst.sh "
-                f"on a machine with $VERDI_HOME set. See docs/FSDB_GUIDE.md.")
-        # Otherwise fsdb2fst's own diagnostics are already actionable (unknown
-        # timescale, signal-count guard with the -l/-L hint, load failures), so
-        # pass them through instead of wrapping and losing the hint.
-        raise ConversionError(
-            f"fsdb2fst failed (rc={proc.returncode}): {detail}")
+        raise _fsdb_failure(binary, proc.returncode, out)
 
     hier = fst_path + ".hier"
     if not os.path.exists(hier):
@@ -638,8 +663,7 @@ def fsdb_info(fsdb_path: str, timeout: Optional[float] = 600) -> dict:
         raise ConversionError(f"fsdb2fst --info failed: {exc}") from exc
     out = (proc.stderr or "") + (proc.stdout or "")
     if proc.returncode != 0:
-        raise ConversionError(
-            f"fsdb2fst --info failed (rc={proc.returncode}): {out.strip()}")
+        raise _fsdb_failure(binary, proc.returncode, out, info_only=True)
     return {"binary": binary, "fsdb_path": fsdb_path,
             "stats": _parse_fsdb_stats(out), "report": out.strip()}
 

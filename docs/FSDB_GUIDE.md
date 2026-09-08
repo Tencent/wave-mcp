@@ -40,7 +40,9 @@ prepare_session(wave_path="dump.fsdb", filelist_path="your_filelist.f")
 
 首次转换时 wave-mcp 会自动编一次 `fsdb2fst`（需要 `g++`，约十几秒），之后直接复用。
 
-超大设计（选中信号超 500 万）需要切片，传 `fsdb_scopes=["u_core"]` 收窄范围。
+`fsdb_scopes=["u_core"]` 只收窄待加载信号，不缩小原文件的 VAR 元数据。
+原始 VAR 总数超过默认 500 万安全阈值时，即使只选一个信号也会在加载前拒绝；
+应在 dump 源头减少 probe 范围，生成独立的小文件，详见下文规模说明。
 遇到问题看[排错速查](#排错速查)；想手工构建或用命令行看[手工构建](#手工构建备选)与
 [命令行用法](#命令行用法)。
 
@@ -143,7 +145,7 @@ convert_fsdb_to_fst(fsdb_path="dump.fsdb", scopes=["u_core"]) # 手动转指定�
 # 全量转换
 fsdb2fst dump.fsdb dump.fst
 
-# 按 scope 切片（超大设计必用，多个子串是 OR 关系）
+# 按 scope 选择信号（不绕过文件级 VAR 保护，多个子串是 OR 关系）
 fsdb2fst -l u_core,uart dump.fsdb part.fst
 
 # 按精确路径清单切片（一行一个路径，# 开头为注释）
@@ -201,14 +203,48 @@ FST 里登记为 alias 共享同一句柄与值数据，不会重复存储。
 
 ## 超大文件的处理
 
-FsdbReader 在超大设计（千万信号量级的门级展开）上会在内部崩溃，且与内存余量
-无关、切片也未必能绕过。fsdb2fst 的应对是提前拦而不是让它崩：
+[Issue #1](https://github.com/Tencent/wave-mcp/issues/1) 报告：约 112 MB、2280 万 VAR
+的 FSDB，在 Verdi V-2023.12-SP2 的 `ffrLoadSignals` 中崩溃；筛选一个子模块仍失败。
+文件大小、时间刻度和已选信号数都不能单独判断这类风险。现有证据不足以把某个数值
+称为所有 FsdbReader 版本的容量上限，也不能仅凭 SIGSEGV 判断为内存不足。
 
-- 选中信号数超过 500 万时直接报错并提示用 `-l` / `-L` 切片，阈值可用
-  `FSDB2FST_MAX_SIGNALS=<n>` 覆盖，`0` 关闭。
-- 文件整体超限但已切片时额外提示：这种规模下 FsdbReader 仍可能在内部崩溃，
-  属于 reader 的限制而不是筛选的问题。
-- FsdbReader 的返回码逐个检查，失败即明确报错。
+**两个独立保护，在创建输出和加载值数据之前执行：**
+
+| 计数 | 默认安全阈值 | 作用 |
+| --- | --- | --- |
+| 原始 VAR 回调总数（包含重复路径及不支持类型） | 500 万 | 超过即拒绝，`-l` / `-L` / `fsdb_scopes` 无法绕过 |
+| 筛选后的可转换信号路径数 | 500 万 | 超过即拒绝，可在文件级保护允许的前提下减少选择范围 |
+
+这两个阈值是 wave-mcp 的保守保护策略，**不是厂商公布的极限，也不保证阈值以内不崩溃**。
+`FSDB2FST_MAX_TOTAL_VARS` 和 `FSDB2FST_MAX_SIGNALS` 分别覆盖上述阈值；`0` 只关闭
+对应保护，非法值会报错。提高或关闭保护仅供了解风险的诊断，不是修复手段。
+
+`--info` / `--dump-tree` 只遍历层次，不加载值数据，不受这两个加载保护限制。
+`--info` 现在同时输出：
+
+```text
+[fsdb2fst] census: 12 total-vars, 3 unique-paths, 2 convertible
+```
+
+此行为格式示例。`total-vars` 是原始回调数，`unique-paths` 是按路径去重后的数量，
+`convertible` 是其中支持转换的数量；转换日志另有 `selected` 表示筛选结果。
+旧日志中的 `real` 指**浮点类型信号**，不是“真实/有效信号总数”；旧的 `signals`
+为去重后的路径数，strength/unsupported 计数来自原始回调，不能简单相减推算。
+
+**应对方式：**
+
+- 在仿真源头减少 probe 的层次和范围，按模块分别 dump，避免再 merge 为一份全层次文件。
+- 按时间分文件可以减少值数据，但可能保留相同 VAR 元数据；仍需逐文件检查 `--info`。
+- 仿真器支持时可直接生成 FST，避免这条 FsdbReader 加载路径。
+- 仅提供脱敏后的 `--info` 统计、运行库版本和 dump/merge 参数即可继续诊断；不需要上传涉密波形。
+
+`-l` / `-L` 实际在 `ffrLoadSignals` **之前**选择信号，但不会改写原文件的内部索引。
+当前转换器仍使用单次加载，尚无在该问题文件上验证可用的分批或时间窗口方案，
+因此不能承诺分批能规避运行库崩溃。Python 入口会把 SIGSEGV 与缺失动态库分开报告，
+保留原始诊断，不因日志出现 `libnffr` 就误导用户重新配置运行库。
+
+**手工构建用户必须重新编译转换器，并确认 `FSDB2FST_BIN` 指向新二进制。**
+仅更新 pip 包不能改变旧的 C++ 二进制；pip 包仍不附带转换器源码。
 
 ## 排错速查
 
@@ -222,6 +258,8 @@ FsdbReader 在超大设计（千万信号量级的门级展开）上会在内部
 | `cannot parse the FSDB time scale` | 刻度字符串不认识 | 把 `--info` 输出附在 issue 里反馈 |
 | `no value data was loaded`（0 跳变） | 文件可能被截断，或该版本需换加载路径 | 先 `--info` 看概要；应急可加 `--allow-empty` |
 | 产物打不开 | 只拷了 `.fst`，漏了 `.fst.hier` | 两个文件一起搬 |
-| `selected signals exceed the in-core limit` | 选中信号数超阈值 | 用 `-l` / `-L` 切片，或调 `FSDB2FST_MAX_SIGNALS` |
+| `total VAR entries exceed the file-wide safety limit` | 原始 VAR 总数超保守阈值 | 减少源头 probe、独立分模块 dump，不能靠转换筛选绕过 |
+| `selected signals exceed the in-core limit` | 已选信号数超保守阈值 | 在文件级保护允许范围内，用 `-l` / `-L` 减少选择 |
+| `SIGSEGV (rc=-11)` | 转换器或 FsdbReader 崩溃，可能涉及全文件元数据或其他布局/版本问题 | 重编转换器获得预检，用相同环境获取脱敏 `--info`；不是缺库的充分证据 |
 | 某些信号在 FST 里没有值 | 常量 / 不翻转信号，或属跳过的类型 | 看转换日志的 strength / unsupported 计数 |
 | 层次或 scope 路径可疑 | 需要看原始事件流 | `fsdb2fst --dump-tree x.fsdb \| head -50` |

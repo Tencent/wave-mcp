@@ -11,12 +11,19 @@ builds work in containers without network access.
 | `EUPL-1.2.txt` | EUPL-1.2 | Surfer WASM + `surver` in the viewer assets package | https://gitlab.com/surfer-project/surfer/-/raw/v0.7.0/LICENSE-EUPL-1.2.txt |
 | `TraceWeave-MIT.txt` | MIT (Copyright (c) 2025 gokeshenzhen) | parts of `third_party/fsdb2fst` written with TraceWeave as a reference; see [THIRD_PARTY.md](../THIRD_PARTY.md) | https://github.com/gokeshenzhen/TraceWeave |
 
-Copy rules (enforced by the packaging scripts):
+Copy rules (enforced by the packaging configuration and scripts):
 
-- `deploy/build_offline_bundle.sh` copies this directory into the
-  bundle as `licenses/` whenever `--vcd2fst` is given (LGPL-2.1) and
-  `--viewer` is given (EUPL-1.2), together with per-component MIT/BSD
-  texts extracted from the wheelhouse.
+- The source distribution retains `docs/THIRD_PARTY.md` and this
+  directory. The core wheel installs them under `share/doc/wave-mcp/`
+  and `share/doc/wave-mcp/licenses/`, alongside the project's `LICENSE`.
+- `deploy/build_offline_bundle.sh` always copies the complete directory
+  as `licenses/`, beside `THIRD_PARTY.md`, and also retains these files
+  in the bundled source tree. Missing required materials stop the build.
+- Wheelhouse notices are retained under `licenses/wheels/`, grouped by
+  wheel filename with their original paths, so multiple notices and
+  identically named files are not dropped or overwritten.
+- Carrying a license text does not mean that its component is bundled;
+  see [THIRD_PARTY.md](../THIRD_PARTY.md) for the distribution scope.
 - `deploy/build_viewer_assets.sh` embeds `EUPL-1.2.txt` and a NOTICE
   file into the `wave-mcp-viewer-assets` package.
 - `deploy/build_surver_static.sh` generates a Rust-crate license
@@ -25,3 +32,15 @@ Copy rules (enforced by the packaging scripts):
 
 When bumping the Surfer version or the GTKWave sources, re-check that
 these texts still match the licenses of the pinned upstream refs.
+
+## Optional component materials
+
+`vcd2fst.fstapi.LICENSE`, `vcd2fst.fastlz.LICENSE`, `vcd2fst.lz4.LICENSE`,
+`vcd2fst.helper.LICENSE` and `vcd2fst.jrb.LICENSE` are verbatim comment blocks
+from GTKWave 3.3.121. `vcd2fst.SOURCES.json` records the archive and source
+hashes. These text files alone do not replace binary-specific source and
+relink materials. See [packaging materials](../PACKAGING_MATERIALS.md).
+
+Optional Python, viewer and converter inputs require a corresponding verified
+material directory. The packaging gate checks identity and completeness, not
+legal suitability of every license or of the overall distribution.

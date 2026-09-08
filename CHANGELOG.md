@@ -4,7 +4,7 @@ All notable changes to wave-mcp are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.4] - 2026-09-08
 
 ### Changed
 
@@ -38,6 +38,24 @@ All notable changes to wave-mcp are documented here. Format follows
   redistribution.
 - **Attribution surfaced in both READMEs**, as a one-line note after the feature
   list linking to the full notice, instead of living only in the FAQ.
+
+### Added
+
+- **`LICENSE`, `docs/THIRD_PARTY.md`, `docs/PACKAGING_MATERIALS.md` and
+  `docs/licenses/` now install with the wheel** via `data-files`, so the
+  attribution and third-party notices travel with a plain `pip install`
+  instead of living only in the sdist or the offline bundle.
+- **Complete redistribution materials for the optional components**: original
+  source archives, license texts and provenance records for the standalone
+  Python runtime (52 files), `vcd2fst` (27 files) and the viewer assets,
+  with hashes verified against upstream. See `docs/PACKAGING_MATERIALS.md`.
+- **Font licenses that the viewer binaries actually embed**: `OFL-1.1` and
+  `Ubuntu-font-1.0` for the fonts shipped inside the `surver` binary. Earlier
+  releases recorded `epaint_default_fonts` as an unknown license; both texts
+  are now vendored and required by the packaging gate.
+- **`deploy/redistribution_materials.py` packaging gate**: blocks a build when
+  required redistribution materials are missing, unresolved or hash-mismatched,
+  so a release cannot ship without them.
 
 ## [0.2.3] - 2026-09-05
 

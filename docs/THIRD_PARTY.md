@@ -19,7 +19,7 @@ Their notices are retained here as required.
 
 ## Bundled binary (offline/self-contained release only)
 
-The offline bundle ships a `vcd2fst` converter built from source. It is an
+The offline bundle optionally ships a `vcd2fst` converter built from source. It is an
 aggregation: `vcd2fst` is a separate program invoked as a subprocess and does
 NOT link into or affect the MIT license of wave-mcp itself.
 
@@ -31,13 +31,19 @@ NOT link into or affect the MIT license of wave-mcp itself.
 | libfst / fstapi | MIT | https://github.com/gtkwave/libfst |
 | LZ4 | BSD-2-Clause | https://github.com/lz4/lz4 |
 | FastLZ | MIT | https://github.com/ariya/FastLZ |
-| jrb (libfdr red-black tree) | LGPL-2.1 | https://github.com/josborn8/libfdr |
+| jrb (libfdr red-black tree) | LGPL-2.1-or-later | https://github.com/josborn8/libfdr |
 
-Note on the LGPL-2.1 component (`jrb`): the offline bundle satisfies LGPL-2.1 by
-providing the corresponding build recipe (`deploy/build_vcd2fst.sh`, which
-records the exact GTKWave version/commit) so the binary can be rebuilt/relinked.
-The GTKWave GUI application is GPL-licensed, but wave-mcp does NOT use or ship
-it; only the MIT FST library plus the above converter sources are used.
+The original helper, fstapi, FastLZ, LZ4 and jrb notices are retained in
+`licenses/vcd2fst.*.LICENSE`; `licenses/vcd2fst.SOURCES.json` identifies their
+exact GTKWave source archive and file hashes. Each distributed converter also
+requires a matching `materials/vcd2fst/` directory containing that source,
+original notices, generated build configuration, build recipe and application
+objects with a relink script. Any copied zlib runtime is included in its
+fingerprint inventory with the package's original notice. A recipe alone is
+not treated as proof that all LGPL distribution requirements are satisfied.
+The GTKWave GUI is not linked or shipped as a binary. The complete upstream
+source archive retained for rebuilding includes other files under their own
+original licenses. See [packaging materials](PACKAGING_MATERIALS.md).
 
 ## FSDB converter (local build artifact only, never distributed)
 
@@ -165,8 +171,12 @@ Licensing notes:
 
 ## Standalone Python runtime (offline bundle only)
 
-If the offline bundle embeds a standalone CPython (python-build-standalone),
-CPython is distributed under the Python Software Foundation License (PSF).
+If the offline bundle embeds standalone CPython (python-build-standalone),
+its matching upstream `PYTHON.json` and all declared dependency licenses must
+accompany the runtime in `materials/python/`. CPython's own license does not
+cover every bundled library (such as OpenSSL, Tcl/Tk, bzip2 or libffi).
+The material manifest binds the runtime to the exact upstream build and
+payload hashes; unresolved or mismatched inputs stop packaging.
 
 ## Wave viewer assets (optional `wave-mcp-viewer-assets` package only)
 
@@ -186,3 +196,28 @@ user's browser; neither links into wave-mcp. The assets package is built by
 statically-linked `surver` for old-glibc hosts can be reproduced with
 `deploy/build_surver_static.sh`. wave-mcp's own shell assets
 (`wave_mcp/viewer/web/`) are original MIT-licensed code.
+
+### Fonts embedded in the surver binary
+
+The `surver` binary embeds fonts via the `epaint_default_fonts` crate. Its
+license is `(MIT OR Apache-2.0) AND OFL-1.1 AND Ubuntu-font-1.0`, a
+conjunction: the font licenses apply in addition to the crate license.
+Earlier asset builds recorded this component as an unknown license, which
+left the font texts out of the distributed package. All three are now
+vendored under `docs/licenses/`:
+
+| Font | License | File |
+| --- | --- | --- |
+| Hack, NotoEmoji, Ubuntu-Light | OFL-1.1 | `epaint-default-fonts.OFL-1.1.txt` |
+| Ubuntu font family | Ubuntu-font-1.0 | `epaint-default-fonts.Ubuntu-font-1.0.txt` |
+| emoji-icon-font | MIT | `epaint-default-fonts.emoji-icon-font.MIT.txt` |
+
+Provenance for these texts is recorded in
+`epaint-default-fonts.SOURCES.txt`.
+
+Viewer assets additionally require `redistribution/` with exact source archives,
+dependency notices and an inventory tied to the asset hashes. A Cargo.lock
+inventory is a conservative source superset, not evidence that every listed
+crate was linked. Native surver and WASM build dependencies and bundled fonts
+or JavaScript resources must be reviewed separately. Unknown entries or missing
+source/build correspondence must be resolved before a release is approved.

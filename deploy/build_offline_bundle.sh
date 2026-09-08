@@ -20,6 +20,8 @@
 #       [--python <cpython-*-install_only.tar.gz | dir | URL>] \
 #       [--pyslang-wheel <pyslang-*manylinux2014*.whl>] \
 #       [--vcd2fst /usr/bin/vcd2fst] [--no-tar]
+# Optional inputs require matching --python-materials, --viewer-materials,
+# or --vcd2fst-materials directories. See docs/PACKAGING_MATERIALS.md.
 #
 # --target-glibc sets the minimum glibc of the TARGET machines (default 2.28):
 #   2.28  official pyslang/cryptography wheels (Ubuntu 18.10+ / CentOS 8+)
@@ -35,6 +37,9 @@ DO_TAR=1
 TARGET_GLIBC="2.28"
 PYSLANG_WHEEL=""
 VIEWER_SRC=""
+PYTHON_MATERIALS=""
+VCD_MATERIALS=""
+VIEWER_MATERIALS=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -44,6 +49,9 @@ while [[ $# -gt 0 ]]; do
     --target-glibc) TARGET_GLIBC="$2"; shift 2;;
     --pyslang-wheel) PYSLANG_WHEEL="$2"; shift 2;;
     --viewer) VIEWER_SRC="$2"; shift 2;;
+    --python-materials) PYTHON_MATERIALS="$2"; shift 2;;
+    --vcd2fst-materials) VCD_MATERIALS="$2"; shift 2;;
+    --viewer-materials) VIEWER_MATERIALS="$2"; shift 2;;
     --no-tar) DO_TAR=0; shift;;
     *) echo "unknown arg: $1"; exit 1;;
   esac
@@ -65,6 +73,40 @@ if [[ "$TARGET_GLIBC" == "2.17" && -z "$PYSLANG_WHEEL" ]]; then
 fi
 if [[ -n "$PYSLANG_WHEEL" && ! -f "$PYSLANG_WHEEL" ]]; then
   echo "ERROR: --pyslang-wheel not found: $PYSLANG_WHEEL"; exit 1
+fi
+
+# Check required notices before downloading or replacing an existing bundle.
+LIC_SRC="$REPO_ROOT/docs/licenses"
+REQUIRED_NOTICES=(LICENSE docs/THIRD_PARTY.md docs/licenses/README.md
+  docs/licenses/TraceWeave-MIT.txt docs/licenses/LGPL-2.1.txt docs/licenses/EUPL-1.2.txt)
+if [[ -n "$VCD2FST_SRC" ]]; then
+  for f in vcd2fst.fstapi.LICENSE vcd2fst.fastlz.LICENSE vcd2fst.lz4.LICENSE; do
+    REQUIRED_NOTICES+=("docs/licenses/$f")
+  done
+fi
+for notice in "${REQUIRED_NOTICES[@]}"; do
+  if [[ ! -s "$REPO_ROOT/$notice" ]]; then
+    echo "ERROR: missing or empty required notice: $notice" >&2
+    exit 1
+  fi
+done
+
+# Every optional binary/runtime needs a matching, complete material inventory.
+MATERIAL_CHECK="$REPO_ROOT/deploy/redistribution_materials.py"
+check_materials() {
+  local component="$1" artifact="$2" materials="$3"
+  [[ -n "$materials" ]] || { echo "ERROR: --${component}-materials required with --${component}" >&2; exit 1; }
+  python3 "$MATERIAL_CHECK" check --component "$component" --materials "$materials" --artifact "$artifact"
+}
+if [[ -n "$PYTHON_SRC" ]]; then
+  check_materials python "$PYTHON_SRC" "$PYTHON_MATERIALS"
+fi
+if [[ -n "$VCD2FST_SRC" ]]; then
+  [[ -x "$VCD2FST_SRC" ]] || { echo "ERROR: vcd2fst must be executable" >&2; exit 1; }
+  check_materials vcd2fst "$VCD2FST_SRC" "$VCD_MATERIALS"
+fi
+if [[ -n "$VIEWER_SRC" ]]; then
+  check_materials viewer "$VIEWER_SRC" "$VIEWER_MATERIALS"
 fi
 
 echo "[*] bundle output: $OUT"
@@ -114,7 +156,7 @@ if [[ -n "$VIEWER_SRC" ]]; then
     # Do NOT swallow this: a wellen version mismatch (or any other build
     # failure) must surface here, otherwise the bundle step just stops with
     # no clue (measured 2026-09-02). Capture, then replay on failure.
-    if ! VIEWER_LOG=$("$REPO_ROOT/deploy/build_viewer_assets.sh" "$VIEWER_SRC" 2>&1); then
+    if ! VIEWER_LOG=$(VIEWER_MATERIALS="$VIEWER_MATERIALS" "$REPO_ROOT/deploy/build_viewer_assets.sh" "$VIEWER_SRC" 2>&1); then
       echo "ERROR: failed to pack viewer assets from $VIEWER_SRC"
       echo "$VIEWER_LOG" | sed 's/^/       /'
       exit 1
@@ -186,13 +228,18 @@ if [[ -n "$PYTHON_SRC" ]]; then
   echo "[*] adding standalone python from: $PYTHON_SRC"
   mkdir -p "$OUT/python"
   if [[ "$PYTHON_SRC" == http*://* ]]; then
-    curl -sL "$PYTHON_SRC" -o "$OUT/_py.tar.gz"; tar -xzf "$OUT/_py.tar.gz" -C "$OUT/python" --strip-components=1; rm -f "$OUT/_py.tar.gz"
+    curl -fL "$PYTHON_SRC" -o "$OUT/_py.tar.gz"
+    python3 "$MATERIAL_CHECK" check --component python --materials "$PYTHON_MATERIALS" --artifact "$OUT/_py.tar.gz"
+    tar -xzf "$OUT/_py.tar.gz" -C "$OUT/python" --strip-components=1
+    rm -f "$OUT/_py.tar.gz"
   elif [[ -f "$PYTHON_SRC" ]]; then
     tar -xzf "$PYTHON_SRC" -C "$OUT/python" --strip-components=1
   elif [[ -d "$PYTHON_SRC" ]]; then
     cp -r "$PYTHON_SRC"/. "$OUT/python/"
   fi
-  [[ -x "$OUT/python/bin/python3" ]] && echo "    standalone python OK" || echo "    WARN: python/bin/python3 not found"
+  [[ -x "$OUT/python/bin/python3" ]] || { echo "ERROR: python/bin/python3 not found" >&2; exit 1; }
+  python3 "$MATERIAL_CHECK" check --component python --materials "$PYTHON_MATERIALS" --artifact "$OUT/python"
+  echo "    standalone python identity OK"
 else
   echo "[!] --python not given: bundle will rely on target's python3 (>= 3.10, x86_64)."
   echo "    For version-independence, fetch python-build-standalone (install_only, x86_64-unknown-linux-gnu)"
@@ -203,9 +250,10 @@ fi
 if [[ -n "$VCD2FST_SRC" && -x "$VCD2FST_SRC" ]]; then
   echo "[*] bundling vcd2fst from: $VCD2FST_SRC (verify target glibc compatibility!)"
   cp "$VCD2FST_SRC" "$OUT/bin/vcd2fst"; mkdir -p "$OUT/bin/lib"
-  ldd "$VCD2FST_SRC" | awk '/=>/{print $3}' | grep -E 'libJudy|libz|libtdsp|libonion' | while read -r so; do
-    [[ -f "$so" ]] && cp -L "$so" "$OUT/bin/lib/" || true
-  done
+  # Only copy the exact runtime libraries bound to the component manifest.
+  if [[ -d "$VCD_MATERIALS/runtime" ]]; then
+    cp -R "$VCD_MATERIALS/runtime/." "$OUT/bin/lib/"
+  fi
   echo "    bundled libs: $(ls "$OUT/bin/lib" 2>/dev/null | wc -l)"
 else
   echo "[!] --vcd2fst not given: install GTKWave on the target, or copy a glibc-$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{print $2}')-or-lower vcd2fst."
@@ -218,57 +266,94 @@ cp "$REPO_ROOT/deploy/mcp.json.example"  "$OUT/mcp.json.example"
 chmod +x "$OUT/install.sh"
 date -u +"%Y-%m-%dT%H:%M:%SZ" > "$OUT/VERSION"
 
-# 5b) license + third-party notices (MIT project + bundled binary provenance)
-cp "$REPO_ROOT/LICENSE" "$OUT/LICENSE" 2>/dev/null || echo "[!] no top-level LICENSE found"
-cp "$REPO_ROOT/docs/THIRD_PARTY.md" "$OUT/THIRD_PARTY.md" 2>/dev/null || true
+# 5b) retain project notices at the bundle root and in the source tree.
+# Keep THIRD_PARTY.md beside licenses/ so its license links remain valid.
+cp "$REPO_ROOT/LICENSE" "$OUT/LICENSE"
+cp "$REPO_ROOT/docs/THIRD_PARTY.md" "$OUT/THIRD_PARTY.md"
+cp "$REPO_ROOT/docs/PACKAGING_MATERIALS.md" "$OUT/PACKAGING_MATERIALS.md"
+cp -R "$LIC_SRC" "$OUT/licenses"
+mkdir -p "$OUT/src/docs"
+cp "$REPO_ROOT/LICENSE" "$REPO_ROOT/README.md" "$REPO_ROOT/README.en.md" \
+   "$REPO_ROOT/CHANGELOG.md" "$REPO_ROOT/MANIFEST.in" "$OUT/src/"
+cp "$REPO_ROOT/docs/THIRD_PARTY.md" "$REPO_ROOT/docs/PACKAGING_MATERIALS.md" "$OUT/src/docs/"
+cp -R "$LIC_SRC" "$OUT/src/docs/licenses"
 
-# 5c) full license texts for redistributed third-party components -----------
-# MIT/BSD require retaining the license+copyright notice on redistribution;
-# LGPL-2.1 requires the license text; EUPL-1.2 likewise. THIRD_PARTY.md alone
-# does not satisfy this, so ship a licenses/ directory next to the binaries.
-mkdir -p "$OUT/licenses"
-LIC_SRC="$REPO_ROOT/docs/licenses"
-if [[ -n "$VCD2FST_SRC" && -x "$VCD2FST_SRC" ]]; then
-  cp "$LIC_SRC/LGPL-2.1.txt" "$OUT/licenses/" 2>/dev/null || \
-    echo "[!] missing $LIC_SRC/LGPL-2.1.txt (jrb component)"
-  # permissive components compiled into vcd2fst (MIT/BSD texts)
-  for f in vcd2fst.fstapi.LICENSE vcd2fst.fastlz.LICENSE vcd2fst.lz4.LICENSE; do
-    [[ -f "$LIC_SRC/$f" ]] && cp "$LIC_SRC/$f" "$OUT/licenses/"
-  done
+# 5c) retain ALL wheel notices, including declared License-File entries.
+# Preserve both wheel identity and original member path to avoid collisions.
+# Invalid/missing declared files, corrupt archives and write errors are fatal.
+python3 - "$OUT/wheels" "$OUT/licenses/wheels" <<'PYEOF'
+from email.parser import BytesParser
+from pathlib import Path, PurePosixPath
+import shutil
+import stat
+import sys
+import zipfile
+
+wheel_dir, out_dir = map(Path, sys.argv[1:])
+for wheel in sorted(wheel_dir.glob("*.whl")):
+    with zipfile.ZipFile(wheel) as archive:
+        members = [info for info in archive.infolist() if not info.is_dir()]
+        names = {info.filename for info in members}
+        if len(names) != len(members):
+            raise ValueError(f"duplicate wheel members: {wheel.name}")
+        declared = set()
+        for info in members:
+            if not info.filename.endswith(".dist-info/METADATA"):
+                continue
+            parent = PurePosixPath(info.filename).parent
+            metadata = BytesParser().parsebytes(archive.read(info))
+            for value in metadata.get_all("License-File", []):
+                path = PurePosixPath(value)
+                if path.is_absolute() or ".." in path.parts or "\\" in value:
+                    raise ValueError(f"unsafe License-File in {wheel.name}: {value}")
+                # PEP 639 and legacy setuptools/maturin wheel layouts.
+                choices = {str(parent / subdir / path)
+                           for subdir in ("licenses", "license_files", "")}
+                found = choices & names
+                if not found:
+                    raise ValueError(f"missing License-File in {wheel.name}: {value}")
+                declared.update(found)
+        count = 0
+        for info in members:
+            path = PurePosixPath(info.filename)
+            low = path.name.lower()
+            is_notice = (
+                info.filename in declared
+                or any(part.lower() in {"licenses", "licences", "license_files"}
+                       for part in path.parts[:-1])
+                or low.startswith(("license", "licence", "copying", "notice", "copyright"))
+                or low.endswith((".license", ".licence"))
+                or low == "third_party.md"
+            )
+            if not is_notice:
+                continue
+            if path.is_absolute() or ".." in path.parts or "\\" in info.filename:
+                raise ValueError(f"unsafe notice path in {wheel.name}: {info.filename}")
+            if stat.S_ISLNK(info.external_attr >> 16):
+                raise ValueError(f"symlink notice in {wheel.name}: {info.filename}")
+            destination = out_dir / wheel.name / path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(info) as source, destination.open("xb") as target:
+                shutil.copyfileobj(source, target)
+            count += 1
+        if not count:
+            print(f"    WARN: {wheel.name}: no license files detected; review upstream notices")
+        else:
+            print(f"    {wheel.name}: retained {count} notice files")
+PYEOF
+echo "    licenses/: $(find "$OUT/licenses" -type f | wc -l) files"
+
+mkdir -p "$OUT/materials"
+if [[ -n "$PYTHON_SRC" ]]; then
+  python3 "$MATERIAL_CHECK" copy --component python --materials "$PYTHON_MATERIALS" --output "$OUT/materials/python"
+fi
+if [[ -n "$VCD2FST_SRC" ]]; then
+  python3 "$MATERIAL_CHECK" copy --component vcd2fst --materials "$VCD_MATERIALS" --output "$OUT/materials/vcd2fst"
 fi
 if [[ -n "$VIEWER_SRC" ]]; then
-  cp "$LIC_SRC/EUPL-1.2.txt" "$OUT/licenses/" 2>/dev/null || \
-    echo "[!] missing $LIC_SRC/EUPL-1.2.txt (surfer component)"
+  python3 "$MATERIAL_CHECK" copy --component viewer --materials "$VIEWER_MATERIALS" --output "$OUT/materials/viewer"
 fi
-# wheelhouse notices: copy every wheel's own license file (covers all pip
-# deps: pyslang, mcp, cryptography, pylibfst, ... and the viewer assets
-# wheel, which carries its embedded EUPL text).
-python3 - "$OUT/wheels" "$OUT/licenses" <<'PYEOF'
-import base64, os, sys
-wheel_dir, out_dir = sys.argv[1], sys.argv[2]
-import zipfile
-for fn in sorted(os.listdir(wheel_dir)):
-    if not fn.endswith(".whl"):
-        continue
-    try:
-        with zipfile.ZipFile(os.path.join(wheel_dir, fn)) as z:
-            for name in z.namelist():
-                base = name.rsplit("/", 1)[-1]
-                low = base.lower()
-                if low.startswith(("license", "licence", "copying", "notice")) and \
-                   low.endswith((".txt", ".md", ".rst", "")):
-                    stem = fn.split("-")[0]
-                    data = z.read(name)
-                    # skip huge vendored trees (e.g. cryptography's rust crates)
-                    if len(data) > 2_000_000:
-                        continue
-                    with open(os.path.join(out_dir, f"{stem}.{base or 'LICENSE'}"), "wb") as f:
-                        f.write(data)
-                    break
-    except Exception as e:
-        print(f"    [warn] {fn}: {e}")
-PYEOF
-echo "    licenses/: $(ls "$OUT/licenses" 2>/dev/null | wc -l) files"
+cp "$MATERIAL_CHECK" "$OUT/materials/check.py"
 
 echo "[*] bundle assembled at $OUT"
 if [[ "$DO_TAR" == "1" ]]; then

@@ -33,6 +33,8 @@ CACHE="$REPO_ROOT/deploy/.docker-build-cache"
 DIST="$REPO_ROOT/dist"
 VIEWER_SRC=""
 PYTHON_SRC=""
+PYTHON_MATERIALS=""
+VIEWER_MATERIALS=""
 SKIP_LEGACY=0
 REBUILD=0
 PYSLANG_VER="$(grep -oP 'pyslang>=\K[0-9.]+' "$REPO_ROOT/pyproject.toml" || echo 11.0.0)"
@@ -47,6 +49,8 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --viewer) VIEWER_SRC="$2"; shift 2;;
     --python) PYTHON_SRC="$2"; shift 2;;
+    --python-materials) PYTHON_MATERIALS="$2"; shift 2;;
+    --viewer-materials) VIEWER_MATERIALS="$2"; shift 2;;
     --skip-legacy) SKIP_LEGACY=1; shift;;
     --rebuild) REBUILD=1; shift;;
     *) echo "unknown arg: $1"; exit 1;;
@@ -55,6 +59,20 @@ done
 
 command -v docker >/dev/null || { echo "ERROR: docker required"; exit 1; }
 mkdir -p "$CACHE" "$DIST"
+if [[ -n "$PYTHON_SRC" ]]; then
+  [[ -n "$PYTHON_MATERIALS" ]] || { echo "ERROR: --python-materials required"; exit 1; }
+  python3 "$REPO_ROOT/deploy/redistribution_materials.py" check --component python --materials "$PYTHON_MATERIALS" --artifact "$PYTHON_SRC"
+  mkdir -p "$CACHE/materials"
+  [[ ! -e "$CACHE/materials/python" ]] || { echo "ERROR: use a fresh material cache"; exit 1; }
+  cp -R "$PYTHON_MATERIALS" "$CACHE/materials/python"
+fi
+if [[ -n "$VIEWER_SRC" ]]; then
+  [[ -n "$VIEWER_MATERIALS" ]] || { echo "ERROR: --viewer-materials required"; exit 1; }
+  python3 "$REPO_ROOT/deploy/redistribution_materials.py" check --component viewer --materials "$VIEWER_MATERIALS" --artifact "$VIEWER_SRC"
+  mkdir -p "$CACHE/materials"
+  [[ ! -e "$CACHE/materials/viewer" ]] || { echo "ERROR: use a fresh material cache"; exit 1; }
+  cp -R "$VIEWER_MATERIALS" "$CACHE/materials/viewer"
+fi
 [[ "$REBUILD" == "1" ]] && rm -rf "$CACHE"/surver-static "$CACHE"/pyslang-whl
 
 # -- stage 1: musl static surver (needed by 2.17; also fallback for 2.28) --
@@ -142,12 +160,12 @@ PY_ARGS=()
 if [[ -n "$PYTHON_SRC" ]]; then
   if [[ -f "$PYTHON_SRC" ]]; then
     cp -f "$PYTHON_SRC" "$CACHE/python-standalone.tar.gz"
-    PY_ARGS=(--python /cache/python-standalone.tar.gz)
+    PY_ARGS=(--python /cache/python-standalone.tar.gz --python-materials /cache/materials/python)
   else
     # URL: download once into the cache, then treat as local
     echo "[*] fetching standalone python: $PYTHON_SRC"
     curl -sL "$PYTHON_SRC" -o "$CACHE/python-standalone.tar.gz"
-    PY_ARGS=(--python /cache/python-standalone.tar.gz)
+    PY_ARGS=(--python /cache/python-standalone.tar.gz --python-materials /cache/materials/python)
   fi
 fi
 mkdir -p "$CACHE/build"
@@ -156,9 +174,9 @@ mkdir -p "$CACHE/build"
 V_ARGS=()
 if [[ -n "$VIEWER_SRC" ]]; then
   if [[ -x "$VIEWER_SRC/surver" ]]; then
-    V_ARGS=(--viewer "$(stage_viewer "$VIEWER_SRC/surver" | tail -1)")
+    V_ARGS=(--viewer "$(stage_viewer "$VIEWER_SRC/surver" | tail -1)" --viewer-materials /cache/materials/viewer)
   else
-    V_ARGS=(--viewer "$(stage_viewer "$CACHE/surver-static/surver" | tail -1)")
+    V_ARGS=(--viewer "$(stage_viewer "$CACHE/surver-static/surver" | tail -1)" --viewer-materials /cache/materials/viewer)
   fi
 fi
 bundle_in_container quay.io/pypa/manylinux_2_28_x86_64 2.28 \
@@ -168,7 +186,7 @@ bundle_in_container quay.io/pypa/manylinux_2_28_x86_64 2.28 \
 if [[ "$SKIP_LEGACY" == "0" ]]; then
   V_ARGS=()
   if [[ -n "$VIEWER_SRC" ]]; then
-    V_ARGS=(--viewer "$(stage_viewer "$CACHE/surver-static/surver" | tail -1)")
+    V_ARGS=(--viewer "$(stage_viewer "$CACHE/surver-static/surver" | tail -1)" --viewer-materials /cache/materials/viewer)
   fi
   bundle_in_container quay.io/pypa/manylinux2014_x86_64 2.17 \
       wave-mcp-bundle-glibc2.17 \

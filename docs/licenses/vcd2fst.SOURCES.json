@@ -1,0 +1,41 @@
+{
+  "upstream_url": "https://gtkwave.sourceforge.net/gtkwave-3.3.121.tar.gz",
+  "archive_sha256": "5b05b6469bca675d9c9de60cf7ce8ad33afe13ef71aa29777898ced2ffe88397",
+  "components": [
+    {
+      "component": "fstapi",
+      "upstream_file": "src/helpers/fst/fstapi.c",
+      "source_sha256": "6a09b5a4aea241f12939e8005f7e2c1b2c60f28e39d66a1d02d3edd69c80a1c8",
+      "notice_file": "vcd2fst.fstapi.LICENSE",
+      "notice_sha256": "a99c03c21fe8e317f248dc399314cb48a2dcbdf3fa41fadfddfe82ea9e83f0a7"
+    },
+    {
+      "component": "fastlz",
+      "upstream_file": "src/helpers/fst/fastlz.c",
+      "source_sha256": "35d2b3ab8ea04615cc56dee1a7017610f459b57aef51d9de69c71c24bd9ee719",
+      "notice_file": "vcd2fst.fastlz.LICENSE",
+      "notice_sha256": "f0561e84fe4ecdaf4781f58cc0b9665117250d1617ac3099eddbddc67cfae471"
+    },
+    {
+      "component": "lz4",
+      "upstream_file": "src/helpers/fst/lz4.c",
+      "source_sha256": "af9087bb6d6155079cccaf8635acc6590b8a6f2fc98efce35e926f30f79366b8",
+      "notice_file": "vcd2fst.lz4.LICENSE",
+      "notice_sha256": "c5cc80af5cbc31e989d4f74a7cecfb2caa9a245ad1b03947bbb34b77c6d5a74e"
+    },
+    {
+      "component": "helper",
+      "upstream_file": "src/helpers/vcd2fst.c",
+      "source_sha256": "a913bf67d9b82ca65f7e21ec1722153b5ca8f4f4a605a57b38389e1ba3812a57",
+      "notice_file": "vcd2fst.helper.LICENSE",
+      "notice_sha256": "4eba461c2fc9188dfdca6918dbf31085e3dcfa51d2ae2802dbaec7e9008a45ea"
+    },
+    {
+      "component": "jrb",
+      "upstream_file": "contrib/rtlbrowse/jrb.c",
+      "source_sha256": "94062c6793dda93c39593200aea52eb27faa63e5412f9bff5459a6e416c75a16",
+      "notice_file": "vcd2fst.jrb.LICENSE",
+      "notice_sha256": "086d3e9e12456df03d7d4b683837bc4e2ba7a7f2a3bcbe78f8d40fffa5107f9a"
+    }
+  ]
+}

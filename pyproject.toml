@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wave-mcp"
-version = "0.2.3"
+version = "0.2.4"
 description = "Open-source, license-free MCP server for RTL waveform debug (FST + SystemVerilog static analysis), an Indago/Verisium Debug MCP alternative."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -51,3 +51,7 @@ include = ["wave_mcp*"]
 # ViewerServer, so it must ship inside the wheel: without this the viewer
 # tools install fine but fail to serve their own pages.
 "wave_mcp.viewer" = ["web/*.html", "web/*.js"]
+
+[tool.setuptools.data-files]
+"share/doc/wave-mcp" = ["LICENSE", "docs/THIRD_PARTY.md", "docs/PACKAGING_MATERIALS.md"]
+"share/doc/wave-mcp/licenses" = ["docs/licenses/*"]

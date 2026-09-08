@@ -56,7 +56,9 @@
  *   ffrLoadSignals), then traversed through a single merged time-based
  *   iterator (ffrCreateTimeBasedVCTrvsHdl), which yields (idcode, time,
  *   value) records in time order. RAM scales with the design's value data;
- *   use -l / -L to convert a subset when the design is huge.
+ *   use -l / -L to reduce the selected value data. Filtering does not shrink
+ *   the file-wide metadata used by FsdbReader; a separate raw VAR guard
+ *   rejects risky files before loading, even when a tiny subset is selected.
  */
 /* Offline stub builds (-DFFRAPI_STUB, machines without Verdi) pick up the
  * vendored ffrAPI_stub.h from this directory; the real build must leave
@@ -133,6 +135,22 @@ void vinfo(const char *fmt, ...) {  /* printed regardless of verbosity */
     va_end(ap);
     fputc('\n', stderr);
     std::exit(2);
+}
+
+/* Safety policy, not a documented Synopsys capacity limit. Reject malformed
+ * overrides instead of accidentally treating them as 0 (guard disabled). */
+unsigned long long ReadLimit(const char *name) {
+    const char *value = std::getenv(name);
+    if (!value) return 5000000;
+    if (!*value) die("%s must be a non-negative integer (0 disables)", name);
+    for (const char *p = value; *p; ++p)
+        if (*p < '0' || *p > '9')
+            die("%s must be a non-negative integer (0 disables)", name);
+    errno = 0;
+    unsigned long long limit = std::strtoull(value, nullptr, 10);
+    if (errno == ERANGE)
+        die("%s must be a non-negative integer within unsigned 64-bit range", name);
+    return limit;
 }
 
 /* ---------- FSDB scale string ("1ns", "100fs", ...) -> fs per tick ----------
@@ -301,6 +319,7 @@ struct FsdbReader {
     std::string scale_unit;
     std::vector<Signal> signals;
     std::vector<std::string> scope_stack;
+    unsigned long long n_total_vars = 0; /* raw VAR callbacks, before dedup */
     unsigned int n_strength = 0;
     unsigned int n_unsupported = 0;    /* stream/MDA/property/internal types */
 
@@ -337,6 +356,7 @@ struct FsdbReader {
             if (g_dump_tree) std::fprintf(stderr, "TREE END_ALL_TREE\n");
             break;
         case FSDB_TREE_CBT_VAR: {
+            ++r->n_total_vars;  /* include duplicates and unsupported types */
             fsdbTreeCBDataVar *v =
                 static_cast<fsdbTreeCBDataVar *>(tree_cb_data);
             Signal sig;
@@ -480,14 +500,17 @@ void Usage() {
         "\n"
         "notes:\n"
         "  * strength-valued vars (2 bytes per bit) are skipped.\n"
-        "  * batches of more than 5000000 SELECTED signals are refused up\n"
-        "    front (the loader would crash); filter with -l / -L to convert\n"
-        "    a subset, or override via FSDB2FST_MAX_SIGNALS=<n> (0=off).\n"
-        "  * on an oversized file, filtering gets you past that limit but\n"
-        "    FsdbReader may still crash inside ffrLoadSignals regardless of\n"
-        "    the subset size; that is a reader limitation, not a filter bug.\n"
-        "  * all selected signals are loaded into RAM at once; for very\n"
-        "    large designs convert per-scope with -l / -L.\n",
+        "  * files with more than 5000000 raw VAR entries are refused before\n"
+        "    loading, regardless of -l / -L. Dump fewer scopes into separate\n"
+        "    source files; avoid merging them into one huge hierarchy.\n"
+        "    FSDB2FST_MAX_TOTAL_VARS=<n> overrides this guard (0=off, unsafe).\n"
+        "  * more than 5000000 SELECTED signals are also refused; reduce the\n"
+        "    selection or override FSDB2FST_MAX_SIGNALS=<n> (0=off, unsafe).\n"
+        "  * these are conservative safety thresholds, NOT documented\n"
+        "    FsdbReader limits. Smaller files may also fail. --info and\n"
+        "    --dump-tree never load value data and bypass these guards.\n"
+        "  * all selected signals are loaded into RAM at once; filtering\n"
+        "    reduces value data, not the file-wide metadata.\n",
         stderr);
 }
 
@@ -565,14 +588,19 @@ int main(int argc, char **argv) {
     rd.Open(in_path);
 
     unsigned int n_real = 0;
-    for (const auto &s : rd.signals)
+    size_t n_convertible = 0;
+    for (const auto &s : rd.signals) {
         if (s.is_real) n_real++;
+        if (s.loadable) n_convertible++;
+    }
     vinfo("[fsdb2fst] scale: %s (%llu fs per tick)", 
           rd.scale_unit.empty() ? "unknown" : rd.scale_unit.c_str(),
           rd.scale_fs);
     vinfo("[fsdb2fst] signals: %zu (%u real, %u strength-skipped, "
           "%u unsupported-type)",
           rd.signals.size(), n_real, rd.n_strength, rd.n_unsupported);
+    vinfo("[fsdb2fst] census: %llu total-vars, %zu unique-paths, %zu convertible",
+          rd.n_total_vars, rd.signals.size(), n_convertible);
 
     if (info_only) {
         for (size_t i = 0; i < rd.signals.size() && i < 10; i++)
@@ -591,38 +619,40 @@ int main(int argc, char **argv) {
     }
 
     /* ---- select the signals to convert ---- */
-    /* Huge designs (gate-level nets with tens of millions of vars) can make
-     * ffrLoadSignals/ffrCreateTimeBasedVCTrvsHdl segfault deep inside libnffr.
-     * It is not an OOM, and it can happen even for a 1-signal subset. The
-     * guard bounds the number of signals actually loaded (the SELECTED set,
-     * after -l/-L) so that filtering stays useful.
-     * Override with FSDB2FST_MAX_SIGNALS=<n>; 0 disables the guard. */
-    unsigned long max_signals = 5000000;
-    if (const char *env_ms = std::getenv("FSDB2FST_MAX_SIGNALS"))
-        max_signals = std::strtoul(env_ms, nullptr, 10);
+    /* File-wide metadata can crash FsdbReader even for a 1-signal subset.
+     * Keep that guard independent of the selected-value-data guard. Count
+     * raw callbacks: path dedup and type filtering must not hide file size. */
+    const auto max_total_vars = ReadLimit("FSDB2FST_MAX_TOTAL_VARS");
+    const auto max_signals = ReadLimit("FSDB2FST_MAX_SIGNALS");
     std::vector<Signal *> sel;
     for (auto &s : rd.signals) {
         if (!s.loadable) continue;
         if (!filter.Passes(s.path)) continue;
         sel.push_back(&s);
     }
+    vinfo("[fsdb2fst] selected: %zu signals", sel.size());
+    if (max_total_vars && rd.n_total_vars > max_total_vars)
+        die("%llu total VAR entries exceed the file-wide safety limit (%llu); "
+            "%zu unique paths, %zu convertible, %zu selected. Refusing before "
+            "ffrLoadSignals: FsdbReader may crash on file-wide metadata even "
+            "for a single selected signal. -l/-L and fsdb_scopes do not reduce "
+            "that metadata. Re-dump fewer scopes into separate FSDB files; "
+            "avoid merging full hierarchies. Time-only splitting may retain "
+            "the same VAR count. Run --info for diagnostics (real means "
+            "floating-point, not valid signals). This is a conservative "
+            "guard, not a documented vendor limit. Expert-only override: "
+            "FSDB2FST_MAX_TOTAL_VARS=<n> (0 disables; SIGSEGV risk). "
+            "See docs/FSDB_GUIDE.md.",
+            rd.n_total_vars, max_total_vars, rd.signals.size(),
+            n_convertible, sel.size());
     if (sel.empty()) die("no convertible signal matches the filter");
     if (max_signals && sel.size() > max_signals)
-        die("%zu selected signals exceed the in-core limit (%lu); "
-            "ffrLoadSignals would crash on a batch this size. Filter with "
-            "-l/-L to convert a subset (split per scope), or raise the limit "
-            "via FSDB2FST_MAX_SIGNALS=<n> (0 disables).",
+        die("%zu selected signals exceed the in-core limit (%llu); "
+            "this conservative guard avoids risky ffrLoadSignals batches. "
+            "Filter with -l/-L to reduce selected value data; this does not "
+            "bypass the separate file-wide VAR guard. Expert-only override: "
+            "FSDB2FST_MAX_SIGNALS=<n> (0 disables; SIGSEGV risk).",
             sel.size(), max_signals);
-    /* The file as a whole is oversized: -l/-L gets us past the guard, but
-     * FsdbReader may still fail inside ffrLoadSignals regardless of how few
-     * signals were asked for. Say so instead of letting a raw segfault be the
-     * only feedback. */
-    if (max_signals && rd.signals.size() > max_signals)
-        vinfo("[fsdb2fst] warning: this FSDB holds %zu signals in total; "
-              "FsdbReader can fail inside ffrLoadSignals on designs this "
-              "large even when only a few signals are selected. If that "
-              "happens, -l/-L cannot help.",
-              rd.signals.size());
     if (sel.size() > 2000000)
         vinfo("[fsdb2fst] warning: %zu signals selected; consider -l/-L "
               "to split the conversion", sel.size());

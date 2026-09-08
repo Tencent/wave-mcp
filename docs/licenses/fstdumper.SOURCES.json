@@ -1,0 +1,10 @@
+{
+  "upstream": "https://github.com/semify-eda/fstdumper",
+  "commit": "3c7506333d2c9ad098d4526209621ea401a077ba",
+  "archive_sha256": "b4caee3f9da011df0ab98c7acd31ffe4eaf44f109c1a58eaacc03b5b0bd089e7",
+  "notice_files": {
+    "fstdumper-GPL-3.0.txt": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+    "fstdumper-sys_fst.NOTICE": "e901ca893fee00c6b74fcd2241d0dbace3918f9f25a5da01924030879c51485d",
+    "GPL-2.0.txt": "640d90f6ee401241ff62834d0d1b33f83049e99b8bfdfa04ed1b0a1635dde3e7"
+  }
+}

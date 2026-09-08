@@ -1,0 +1,25 @@
+epaint_default_fonts 0.35.0 - bundled font license provenance
+
+Declared license (Cargo.toml): (MIT OR Apache-2.0) AND OFL-1.1 AND Ubuntu-font-1.0
+
+This crate bundles font binaries, so the license is a conjunction, not a
+choice. All three parts apply simultaneously.
+
+Bundled font files and their licenses:
+  1. Hack-Regular.ttf        -> OFL-1.1 (SIL Open Font License 1.1)
+  2. NotoEmoji-Regular.ttf   -> OFL-1.1 (SIL Open Font License 1.1)
+  3. Ubuntu-Light.ttf        -> Ubuntu-font-1.0 (Ubuntu Font Licence 1.0)
+  4. emoji-icon-font.ttf     -> MIT, Copyright (c) 2014 John Slegers
+                                (upstream ships emoji-icon-font-mit-license.txt,
+                                 copied verbatim into this directory)
+
+Files in this directory:
+  OFL-1.1.txt           canonical SIL Open Font License 1.1 text
+  Ubuntu-font-1.0.txt   canonical Ubuntu Font Licence 1.0 text
+  emoji-icon-font-mit-license.txt  verbatim upstream MIT notice for font 4
+
+Note on redistribution: OFL-1.1 and Ubuntu-font-1.0 both require the license
+text to accompany the fonts. These fonts are embedded in the surver/wasm
+artifacts, so the texts above MUST ship with any distribution that contains
+those artifacts. The MIT/Apache texts in ../upstream/ cover the crate code
+itself but do NOT cover the font binaries.
