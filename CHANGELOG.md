@@ -4,6 +4,37 @@ All notable changes to wave-mcp are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.5] - 2026-09-08
+
+### Fixed
+
+- **Embedded font license texts corrected.** The notice shipped for
+  `Hack-Regular.ttf` was wrong: the crate's declared license string
+  (`... AND OFL-1.1 AND Ubuntu-font-1.0`) had been read as a per font mapping, so
+  Hack was recorded as OFL-1.1. Hack is actually MIT (Copyright 2018 Source
+  Foundry Authors) plus Bitstream Vera (Copyright 2003 Bitstream, Inc., with
+  Reserved Font Names "Bitstream" and "Vera"), which means the declared
+  `OFL-1.1` covers `NotoEmoji-Regular.ttf` only. The upstream notice is now
+  vendored at `docs/licenses/epaint-default-fonts.Hack.txt` and
+  `epaint-default-fonts.SOURCES.txt` records the mapping taken from the upstream
+  per font notices rather than from the declared string.
+- **Blank SIL template replaced with the upstream text.** The OFL-1.1 file was a
+  generic template still carrying unfilled `<Copyright Holder>` and
+  `<Reserved Font Name>` placeholders, so it named no copyright holder and did
+  not satisfy the notice requirement. It is now the verbatim
+  `fonts/OFL.txt` that upstream distributes with the font. All four font notices
+  are byte identical to `epaint_default_fonts` 0.35.0.
+- **Placeholder gate added to the asset build.** `build_viewer_assets.sh` now
+  refuses to package any font license text that still contains template
+  placeholders, so a blank notice cannot silently ship again.
+
+### Changed
+
+- `deploy/viewer-pin.sh` pins the viewer asset package to `0.25.6.post1`. The
+  pinned surver/wasm pair is unchanged, so the wellen version assertion stays at
+  `0.25.6`; the post release suffix marks a packaging only fix that ships the
+  same binaries with the corrected font notices.
+
 ## [0.2.4] - 2026-09-08
 
 ### Changed
