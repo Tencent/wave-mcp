@@ -39,9 +39,19 @@ SURFER_REF="${SURFER_REF:-86eedfd0cda70fc0a61ab200ebf37aabf97c5cde}"
 
 # Version of the wave-mcp-viewer-assets package. Tracks the wellen version of
 # the pinned pair, which is what actually has to match at connect time.
-VIEWER_ASSETS_VERSION="${VIEWER_ASSETS_VERSION:-0.25.6}"
+#
+# A PEP 440 post-release suffix (`.postN`) is used for packaging-only fixes that
+# ship the SAME artifacts: the pinned pair, and therefore the wellen version,
+# is unchanged, so the base version must stay put. 0.25.6.post1 adds the
+# embedded-font license texts that 0.25.6 shipped without. Do NOT bump the base
+# version for this: that would claim a wellen version we did not package, and
+# the gate below compares against the real binaries.
+VIEWER_ASSETS_VERSION="${VIEWER_ASSETS_VERSION:-0.25.6.post1}"
 
 # Expected wellen version of both artifacts. build_viewer_assets.sh compares
 # the two binaries against each other and against this value, so a stale pin is
 # caught even when surver and wasm happen to agree with each other.
+#
+# This is an assertion about the BINARIES, not the package version: it must not
+# carry a post-release suffix, and it only changes when SURFER_REF changes.
 VIEWER_WELLEN_VERSION="${VIEWER_WELLEN_VERSION:-0.25.6}"

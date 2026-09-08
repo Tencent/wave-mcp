@@ -3,23 +3,41 @@ epaint_default_fonts 0.35.0 - bundled font license provenance
 Declared license (Cargo.toml): (MIT OR Apache-2.0) AND OFL-1.1 AND Ubuntu-font-1.0
 
 This crate bundles font binaries, so the license is a conjunction, not a
-choice. All three parts apply simultaneously.
+choice. The declared string covers the crate as a whole; the per-font notices
+shipped upstream are the authoritative mapping, and they do NOT line up with
+the declared string one-to-one. In particular Hack is MIT plus Bitstream Vera,
+not OFL, so the declared "OFL-1.1" applies to NotoEmoji only.
 
-Bundled font files and their licenses:
-  1. Hack-Regular.ttf        -> OFL-1.1 (SIL Open Font License 1.1)
+Bundled font files and their licenses (taken from the upstream notices, not
+from the declared string):
+  1. Hack-Regular.ttf        -> MIT, Copyright 2018 Source Foundry Authors.
+                                Derived from DejaVu (public domain) and
+                                Bitstream Vera Sans Mono, Copyright 2003
+                                Bitstream, Inc., under the Bitstream Vera
+                                License with Reserved Font Names "Bitstream"
+                                and "Vera". All three notices are in
+                                epaint-default-fonts.Hack.txt.
   2. NotoEmoji-Regular.ttf   -> OFL-1.1 (SIL Open Font License 1.1)
   3. Ubuntu-Light.ttf        -> Ubuntu-font-1.0 (Ubuntu Font Licence 1.0)
   4. emoji-icon-font.ttf     -> MIT, Copyright (c) 2014 John Slegers
-                                (upstream ships emoji-icon-font-mit-license.txt,
-                                 copied verbatim into this directory)
 
-Files in this directory:
-  OFL-1.1.txt           canonical SIL Open Font License 1.1 text
-  Ubuntu-font-1.0.txt   canonical Ubuntu Font Licence 1.0 text
-  emoji-icon-font-mit-license.txt  verbatim upstream MIT notice for font 4
+Files in this directory and their upstream origin (all copied verbatim from
+the epaint_default_fonts-0.35.0 crate, fonts/ directory; sha256 recorded in
+the viewer material manifest):
+  epaint-default-fonts.Hack.txt                    <- fonts/Hack-Regular.txt
+  epaint-default-fonts.OFL-1.1.txt                 <- fonts/OFL.txt
+  epaint-default-fonts.Ubuntu-font-1.0.txt         <- fonts/UFL.txt
+  epaint-default-fonts.emoji-icon-font.MIT.txt     <- fonts/emoji-icon-font-mit-license.txt
+
+Do not substitute a generic SIL template for fonts/OFL.txt. A blank template
+carries unfilled <Copyright Holder> and <Reserved Font Name> placeholders, so
+it names no copyright holder and does not satisfy the notice requirement; the
+upstream file is the text that actually accompanies the font.
 
 Note on redistribution: OFL-1.1 and Ubuntu-font-1.0 both require the license
-text to accompany the fonts. These fonts are embedded in the surver/wasm
-artifacts, so the texts above MUST ship with any distribution that contains
-those artifacts. The MIT/Apache texts in ../upstream/ cover the crate code
-itself but do NOT cover the font binaries.
+text to accompany the fonts, and the MIT and Bitstream Vera notices for Hack
+require the copyright notice to travel with copies. These fonts are embedded
+in the surver/wasm artifacts, so all four texts above MUST ship with any
+distribution that contains those artifacts. The MIT/Apache texts under
+licenses/epaint_default_fonts-0.35.0/upstream/ cover the crate code itself but
+do NOT cover the font binaries.

@@ -145,18 +145,35 @@ EOF
 cp "$OUT/NOTICE" "$PKG/NOTICE"
 
 # The surver binary embeds fonts from the epaint_default_fonts crate. Its
-# license is a conjunction that includes OFL-1.1 and Ubuntu-font-1.0, both of
-# which require the license text to travel with the fonts. Earlier asset
-# builds shipped only the per-crate report, which recorded this component as
-# an unknown license and left the font texts out. Copy them into the package
+# declared license is a conjunction that includes OFL-1.1 and Ubuntu-font-1.0,
+# both of which require the license text to travel with the fonts. Earlier
+# asset builds shipped only the per-crate report, which recorded this component
+# as an unknown license and left the font texts out. Copy them into the package
 # and fail the build if they are missing.
+#
+# Hack needs its own notice: it is MIT (Source Foundry) plus Bitstream Vera,
+# NOT OFL, so the declared "OFL-1.1" covers NotoEmoji only. See
+# docs/licenses/epaint-default-fonts.SOURCES.txt for the per-font mapping.
 mkdir -p "$PKG/licenses/fonts"
 FONT_MISSING=0
 for f in epaint-default-fonts.OFL-1.1.txt \
          epaint-default-fonts.Ubuntu-font-1.0.txt \
          epaint-default-fonts.emoji-icon-font.MIT.txt \
+         epaint-default-fonts.Hack.txt \
          epaint-default-fonts.SOURCES.txt; do
   if [[ -f "$REPO_ROOT/docs/licenses/$f" ]]; then
+    # An unfilled SIL/UFL template names no copyright holder, so shipping one
+    # would assert compliance while carrying a blank notice. Refuse it. Only
+    # license texts are scanned: SOURCES.txt documents this very rule and so
+    # legitimately quotes the placeholder strings.
+    if [[ "$f" != *.SOURCES.txt ]] \
+       && grep -qE '<Copyright Holder>|<Reserved Font Name>|<dates>' "$REPO_ROOT/docs/licenses/$f"; then
+      echo "ERROR: docs/licenses/$f still contains license template placeholders."
+      echo "       Ship the notice that upstream distributes with the font, not"
+      echo "       a blank template. See epaint-default-fonts.SOURCES.txt."
+      FONT_MISSING=1
+      continue
+    fi
     cp "$REPO_ROOT/docs/licenses/$f" "$PKG/licenses/fonts/$f"
   else
     echo "ERROR: docs/licenses/$f not found; the surver binary embeds these"
