@@ -85,6 +85,41 @@ bash deploy/build_fstdumper.sh              # 产出 third_party/fstdumper/build
 bash deploy/build_fstdumper.sh --perf-opt   # 额外应用可选的性能补丁
 ```
 
+### 离线 / 隔离网构建
+
+fstdumper 的源码托管在 GitHub（GPL-3.0），不随 wave-mcp 分发，因此脚本默认
+会联网 clone。隔离网环境没有外网，需要提前在有网络的机器上准备好源码目录，
+再拷到目标机。
+
+```bash
+# ① 在有网的机器上 clone（只需一次，几秒钟）
+git clone --depth 1 https://github.com/semify-eda/fstdumper.git /tmp/fstdumper
+
+# ② 把 /tmp/fstdumper 目录整体拷到隔离网机器（U 盘 / scp / 共享目录均可）
+#    同时需要 wave-mcp 仓库中的补丁文件：third_party/fstdumper/*.patch
+#    离线 bundle 中对应路径为 fsdb2fst-src/ 同级没有 fstdumper 补丁，
+#    需从仓库或 sdist 中取 third_party/fstdumper/ 目录一并带过去
+
+# ③ 在隔离网机器上构建（指定 checkout 路径，脚本会跳过 clone）
+FSTDUMPER_BUILD_DIR=/path/to/fstdumper bash deploy/build_fstdumper.sh
+```
+
+脚本检测到 `$FSTDUMPER_BUILD_DIR` 下已有 `.git` 目录时会直接跳过 clone，
+只执行打补丁和编译。编译仅需 gcc、make 和 zlib（`-lz`），不需要网络。
+
+如果目标机上连 `deploy/build_fstdumper.sh` 也没有（纯离线 bundle 安装），
+可以手工执行等价操作：
+
+```bash
+cd /path/to/fstdumper
+patch -p1 < /path/to/third_party/fstdumper/fstdumper-xcelium-fixes.patch
+make fstdumper.so
+```
+
+产出的 `fstdumper.so` 可以拷给同环境的所有人复用。
+
+### 手工流程
+
 没有外网时先自行 clone，再用 `FSTDUMPER_BUILD_DIR=<你的 checkout>` 指向它。
 手工流程如下，与脚本等价：
 

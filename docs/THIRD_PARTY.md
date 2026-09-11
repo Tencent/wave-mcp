@@ -45,7 +45,7 @@ The GTKWave GUI is not linked or shipped as a binary. The complete upstream
 source archive retained for rebuilding includes other files under their own
 original licenses. See [packaging materials](PACKAGING_MATERIALS.md).
 
-## FSDB converter (local build artifact only, never distributed)
+## FSDB converter
 
 `third_party/fsdb2fst/` contains the source of `fsdb2fst`, an FSDB-to-FST
 converter built by `deploy/build_fsdb2fst.sh`. The converter source and the
@@ -58,14 +58,30 @@ vendored FST writer are:
 | LZ4 | BSD-2-Clause (Yann Collet) | via gtkwave 3.3.121 |
 | FastLZ | MIT (Ariya Hidayat) | via gtkwave 3.3.121 |
 
+The converter is built on demand on the user's machine, so its source and the
+build script ship in the wheel, the sdist and the offline bundle; without them
+the auto-build has nothing to compile. What ships is source only. The compiled
+`fsdb2fst` binary is a local artifact and is not distributed: the build that
+produces it links against a Verdi installation that differs per site.
+
+The vendored FST writer files are byte-identical to the GTKWave 3.3.121
+originals recorded in [`licenses/vcd2fst.SOURCES.json`](licenses/vcd2fst.SOURCES.json),
+and each file retains its upstream copyright header. The corresponding notices
+ship as [`licenses/vcd2fst.fstapi.LICENSE`](licenses/vcd2fst.fstapi.LICENSE),
+[`licenses/vcd2fst.lz4.LICENSE`](licenses/vcd2fst.lz4.LICENSE) and
+[`licenses/vcd2fst.fastlz.LICENSE`](licenses/vcd2fst.fastlz.LICENSE), named for
+the first component that vendored them; they cover both converters.
+
 The converter additionally links at BUILD time against the Synopsys
 FsdbReader runtime (`libnffr.so` + `libnsys.so` from a local Verdi
 installation, `$VERDI_HOME/share/FsdbReader/linux64`). Those libraries are
 proprietary Synopsys property: they are NEVER committed, vendored, or
-redistributed; the produced binary is a local artifact and is excluded from
-git, PyPI, and the offline bundle (`third_party/verdi_runtime/` is
-gitignored). Runtime use of the FsdbReader libraries performs no Synopsys
-license checkout (verify in your own environment, e.g. with `lmstat`).
+redistributed, and no distribution carries them or any Verdi header
+(`third_party/verdi_runtime/` is gitignored). The `ffrAPI_stub.*` files in
+that directory are our own minimal declarations used for an offline compile
+check, not Synopsys headers. Runtime use of the FsdbReader libraries performs
+no Synopsys license checkout (verify in your own environment, e.g. with
+`lmstat`).
 
 ### Attribution: TraceWeave
 

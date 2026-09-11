@@ -136,6 +136,7 @@ typedef bool_T (*fsdbTreeCBFuncT)(fsdbTreeCBType, void *, void *);
 struct ffrVCTrvsHdl_t {
     fsdbRC ffrHasIncoreVC(void);
     fsdbRC ffrGotoXTag(void *tag);
+    fsdbRC ffrGotoTheFirstVC(void);
     fsdbRC ffrGotoNextVC(void);
     fsdbRC ffrGotoPrevVC(void);
     fsdbRC ffrGetXTag(void *tag);
@@ -151,7 +152,16 @@ struct ffrTimeBasedVCTrvsHdl_t {
     void   ffrFree(void);
 };
 
+struct ffrVCIterOne_t {
+    fsdbRC ffrGotoTheFirstVC(void);
+    fsdbRC ffrGotoNextVC(void);
+    fsdbRC ffrGetXTag(void *tag);
+    fsdbRC ffrGetVC(byte_T **vc);
+    void   ffrFree(void);
+};
+
 typedef ffrVCTrvsHdl_t        *ffrVCTrvsHdl;
+typedef ffrVCIterOne_t         ffrVCIterOne;
 typedef ffrTimeBasedVCTrvsHdl_t *ffrTimeBasedVCTrvsHdl;
 
 #define FSDB_MIN_VAR_IDCODE 1
@@ -169,6 +179,7 @@ public:
     fsdbRC    ffrLoadSignals(void);
     fsdbRC    ffrUnloadSignals(void);
     ffrVCTrvsHdl ffrCreateVCTraverseHandle(fsdbVarIdcode id);
+    ffrVCIterOne *ffrCreateVCTrvsHdl(fsdbVarIdcode id);
     ffrTimeBasedVCTrvsHdl ffrCreateTimeBasedVCTrvsHdl(uint_T n,
                                                       fsdbVarIdcode *ids);
     fsdbRC    ffrGetMaxVarIdcode(void);

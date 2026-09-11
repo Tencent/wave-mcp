@@ -319,8 +319,43 @@ fsdbRC ffrObject::ffrClose(void) { return FSDB_RC_SUCCESS; }
 
 fsdbRC ffrVCTrvsHdl_t::ffrHasIncoreVC(void) { return FALSE; }
 fsdbRC ffrVCTrvsHdl_t::ffrGotoXTag(void *) { return FSDB_RC_FAILURE; }
+fsdbRC ffrVCTrvsHdl_t::ffrGotoTheFirstVC(void) { return FSDB_RC_FAILURE; }
 fsdbRC ffrVCTrvsHdl_t::ffrGotoPrevVC(void) { return FSDB_RC_FAILURE; }
 fsdbRC ffrVCTrvsHdl_t::ffrGetXTag(void *) { return FSDB_RC_FAILURE; }
 fsdbRC ffrVCTrvsHdl_t::ffrGetVC(byte_T **) { return FSDB_RC_FAILURE; }
 fsdbRC ffrVCTrvsHdl_t::ffrGetMaxXTag(void *) { return FSDB_RC_FAILURE; }
 void ffrVCTrvsHdl_t::ffrFree(void) {}
+
+/* per-signal traverse used by ProbeHasValueChange(). The offline stub keeps a
+ * single g_state->vcs list, so the probe reports "has value change" exactly
+ * when that list holds at least one record for the signal (or, when the script
+ * did not bind ids, when the file has any value change at all). */
+namespace {
+struct StubIterOne : ffrVCIterOne_t {
+    std::vector<StubVC> *vcs = NULL;
+    fsdbVarIdcode id = 0;
+    size_t pos = 0;
+    std::vector<size_t> hits;
+};
+}
+
+ffrVCIterOne *ffrObject::ffrCreateVCTrvsHdl(fsdbVarIdcode id) {
+    if (!g_state) return NULL;
+    StubIterOne *h = new StubIterOne();
+    h->vcs = &g_state->vcs;
+    h->id = id;
+    for (size_t i = 0; i < h->vcs->size(); i++)
+        if ((*h->vcs)[i].id == id || (*h->vcs)[i].id == 0) h->hits.push_back(i);
+    return h;
+}
+
+fsdbRC ffrVCIterOne_t::ffrGotoTheFirstVC(void) {
+    StubIterOne *h = static_cast<StubIterOne *>(this);
+    if (!h->vcs || h->hits.empty()) return FSDB_RC_FAILURE;
+    h->pos = 0;
+    return FSDB_RC_SUCCESS;
+}
+fsdbRC ffrVCIterOne_t::ffrGotoNextVC(void) { return FSDB_RC_FAILURE; }
+fsdbRC ffrVCIterOne_t::ffrGetXTag(void *) { return FSDB_RC_FAILURE; }
+fsdbRC ffrVCIterOne_t::ffrGetVC(byte_T **) { return FSDB_RC_FAILURE; }
+void ffrVCIterOne_t::ffrFree(void) {}

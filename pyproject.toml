@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wave-mcp"
-version = "0.2.5"
+version = "0.2.6"
 description = "Open-source, license-free MCP server for RTL waveform debug (FST + SystemVerilog static analysis), an Indago/Verisium Debug MCP alternative."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -53,5 +53,11 @@ include = ["wave_mcp*"]
 "wave_mcp.viewer" = ["web/*.html", "web/*.js"]
 
 [tool.setuptools.data-files]
-"share/doc/wave-mcp" = ["LICENSE", "docs/THIRD_PARTY.md", "docs/PACKAGING_MATERIALS.md"]
+"share/doc/wave-mcp" = ["LICENSE", "docs/THIRD_PARTY.md", "docs/PACKAGING_MATERIALS.md", "docs/FSDB_GUIDE.md", "docs/WAVE_VIEWER.md", "docs/WAVE_VIEWER.en.md"]
 "share/doc/wave-mcp/licenses" = ["docs/licenses/*"]
+# On-demand fsdb2fst build inputs. The Verdi FsdbReader runtime stays on the
+# user's machine, but the converter sources must ship or there is nothing to
+# compile; convert.py resolves these paths after a pip install.
+"share/wave-mcp/fsdb2fst" = ["third_party/fsdb2fst/fsdb2fst.cpp", "third_party/fsdb2fst/ffrAPI_stub.h", "third_party/fsdb2fst/ffrAPI_stub_impl.cpp"]
+"share/wave-mcp/fsdb2fst/fst" = ["third_party/fsdb2fst/fst/fstapi.c", "third_party/fsdb2fst/fst/fstapi.h", "third_party/fsdb2fst/fst/lz4.c", "third_party/fsdb2fst/fst/lz4.h", "third_party/fsdb2fst/fst/fastlz.c", "third_party/fsdb2fst/fst/fastlz.h", "third_party/fsdb2fst/fst/config.h"]
+"share/wave-mcp/deploy" = ["deploy/build_fsdb2fst.sh"]

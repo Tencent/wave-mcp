@@ -24,6 +24,7 @@ import sys
 from typing import Any, get_args, get_origin, get_type_hints
 
 from .. import server
+from ..__init__ import __version__
 
 
 def _tool_registry() -> dict[str, Any]:
@@ -116,6 +117,9 @@ def main(argv: list[str] | None = None) -> int:
         add_help=False)
     parser.add_argument("-h", "--help", action="store_true",
                         help="show this help message and exit")
+    parser.add_argument("--version", action="version",
+                        version=f"wave-mcp {__version__}",
+                        help="print the wave-mcp version and exit")
     parser.add_argument("tool", nargs="?",
                         help="tool name (see --list)")
     parser.add_argument("--list", action="store_true",

@@ -39,10 +39,12 @@ prepare_session(wave_path="dump.fsdb", filelist_path="your_filelist.f")
 ```
 
 首次转换时 wave-mcp 会自动编一次 `fsdb2fst`（需要 `g++`，约十几秒），之后直接复用。
+升级 wave-mcp 后若转换器源码有变动，下次转换会自动重编，不需要手动处理。
 
-`fsdb_scopes=["u_core"]` 只收窄待加载信号，不缩小原文件的 VAR 元数据。
-原始 VAR 总数超过默认 500 万安全阈值时，即使只选一个信号也会在加载前拒绝；
-应在 dump 源头减少 probe 范围，生成独立的小文件，详见下文规模说明。
+> 需要 `wave-mcp>=0.2.6`：更早的版本没把转换器源码打进包，自动编译这一步会跳过。
+
+`fsdb_scopes=["u_core"]` 收窄待加载信号；已选信号数超过默认 500 万内存阈值时会拒绝，
+用它缩小范围即可。规模本身不再拒绝文件，详见下文规模说明。
 遇到问题看[排错速查](#排错速查)；想手工构建或用命令行看[手工构建](#手工构建备选)与
 [命令行用法](#命令行用法)。
 
@@ -80,11 +82,28 @@ prepare_session(wave_path="dump.fsdb", filelist_path="your_filelist.f")
 | 4 | `PATH` | 系统里已装的 `fsdb2fst` |
 | 5 | **按需构建** | 以上都没有且能探测到 FsdbReader 时，自动编一次到用户缓存 |
 
-自动构建需要三个条件同时满足：探测到 FsdbReader 运行库、有 `g++`、仓库里有转换器源码
-（pip 安装的包不含源码，此时这一级自动跳过）。任一不满足时，报错会指名**具体缺哪一样**，
-不会只说"找不到"。
+自动构建需要三个条件同时满足：探测到 FsdbReader 运行库、有 `g++`、能找到转换器源码。
+任一不满足时，报错会指名**具体缺哪一样**，不会只说"找不到"。
+
+转换器源码有两种布局，按顺序解析，git checkout 优先，这样本地改动不会被旧的安装副本遮蔽：
+
+| 布局 | 源码位置 | 构建脚本 |
+| --- | --- | --- |
+| git checkout | `third_party/fsdb2fst/` | `deploy/build_fsdb2fst.sh` |
+| pip 安装 | `<prefix>/share/wave-mcp/fsdb2fst/` | `<prefix>/share/wave-mcp/deploy/build_fsdb2fst.sh` |
+
+`<prefix>` 是 Python 环境前缀（虚拟环境里就是venv 目录）。报错信息会直接给出当前布局下
+构建脚本的绝对路径，不用自己拼。
+
+> **0.2.6 之前的版本装不了 FSDB**：转换器源码从未打进 wheel 和 sdist，自动构建这一级
+> 因为没有源码可编而静默跳过，FSDB 功能实际只在 git checkout 下可用。0.2.0 到 0.2.5
+> 六个版本都是这样。升级到 0.2.6 或更新版本即可。
 
 关掉自动构建用 `WAVE_MCP_FSDB2FST_AUTOBUILD=0`。
+
+**升级 wave-mcp 后二进制会自动重建**：缓存键包含 `fsdb2fst.cpp` 和 `fst/fstapi.c` 的
+修改时间与大小，所以升级带来的转换器改动会让缓存键改变，下次转 FSDB 时自动重编一次
+（约十几秒），之后继续复用。不需要手动删缓存，也不需要手动重建。
 
 **自动构建不写仓库**：产物直接编到用户缓存，`third_party/` 全程不被写入。这样共享
 checkout 或只读 checkout 都成立，也不会让 git 工作区出现构建产物。实现上靠构建脚本的
@@ -106,10 +125,22 @@ FsdbReader 运行库本身也按四级顺序探测：
 
 ```bash
 export VERDI_HOME=/path/to/verdi     # 必须含 share/FsdbReader/linux64
+
+# git checkout
 bash deploy/build_fsdb2fst.sh        # 默认产出 third_party/fsdb2fst/fsdb2fst
+
+# pip 安装（路径以报错信息里给出的为准）
+bash "$(python3 -c 'import sys,os; print(os.path.join(sys.prefix,"share","wave-mcp","deploy","build_fsdb2fst.sh"))')"
 
 # 想换个落点（自动构建走的就是这条路）
 FSDB2FST_OUT=/somewhere/fsdb2fst bash deploy/build_fsdb2fst.sh
+```
+
+**离线包用户**：解包后源码在 `fsdb2fst-src/`，构建脚本在 `fsdb2fst-src/deploy/`：
+
+```bash
+cd wave-mcp-bundle-*/fsdb2fst-src
+VERDI_HOME=/path/to/verdi bash deploy/build_fsdb2fst.sh
 ```
 
 **本机没有 Verdi 也能编译**：把整个 `share/FsdbReader/` 目录（头文件 + 两个
@@ -145,7 +176,7 @@ convert_fsdb_to_fst(fsdb_path="dump.fsdb", scopes=["u_core"]) # 手动转指定�
 # 全量转换
 fsdb2fst dump.fsdb dump.fst
 
-# 按 scope 选择信号（不绕过文件级 VAR 保护，多个子串是 OR 关系）
+# 按 scope 选择信号（缩小已选集合以满足内存阈值，多个子串是 OR 关系）
 fsdb2fst -l u_core,uart dump.fsdb part.fst
 
 # 按精确路径清单切片（一行一个路径，# 开头为注释）
@@ -203,24 +234,60 @@ FST 里登记为 alias 共享同一句柄与值数据，不会重复存储。
 
 ## 超大文件的处理
 
-[Issue #1](https://github.com/Tencent/wave-mcp/issues/1) 报告：约 112 MB、2280 万 VAR
-的 FSDB，在 Verdi V-2023.12-SP2 的 `ffrLoadSignals` 中崩溃；筛选一个子模块仍失败。
-文件大小、时间刻度和已选信号数都不能单独判断这类风险。现有证据不足以把某个数值
-称为所有 FsdbReader 版本的容量上限，也不能仅凭 SIGSEGV 判断为内存不足。
+[Issue #1](https://github.com/Tencent/wave-mcp/issues/1) 最初报告：约 112 MB、2280 万 VAR
+的 FSDB 在转换时崩溃（`rc=-11`），筛选一个子模块仍失败。
 
-**两个独立保护，在创建输出和加载值数据之前执行：**
+**后续定位推翻了“规模导致崩溃”这一判断。** 实测中崩溃有两个互不相关的原因：
 
-| 计数 | 默认安全阈值 | 作用 |
+- **零值变化文件**：文件只有层次声明、完全没有值变化（既无 `$dumpvars` 初始值，也无
+  任何时间戳）时，`ffrLoadSignals()` 会成功返回，但
+  `ffrCreateTimeBasedVCTrvsHdl()` 返回的句柄内部迭代器为空，首次
+  `ffrGetVarIdcodeXTagVCSeqNum()` 解引用空指针，触发 SIGSEGV。**崩溃点不在
+  `ffrLoadSignals`**：`-v` 日志最后一行是 `loading value data ...`，容易被误读。
+  该情形与文件规模无关，1429 信号、24 KB 的切片同样崩溃；转换器现在会在遍历前探测，
+  给出明确报错而不是崩溃，`--allow-empty` 可只输出层次 FST。
+- **运行环境不匹配**：报告者环境中，向 `LD_LIBRARY_PATH` 注入的 glibc 与二进制链接时的
+  libc 不一致，进程在动态加载阶段、`main` 之前即崩溃（gdb 显示 `No stack`）。这与
+  波形数据无关，属于环境问题，需另行排查。
+
+**规模本身不是拒绝转换的理由。** 因此原先按“原始 VAR 总数”拒绝文件的保护已移除：它的
+立论来自上述被推翻的判断，且属文件级硬拦，`-l` / `-L` / `fsdb_scopes` 都无法规避，会
+拒绝实际可以正常转换的文件。
+
+**保留一个保护，防的是内存而非崩溃：**
+
+| 计数 | 默认阈值 | 作用 |
 | --- | --- | --- |
-| 原始 VAR 回调总数（包含重复路径及不支持类型） | 500 万 | 超过即拒绝，`-l` / `-L` / `fsdb_scopes` 无法绕过 |
-| 筛选后的可转换信号路径数 | 500 万 | 超过即拒绝，可在文件级保护允许的前提下减少选择范围 |
+| 筛选后的可转换信号路径数 | 500 万 | 超过即拒绝；所有已选信号的值数据一次性载入内存，用 `-l` / `-L` 缩小范围即可继续 |
 
-这两个阈值是 wave-mcp 的保守保护策略，**不是厂商公布的极限，也不保证阈值以内不崩溃**。
-`FSDB2FST_MAX_TOTAL_VARS` 和 `FSDB2FST_MAX_SIGNALS` 分别覆盖上述阈值；`0` 只关闭
-对应保护，非法值会报错。提高或关闭保护仅供了解风险的诊断，不是修复手段。
+这是 wave-mcp 的保守内存保护策略，**不是厂商公布的极限**。`FSDB2FST_MAX_SIGNALS`
+可覆盖该阈值，`0` 关闭保护，非法值会报错。该默认值尚未用真实超大文件标定过峰值内存，
+待实测后再调整。
 
-`--info` / `--dump-tree` 只遍历层次，不加载值数据，不受这两个加载保护限制。
-`--info` 现在同时输出：
+`--info` / `--dump-tree` 只遍历层次，不加载值数据，不受该保护限制。
+
+### `-l` 是子串匹配，不是按 scope 层级切分
+
+`-l` 对信号全路径做子串匹配（多个值之间是 OR）。**传顶层 scope 名等于没筛**：几乎所有
+信号路径都包含顶层名，筛完仍是全量，照样撞上 500 万保护。要真正收窄就传更深一层的子
+scope 名，或用 `-L` 给精确路径清单。
+
+实测例：一份 4961 万信号的 ZEBU 波形，传顶层 `-l canghaiv2_fullchip_emu_top.zebu_clk25m`
+仍报全量超限；改传 `-l zebu_clk` 只选中 20 个信号并通过保护。
+
+### 扁平单顶层设计目前无解
+
+如果 FSDB 是扁平结构、只有一个顶层 scope、没有可拆的二级 scope，那么 `-l` / `-L`
+再怎么调都绕不过去：上述 4961 万信号的文件即使筛到 20 个信号并通过了内存保护，
+`ffrLoadSignals()` 仍然 SIGSEGV。当时机器有 3.9 TB 可用内存，排除 OOM，属 FsdbReader
+自身对该文件的处理限制。
+
+这种情况需要**在产生 FSDB 的工具侧分批导出**，wave-mcp 侧无法规避。转换器会在崩溃时
+捕获信号并给出 `rc=3` 和明确说明（"crash inside the closed-source Verdi runtime, not an
+out-of-memory kill"），而不是留下一个静默的 `rc=139` 让人怀疑是内存不足或 wave-mcp 的
+问题。
+
+`--info` 同时输出：
 
 ```text
 [fsdb2fst] census: 12 total-vars, 3 unique-paths, 2 convertible
@@ -228,20 +295,23 @@ FST 里登记为 alias 共享同一句柄与值数据，不会重复存储。
 
 此行为格式示例。`total-vars` 是原始回调数，`unique-paths` 是按路径去重后的数量，
 `convertible` 是其中支持转换的数量；转换日志另有 `selected` 表示筛选结果。
-旧日志中的 `real` 指**浮点类型信号**，不是“真实/有效信号总数”；旧的 `signals`
+日志中的 `real` 指**浮点类型信号**，不是“真实/有效信号总数”；`signals`
 为去重后的路径数，strength/unsupported 计数来自原始回调，不能简单相减推算。
 
-**应对方式：**
+**遇到崩溃时的排查顺序：**
 
-- 在仿真源头减少 probe 的层次和范围，按模块分别 dump，避免再 merge 为一份全层次文件。
-- 按时间分文件可以减少值数据，但可能保留相同 VAR 元数据；仍需逐文件检查 `--info`。
+- 先确认是否为零值变化文件：用 Verdi 的 `fsdb2vcd` 导出后统计 `$dumpvars` 段数与
+  `#` 时间戳行数，两者都为 0 即属此类；若文件由多段 merge 而来，需逐段检查，而不是只看
+  合并结果（`fsdbmerge` 取各段最小刻度）。
+- 再确认运行环境：对比干净 `LD_LIBRARY_PATH` 与实际运行环境下 `--info` 的结果；若仅在
+  注入 glibc 的环境中崩溃且 gdb 显示 `No stack`，属加载阶段问题。
+- 内存不足时再用 `-l` / `-L` 按 scope 拆分，或在仿真源头减少 probe 范围。
 - 仿真器支持时可直接生成 FST，避免这条 FsdbReader 加载路径。
 - 仅提供脱敏后的 `--info` 统计、运行库版本和 dump/merge 参数即可继续诊断；不需要上传涉密波形。
 
-`-l` / `-L` 实际在 `ffrLoadSignals` **之前**选择信号，但不会改写原文件的内部索引。
-当前转换器仍使用单次加载，尚无在该问题文件上验证可用的分批或时间窗口方案，
-因此不能承诺分批能规避运行库崩溃。Python 入口会把 SIGSEGV 与缺失动态库分开报告，
-保留原始诊断，不因日志出现 `libnffr` 就误导用户重新配置运行库。
+`-l` / `-L` 在 `ffrLoadSignals` **之前**选择信号，但 `ffrLoadSignals()` 是无参调用，
+加载的是整个文件的值数据，筛选只决定写入 FST 的范围。Python 入口会把 SIGSEGV 与缺失
+动态库分开报告，保留原始诊断，不因日志出现 `libnffr` 就误导用户重新配置运行库。
 
 **手工构建用户必须重新编译转换器，并确认 `FSDB2FST_BIN` 指向新二进制。**
 仅更新 pip 包不能改变旧的 C++ 二进制；pip 包仍不附带转换器源码。
@@ -252,14 +322,17 @@ FST 里登记为 alias 共享同一句柄与值数据，不会重复存储。
 | --- | --- | --- |
 | 报 `fsdb2fst not found` 且提示 auto-build skipped | 没探测到 FsdbReader 运行库 | 在 MCP 配置的 `env` 里设 `VERDI_HOME`，或设 `FSDB2FST_FREADER` 指向拷来的 `share/FsdbReader` 目录 |
 | 提示 auto-build attempted but failed | 自动编译失败，报错已附原因 | 看 `~/.cache/wave-mcp/fsdb2fst/*/build-failed.log`；缺 `g++` 时装编译器，或手工构建后用 `FSDB2FST_BIN` 指定 |
-| 提示 auto-build unavailable | pip 安装包内不含转换器源码 | 用 git checkout，或在别处构建后用 `FSDB2FST_BIN` 指向二进制 |
+| 提示 auto-build unavailable | 找不到转换器源码；0.2.6 之前的 pip 包不含源码 | 升级到 `wave-mcp>=0.2.6`，或用 git checkout，或在别处构建后用 `FSDB2FST_BIN` 指向二进制 |
 | 编译报 `ffrAPI.h: No such file` | `VERDI_HOME` 不对或缺 FsdbReader | `find / -name ffrAPI.h`，认准 `share/FsdbReader/` |
 | 运行报找不到 `libnffr.so` | 二进制旁没有 `.so`，RPATH 也没命中 | 把两个 `.so` 拷到二进制同目录 |
 | `cannot parse the FSDB time scale` | 刻度字符串不认识 | 把 `--info` 输出附在 issue 里反馈 |
 | `no value data was loaded`（0 跳变） | 文件可能被截断，或该版本需换加载路径 | 先 `--info` 看概要；应急可加 `--allow-empty` |
 | 产物打不开 | 只拷了 `.fst`，漏了 `.fst.hier` | 两个文件一起搬 |
-| `total VAR entries exceed the file-wide safety limit` | 原始 VAR 总数超保守阈值 | 减少源头 probe、独立分模块 dump，不能靠转换筛选绕过 |
-| `selected signals exceed the in-core limit` | 已选信号数超保守阈值 | 在文件级保护允许范围内，用 `-l` / `-L` 减少选择 |
-| `SIGSEGV (rc=-11)` | 转换器或 FsdbReader 崩溃，可能涉及全文件元数据或其他布局/版本问题 | 重编转换器获得预检，用相同环境获取脱敏 `--info`；不是缺库的充分证据 |
+| `selected signals exceed the in-core limit` | 已选信号数超保守内存阈值 | 用 `-l` / `-L` 减少选择，或调 `FSDB2FST_MAX_SIGNALS` |
+| 传了 `-l` 仍报全量超限 | `-l` 是子串匹配，传顶层 scope 名等于没筛 | 改传更深一层的子 scope 名，或用 `-L` 给精确路径清单 |
+| `FsdbReader crashed (SIGSEGV) while loading N selected signals`（rc=3） | 闭源 FsdbReader 内部崩溃，非 OOM、非 wave-mcp 缺陷 | 先 `--info` 看结构；扁平单顶层设计需在产生 FSDB 的工具侧分批导出 |
+| `--dump-tree` 输出被截断 | 默认上限 2000 行，防止超大设计打爆磁盘 | 用 `FSDB2FST_DUMP_TREE_LINES=<n>` 调大，`0` 不限 |
+| `contains no value change data at all` | 文件只有层次、无任何值变化 | 查 `$fsdbDumpvars` 参数与 dump 窗口；merge 产物需逐段查；应急可加 `--allow-empty` |
+| `SIGSEGV (rc=-11)` | 零值变化文件，或运行环境 libc 不匹配 | 先按上一条查是否零值变化；若崩在 `main` 之前、gdb 显示 `No stack`，查 `LD_LIBRARY_PATH` 注入的 glibc；不是缺库的充分证据 |
 | 某些信号在 FST 里没有值 | 常量 / 不翻转信号，或属跳过的类型 | 看转换日志的 strength / unsupported 计数 |
 | 层次或 scope 路径可疑 | 需要看原始事件流 | `fsdb2fst --dump-tree x.fsdb \| head -50` |

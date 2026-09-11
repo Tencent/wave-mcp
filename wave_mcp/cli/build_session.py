@@ -55,7 +55,9 @@ def _read_filelist(path: str) -> List[str]:
 def main(argv=None):
     p = argparse.ArgumentParser(description="Build a wave-mcp session directory")
     p.add_argument("--fst", help="FST waveform path (or use --vcd to convert)")
-    p.add_argument("--vcd", help="VCD to convert to FST (xrun open dump format)")
+    p.add_argument("--vcd", help="waveform to convert to FST (.vcd / .fsdb); "
+                                "conversion is cached and shared with "
+                                "prepare_session and the viewer")
     p.add_argument("--convert-mode", choices=["speed", "balanced", "size"],
                    default="speed", help="VCD->FST packing mode (default: speed)")
     p.add_argument("--top", default="", help="top instance name")
@@ -89,17 +91,33 @@ def main(argv=None):
 
     os.makedirs(args.out, exist_ok=True)
 
-    # auto-convert VCD -> FST if requested (xrun produces VCD)
+    # auto-convert VCD -> FST if requested (xrun produces VCD).
+    # Goes through resolve_waveform so the artifact is shared with
+    # prepare_session and open_wave_view: converting here used to write a
+    # private copy under --out, so the same waveform got converted again by
+    # every other entry point (and vice versa).
     if args.vcd and not args.fst:
         from .. import convert
-        fst_out = os.path.join(args.out, os.path.splitext(os.path.basename(args.vcd))[0] + ".fst")
-        print(f"[info] converting VCD -> FST (mode={args.convert_mode}) ...")
+        print(f"[info] resolving VCD -> FST (mode={args.convert_mode}) ...")
         try:
-            res = convert.convert(args.vcd, fst_out, mode=args.convert_mode)
-            print(f"[ok] {res.elapsed_sec:.3f}s, x{res.ratio} smaller -> {res.fst_path}")
-            args.fst = res.fst_path
-        except convert.ConversionError as exc:
+            got = convert.resolve_waveform(args.vcd, mode=args.convert_mode)
+        except (convert.UnsupportedWaveformError, FileNotFoundError,
+                convert.ConversionError) as exc:
             p.error(str(exc))
+        detail = got.get("detail") or {}
+        if got.get("cached"):
+            print(f"[ok] reused cached FST -> {got['fst_path']}")
+        else:
+            elapsed = detail.get("elapsed_sec")
+            ratio = detail.get("compression_ratio")
+            extra = ""
+            if elapsed is not None:
+                extra = f"{elapsed:.3f}s"
+                if ratio:
+                    extra += f", x{ratio} smaller"
+                extra += " "
+            print(f"[ok] {extra}-> {got['fst_path']}")
+        args.fst = got["fst_path"]
     if not args.fst:
         p.error("either --fst or --vcd is required")
     fst = os.path.abspath(args.fst)

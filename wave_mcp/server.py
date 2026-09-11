@@ -23,6 +23,7 @@ from typing import Any, List, Optional
 from mcp.server.mcpserver import MCPServer
 
 from . import convert, pipeline, timeutil
+from .__init__ import __version__
 from .session import SessionManager
 
 
@@ -839,7 +840,10 @@ def open_wave_view(fst_paths: List[str],
     auto-forward localhost ports. Two fst_paths open a comparison view.
 
     Args:
-        fst_paths: one FST (normal view) or two (diff view, e.g. [pass, fail]).
+        fst_paths: one waveform (normal view) or two (diff view, e.g.
+            [pass, fail]). FST is opened directly; VCD and FSDB are converted
+            to FST first and cached, so the same waveform converted during
+            analysis is reused here instead of being converted again.
         signals: initial signals, each {path, color?, group?, format?, source?}.
             Prefer a short ASCII word for ``group``: the heading is drawn in the
             waveform canvas, whose font has no CJK glyphs, so non-ASCII names
@@ -856,9 +860,27 @@ def open_wave_view(fst_paths: List[str],
             own words, rendered as-is.
         labels: display labels per waveform (e.g. ["pass", "fail"]).
     """
+    from . import convert as _convert
+    resolved: List[str] = []
+    for p in fst_paths:
+        try:
+            got = _convert.resolve_waveform(p)
+        except _convert.UnsupportedWaveformError as exc:
+            return {"available": False, "error": str(exc),
+                    "hint": "convert this file to .fst / .vcd / .fsdb first"}
+        except _convert.ConversionError as exc:
+            return {"available": False, "error": str(exc),
+                    "hint": "conversion to FST failed; check the waveform "
+                            "file and converter dependencies (vcd2fst / "
+                            "fsdb2fst)"}
+        except FileNotFoundError as exc:
+            return {"available": False, "error": str(exc),
+                    "hint": "check the waveform path"}
+        resolved.append(got["fst_path"])
+
     try:
         return _viewer().open_view(
-            fst_paths, signals=signals, cursor=cursor, viewport=viewport,
+            resolved, signals=signals, cursor=cursor, viewport=viewport,
             markers=markers, diff=diff,
             annotations=[annotation] if annotation else None,
             labels=labels)
@@ -965,6 +987,12 @@ def _reap_viewers() -> None:
 
 def main():
     parser = argparse.ArgumentParser(description="wave-mcp: open-source xrun waveform debug MCP server")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"wave-mcp {__version__}",
+        help="print the wave-mcp version and exit",
+    )
     parser.add_argument("--transport", choices=["stdio", "http"], default="stdio")
     parser.add_argument("--session", help="optional session dir/json to auto-open at startup")
     parser.add_argument("--host", default="127.0.0.1")

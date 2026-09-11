@@ -4,8 +4,17 @@ include CHANGELOG.md
 include LICENSE
 include docs/THIRD_PARTY.md
 include docs/PACKAGING_MATERIALS.md
+include docs/FSDB_GUIDE.md
+include docs/WAVE_VIEWER.md
+include docs/WAVE_VIEWER.en.md
 recursive-include wave_mcp/viewer/web *.html *.js
 recursive-include docs/licenses *
+# fsdb2fst is built on demand on the user's machine (the Verdi FsdbReader
+# runtime cannot be redistributed), so the converter sources and the build
+# script have to ship with the package. Without them the auto-build silently
+# had nothing to compile and FSDB support was unreachable for pip users.
+include deploy/build_fsdb2fst.sh
+recursive-include third_party/fsdb2fst *.cpp *.h *.c
 recursive-exclude tests *
 recursive-exclude dev-docs *
 global-exclude __pycache__ *.py[cod]

@@ -56,9 +56,8 @@
  *   ffrLoadSignals), then traversed through a single merged time-based
  *   iterator (ffrCreateTimeBasedVCTrvsHdl), which yields (idcode, time,
  *   value) records in time order. RAM scales with the design's value data;
- *   use -l / -L to reduce the selected value data. Filtering does not shrink
- *   the file-wide metadata used by FsdbReader; a separate raw VAR guard
- *   rejects risky files before loading, even when a tiny subset is selected.
+ *   use -l / -L to reduce the selected value data when a design is too large
+ *   to load in one batch.
  */
 /* Offline stub builds (-DFFRAPI_STUB, machines without Verdi) pick up the
  * vendored ffrAPI_stub.h from this directory; the real build must leave
@@ -89,7 +88,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <csignal>
 #include <ctime>
+#include <unistd.h>
 
 #include <algorithm>
 #include <chrono>
@@ -109,6 +110,14 @@ const char *kVersion = "fsdb2fst 0.1.0 (wave-mcp)";
 int g_verbose = 0;
 int g_dump_tree = 0;   /* --dump-tree: print raw tree callbacks */
 
+/* --dump-tree on a flat 49.6M-signal design printed 67M lines / 15GB and
+ * filled /tmp. The dump is a diagnostic aid: the first few thousand lines
+ * already reveal the scope nesting shape, so cap it by default and let the
+ * cap be lifted explicitly with FSDB2FST_DUMP_TREE_LINES=<n> (0 = unlimited). */
+unsigned long long g_dump_tree_lines = 0;      /* lines printed so far */
+unsigned long long g_dump_tree_max = 2000;     /* 0 = unlimited */
+int g_dump_tree_truncated = 0;
+
 void vlog(const char *fmt, ...) {
     if (!g_verbose) return;
     va_list ap;
@@ -127,6 +136,28 @@ void vinfo(const char *fmt, ...) {  /* printed regardless of verbosity */
     fputc('\n', stderr);
 }
 
+/* Bounded --dump-tree line printer. Returns false once the cap is reached, so
+ * callers can also skip the work of building the line (path concatenation). */
+bool tdump(const char *fmt, ...) {
+    if (!g_dump_tree) return false;
+    if (g_dump_tree_max && g_dump_tree_lines >= g_dump_tree_max) {
+        if (!g_dump_tree_truncated) {
+            g_dump_tree_truncated = 1;
+            std::fprintf(stderr,
+                         "TREE ... truncated at %llu lines; raise or disable "
+                         "with FSDB2FST_DUMP_TREE_LINES=<n> (0 = unlimited)\n",
+                         g_dump_tree_max);
+        }
+        return false;
+    }
+    g_dump_tree_lines++;
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    return true;
+}
+
 [[noreturn]] void die(const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
@@ -139,9 +170,10 @@ void vinfo(const char *fmt, ...) {  /* printed regardless of verbosity */
 
 /* Safety policy, not a documented Synopsys capacity limit. Reject malformed
  * overrides instead of accidentally treating them as 0 (guard disabled). */
-unsigned long long ReadLimit(const char *name) {
+unsigned long long ReadLimit(const char *name,
+                             unsigned long long fallback = 5000000) {
     const char *value = std::getenv(name);
-    if (!value) return 5000000;
+    if (!value) return fallback;
     if (!*value) die("%s must be a non-negative integer (0 disables)", name);
     for (const char *p = value; *p; ++p)
         if (*p < '0' || *p > '9')
@@ -330,30 +362,26 @@ struct FsdbReader {
         case FSDB_TREE_CBT_SCOPE: {
             fsdbTreeCBDataScope *s =
                 static_cast<fsdbTreeCBDataScope *>(tree_cb_data);
-            if (g_dump_tree) {
-                std::fprintf(stderr, "TREE SCOPE  depth=%zu name=%s type=%u\n",
-                             r->scope_stack.size(),
-                             s->name ? s->name : "(null)",
-                             static_cast<unsigned>(s->type));
-            }
+            tdump("TREE SCOPE  depth=%zu name=%s type=%u\n",
+                  r->scope_stack.size(),
+                  s->name ? s->name : "(null)",
+                  static_cast<unsigned>(s->type));
             r->scope_stack.push_back(s->name ? s->name : "");
             break;
         }
         case FSDB_TREE_CBT_UPSCOPE:
-            if (g_dump_tree)
-                std::fprintf(stderr, "TREE UPSCOPE depth=%zu\n",
-                             r->scope_stack.size());
+            tdump("TREE UPSCOPE depth=%zu\n", r->scope_stack.size());
             if (!r->scope_stack.empty()) r->scope_stack.pop_back();
             break;
         case FSDB_TREE_CBT_BEGIN_TREE:
-            if (g_dump_tree) std::fprintf(stderr, "TREE BEGIN_TREE\n");
+            tdump("TREE BEGIN_TREE\n");
             if (!r->scope_stack.empty()) r->scope_stack.clear();
             break;
         case FSDB_TREE_CBT_END_TREE:
-            if (g_dump_tree) std::fprintf(stderr, "TREE END_TREE\n");
+            tdump("TREE END_TREE\n");
             break;
         case FSDB_TREE_CBT_END_ALL_TREE:
-            if (g_dump_tree) std::fprintf(stderr, "TREE END_ALL_TREE\n");
+            tdump("TREE END_ALL_TREE\n");
             break;
         case FSDB_TREE_CBT_VAR: {
             ++r->n_total_vars;  /* include duplicates and unsupported types */
@@ -404,17 +432,21 @@ struct FsdbReader {
                 sig.loadable = false;  /* strength (2B): out of scope */
                 r->n_strength++;
             }
-            if (g_dump_tree) {
+            /* check the cap before building the path: on a 49.6M-var file the
+             * concatenation alone would dominate the run */
+            if (g_dump_tree &&
+                (!g_dump_tree_max || g_dump_tree_lines < g_dump_tree_max)) {
                 std::string path;
                 for (const auto &q : r->scope_stack)
                     { path += q; path += '.'; }
                 path += v->name ? v->name : "(null)";
-                std::fprintf(stderr,
-                             "TREE VAR    depth=%zu name=%s len=%u type=%u "
-                             "bpb=%u dtid=%u\n",
-                             r->scope_stack.size(), path.c_str(), sig.len,
-                             sig.var_type, sig.bytes_per_bit,
-                             static_cast<unsigned>(v->dtidcode));
+                tdump("TREE VAR    depth=%zu name=%s len=%u type=%u "
+                      "bpb=%u dtid=%u\n",
+                      r->scope_stack.size(), path.c_str(), sig.len,
+                      sig.var_type, sig.bytes_per_bit,
+                      static_cast<unsigned>(v->dtidcode));
+            } else if (g_dump_tree) {
+                tdump("");  /* emits the one-time truncation notice */
             }
             r->signals.push_back(std::move(sig));
             break;
@@ -485,33 +517,140 @@ void Usage() {
         "If <output.fst> is omitted it defaults to <input>.fst.\n"
         "\n"
         "options:\n"
-        "  -l LIST    only load signals whose full path contains one of the\n"
-        "             comma-separated substrings LIST (e.g. -l u_core,uart)\n"
+        "  -l LIST    only load signals whose full path CONTAINS one of the\n"
+        "             comma-separated substrings LIST (e.g. -l u_core,uart).\n"
+        "             Substring, not scope-prefix: a top-level scope name\n"
+        "             matches every signal and filters nothing.\n"
         "  -L FILE    only load signals whose full path is listed in FILE\n"
         "             (one path per line, '#' starts a comment)\n"
         "  -p PACK    FST packing: lz4 (default) | fastlz | zlib\n"
         "  --info     print file/scale/signal summary only, no conversion\n"
         "  --dump-tree  print the raw tree callback stream (BEGIN/END TREE,\n"
         "               SCOPE/UPSCOPE nesting, VAR lines) and exit; used to\n"
-        "               diagnose scope-path issues. No conversion.\n"
+        "               diagnose scope-path issues. No conversion. Capped at\n"
+        "               2000 lines; FSDB2FST_DUMP_TREE_LINES=<n> raises it\n"
+        "               (0 = unlimited).\n"
         "  --allow-empty  succeed even when no value data could be loaded\n"
         "  -v         verbose progress on stderr\n"
         "  -h         this help\n"
         "\n"
+        "exit codes:\n"
+        "  0 ok   2 fsdb2fst refused/failed   3 FsdbReader crashed (signal)\n"
+        "\n"
         "notes:\n"
         "  * strength-valued vars (2 bytes per bit) are skipped.\n"
-        "  * files with more than 5000000 raw VAR entries are refused before\n"
-        "    loading, regardless of -l / -L. Dump fewer scopes into separate\n"
-        "    source files; avoid merging them into one huge hierarchy.\n"
-        "    FSDB2FST_MAX_TOTAL_VARS=<n> overrides this guard (0=off, unsafe).\n"
-        "  * more than 5000000 SELECTED signals are also refused; reduce the\n"
-        "    selection or override FSDB2FST_MAX_SIGNALS=<n> (0=off, unsafe).\n"
-        "  * these are conservative safety thresholds, NOT documented\n"
-        "    FsdbReader limits. Smaller files may also fail. --info and\n"
-        "    --dump-tree never load value data and bypass these guards.\n"
-        "  * all selected signals are loaded into RAM at once; filtering\n"
-        "    reduces value data, not the file-wide metadata.\n",
+        "  * more than 5000000 SELECTED signals are refused; reduce the\n"
+        "    selection with -l / -L, or override FSDB2FST_MAX_SIGNALS=<n>\n"
+        "    (0=off). This is a conservative memory threshold, NOT a\n"
+        "    documented FsdbReader limit.\n"
+        "  * all selected signals are loaded into RAM at once, so -l / -L is\n"
+        "    the way to keep a huge design within memory.\n"
+        "  * a flat design with a single top scope cannot be split by -l at\n"
+        "    all; if FsdbReader crashes on it, export in batches from the\n"
+        "    tool that produced the FSDB.\n"
+        "  * --info and --dump-tree never load value data and bypass the\n"
+        "    guard entirely.\n",
         stderr);
+}
+
+/* ---- zero-value-change probe -------------------------------------------
+ * A FSDB that carries declarations but no value changes at all (no initial
+ * values and no time stamps) makes ffrCreateTimeBasedVCTrvsHdl() hand back a
+ * NON-null handle whose internal ffrVCIterOne is NULL.  The first
+ * ffrGetVarIdcodeXTagVCSeqNum() then walks that NULL and dies with SIGSEGV
+ * (si_addr = 0x10).  Neither -l/-L nor fsdb_scopes can dodge it, because
+ * ffrLoadSignals() loads the whole file whatever was selected.
+ *
+ * Per-signal traverse handles (ffrCreateVCTrvsHdl + ffrGotoTheFirstVC) take a
+ * different code path and stay safe on such a file, so they are used to probe
+ * before the time-based iterator is touched.
+ *
+ * The idcodes must already have been handed to ffrAddToSignalList(): without
+ * that, ffrGotoTheFirstVC() fails even on a file that does have value changes.
+ *
+ * Cost: the fast path stops at the first signal that has a value change, so a
+ * normal file pays for one handle.  Only when the first kFastProbe signals all
+ * turn out empty do we sweep the rest; a design whose leading signals happen
+ * to be constants must not be misreported as empty, since that would silently
+ * drop all of its value data.
+ * ------------------------------------------------------------------------ */
+static bool ProbeHasValueChange(ffrObject *obj,
+                                const std::vector<fsdbVarIdcode> &ids) {
+    const size_t kFastProbe = 64;
+    if (ids.empty()) return false;
+
+    auto probe_one = [obj](fsdbVarIdcode id) -> bool {
+        ffrVCIterOne *h = obj->ffrCreateVCTrvsHdl(id);
+        if (!h) return false;
+        fsdbRC rc = h->ffrGotoTheFirstVC();
+        h->ffrFree();
+        return rc == FSDB_RC_SUCCESS;
+    };
+
+    const size_t fast = ids.size() < kFastProbe ? ids.size() : kFastProbe;
+    for (size_t i = 0; i < fast; i++)
+        if (probe_one(ids[i])) return true;
+    if (ids.size() <= fast) return false;
+
+    vlog("no value change in the first %zu signals; sweeping the rest to be "
+         "sure the file is really empty...", fast);
+    for (size_t i = fast; i < ids.size(); i++)
+        if (probe_one(ids[i])) return true;
+    return false;
+}
+
+/* ---- fatal-signal diagnostics -------------------------------------------
+ * A SIGSEGV inside the closed-source FsdbReader leaves no trace: the process
+ * vanishes and the caller only sees rc=139, which is indistinguishable from a
+ * missing library or an OOM kill. Install a handler around the load so the
+ * failure names the phase and the selected-signal count. Only async-signal-safe
+ * calls are allowed here (write(2), no printf, no malloc). */
+volatile sig_atomic_t g_load_phase = 0;   /* 1 = inside ffrLoadSignals */
+char g_load_note[256];                    /* pre-rendered, written verbatim */
+size_t g_load_note_len = 0;
+
+void FatalSignalHandler(int sig) {
+    const char *name = (sig == SIGSEGV) ? "SIGSEGV"
+                     : (sig == SIGBUS)  ? "SIGBUS"
+                     : (sig == SIGABRT) ? "SIGABRT" : "fatal signal";
+    static const char kPrefix[] = "[fsdb2fst] ERROR: FsdbReader crashed (";
+    static const char kTail[] =
+        "). This is a crash inside the closed-source Verdi runtime, not an "
+        "out-of-memory kill and not a wave-mcp bug. Known triggers: an FSDB "
+        "with no value-change data, a libc mismatch from an injected "
+        "LD_LIBRARY_PATH, and flat designs whose var count exceeds what "
+        "FsdbReader can load in one batch. Run --info to inspect the file, "
+        "and if it is flat with a single top scope, export it in batches from "
+        "the tool that produced it.\n";
+    /* write(2) is async-signal-safe; fprintf is not. Lengths come from
+     * sizeof/strlen rather than hand-counted literals. */
+    ssize_t ignored;
+    ignored = write(2, kPrefix, sizeof(kPrefix) - 1);
+    ignored = write(2, name, std::strlen(name));
+    if (g_load_phase && g_load_note_len)
+        ignored = write(2, g_load_note, g_load_note_len);
+    ignored = write(2, kTail, sizeof(kTail) - 1);
+    (void)ignored;
+    std::_Exit(3);  /* distinct from rc=2 (our own die) and rc=139 (raw crash) */
+}
+
+void InstallFatalHandlers() {
+    struct sigaction sa;
+    std::memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = FatalSignalHandler;
+    sa.sa_flags = SA_RESETHAND;  /* a crash inside the handler still dies */
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGSEGV, &sa, nullptr);
+    sigaction(SIGBUS, &sa, nullptr);
+    sigaction(SIGABRT, &sa, nullptr);
+}
+
+/* Pre-render the phase note now, so the handler only has to write() it. */
+void SetLoadNote(size_t n_selected) {
+    int n = std::snprintf(g_load_note, sizeof(g_load_note),
+                          " while loading %zu selected signals", n_selected);
+    g_load_note_len = (n > 0 && static_cast<size_t>(n) < sizeof(g_load_note))
+                      ? static_cast<size_t>(n) : 0;
 }
 
 }  // namespace
@@ -580,7 +719,10 @@ int main(int argc, char **argv) {
         Usage();
         return 2;
     }
-    if (dump_tree) g_dump_tree = 1;
+    if (dump_tree) {
+        g_dump_tree = 1;
+        g_dump_tree_max = ReadLimit("FSDB2FST_DUMP_TREE_LINES", 2000);
+    }
 
     /* ---- phase 0: read hierarchy + scale ---- */
     FsdbReader rd;
@@ -619,10 +761,20 @@ int main(int argc, char **argv) {
     }
 
     /* ---- select the signals to convert ---- */
-    /* File-wide metadata can crash FsdbReader even for a 1-signal subset.
-     * Keep that guard independent of the selected-value-data guard. Count
-     * raw callbacks: path dedup and type filtering must not hide file size. */
-    const auto max_total_vars = ReadLimit("FSDB2FST_MAX_TOTAL_VARS");
+    /* Bound the batch that gets loaded in one go: every selected signal's value
+     * data is held in RAM at once, so a gate-level design with tens of millions
+     * of vars can exhaust memory. The guard counts the SELECTED set (after
+     * -l/-L) so that filtering stays a useful escape hatch.
+     *
+     * Historical note: an earlier revision also carried a file-wide raw-VAR
+     * guard, justified by a SIGSEGV seen on a 49.6M-signal file that "crashed
+     * even for a 1-signal subset". That crash was NOT size-related: the file
+     * carried no value changes at all, and the fault was in
+     * ffrGetVarIdcodeXTagVCSeqNum (NULL+0x10), one call after ffrLoadSignals
+     * returns. ProbeHasValueChange() handles it directly, so the file-wide
+     * guard was removed -- it refused files that convert fine and could not be
+     * worked around with -l/-L.
+     * Override with FSDB2FST_MAX_SIGNALS=<n>; 0 disables the guard. */
     const auto max_signals = ReadLimit("FSDB2FST_MAX_SIGNALS");
     std::vector<Signal *> sel;
     for (auto &s : rd.signals) {
@@ -631,28 +783,25 @@ int main(int argc, char **argv) {
         sel.push_back(&s);
     }
     vinfo("[fsdb2fst] selected: %zu signals", sel.size());
-    if (max_total_vars && rd.n_total_vars > max_total_vars)
-        die("%llu total VAR entries exceed the file-wide safety limit (%llu); "
-            "%zu unique paths, %zu convertible, %zu selected. Refusing before "
-            "ffrLoadSignals: FsdbReader may crash on file-wide metadata even "
-            "for a single selected signal. -l/-L and fsdb_scopes do not reduce "
-            "that metadata. Re-dump fewer scopes into separate FSDB files; "
-            "avoid merging full hierarchies. Time-only splitting may retain "
-            "the same VAR count. Run --info for diagnostics (real means "
-            "floating-point, not valid signals). This is a conservative "
-            "guard, not a documented vendor limit. Expert-only override: "
-            "FSDB2FST_MAX_TOTAL_VARS=<n> (0 disables; SIGSEGV risk). "
-            "See docs/FSDB_GUIDE.md.",
-            rd.n_total_vars, max_total_vars, rd.signals.size(),
-            n_convertible, sel.size());
     if (sel.empty()) die("no convertible signal matches the filter");
-    if (max_signals && sel.size() > max_signals)
-        die("%zu selected signals exceed the in-core limit (%llu); "
-            "this conservative guard avoids risky ffrLoadSignals batches. "
-            "Filter with -l/-L to reduce selected value data; this does not "
-            "bypass the separate file-wide VAR guard. Expert-only override: "
-            "FSDB2FST_MAX_SIGNALS=<n> (0 disables; SIGSEGV risk).",
+    if (max_signals && sel.size() > max_signals) {
+        if (!filter.substrs.empty() || !filter.exact.empty())
+            die("%zu signals still exceed the in-core limit (%llu) after "
+                "applying -l/-L. The filter matched too broadly: -l does "
+                "substring matching, so a top-level scope name often matches "
+                "ALL signals. Use a deeper sub-scope (e.g. -l u_core.u_fetch "
+                "instead of -l u_core), or split into multiple runs each "
+                "targeting a narrower scope. Alternatively, raise the limit "
+                "via FSDB2FST_MAX_SIGNALS=<n> (0 disables).",
+                sel.size(), max_signals);
+        die("%zu signals exceed the in-core limit (%llu); ffrLoadSignals "
+            "would crash on a design this size. Filter with -l/-L to convert "
+            "a subset (split per scope), or raise the limit via "
+            "FSDB2FST_MAX_SIGNALS=<n> (0 disables). Note: -l is substring "
+            "matching, so use sub-scope names (not the top-level) to "
+            "actually reduce the selection.",
             sel.size(), max_signals);
+    }
     if (sel.size() > 2000000)
         vinfo("[fsdb2fst] warning: %zu signals selected; consider -l/-L "
               "to split the conversion", sel.size());
@@ -788,6 +937,12 @@ int main(int argc, char **argv) {
     }
     vlog("loading value data for %zu signals (RAM heavy for big designs)...",
          id2fh.size());
+    /* From here until the traversal completes we are inside closed-source
+     * FsdbReader code that is known to crash on some inputs; make that crash
+     * self-describing instead of a bare rc=139. */
+    SetLoadNote(id2fh.size());
+    InstallFatalHandlers();
+    g_load_phase = 1;
     if (FSDB_RC_SUCCESS != rd.obj->ffrLoadSignals())
         die("ffrLoadSignals failed; the FSDB may be truncated or use an "
             "unsupported layout. Try --info first and report this file.");
@@ -795,10 +950,19 @@ int main(int argc, char **argv) {
     std::vector<fsdbVarIdcode> ids;
     ids.reserve(id2fh.size());
     for (const auto &kv : id2fh) ids.push_back(kv.first);
-    ffrTimeBasedVCTrvsHdl thdl =
-        rd.obj->ffrCreateTimeBasedVCTrvsHdl(
+    /* Guard the time-based iterator: on a file with zero value changes it
+     * returns a handle that segfaults on first use (see ProbeHasValueChange). */
+    const bool has_vc = ProbeHasValueChange(rd.obj, ids);
+    if (!has_vc)
+        vlog("this FSDB carries no value change data at all (declarations "
+             "only); skipping the value traversal");
+
+    ffrTimeBasedVCTrvsHdl thdl = nullptr;
+    if (has_vc) {
+        thdl = rd.obj->ffrCreateTimeBasedVCTrvsHdl(
             static_cast<unsigned int>(ids.size()), ids.data());
-    if (!thdl) die("ffrCreateTimeBasedVCTrvsHdl failed");
+        if (!thdl) die("ffrCreateTimeBasedVCTrvsHdl failed");
+    }
 
     /* idcode -> primary signal, so the traversal hot loop does not have to
      * scan sel linearly. */
@@ -904,27 +1068,40 @@ int main(int argc, char **argv) {
      * ffrGet...() before the first ffrGotoNextVC(), otherwise that record is
      * skipped and the t=0 initial values never reach the FST.
      * Cf. $VERDI_HOME/share/FsdbReader/example/read_analog.cpp. */
-    {
-        bool stop = false;
-        process_one(stop);
-    }
+    if (thdl) {
+        {
+            bool stop = false;
+            process_one(stop);
+        }
 
-    while (FSDB_RC_SUCCESS == thdl->ffrGotoNextVC()) {
-        bool stop = false;
-        process_one(stop);
-        if (stop) break;
-    }
+        while (FSDB_RC_SUCCESS == thdl->ffrGotoNextVC()) {
+            bool stop = false;
+            process_one(stop);
+            if (stop) break;
+        }
 
-    thdl->ffrFree();
-    rd.obj->ffrUnloadSignals();
+        thdl->ffrFree();
+        rd.obj->ffrUnloadSignals();
+    }
     rd.obj->ffrClose();
     rd.obj = nullptr;
 
-    if (emitted == 0 && !allow_empty)
+    if (emitted == 0 && !allow_empty) {
+        if (!has_vc)
+            die("this FSDB contains no value change data at all: it carries "
+                "the design hierarchy but no initial values and no value "
+                "changes, so there is nothing to convert. Nothing is wrong "
+                "with the reader -- check how the waveform was produced: the "
+                "$fsdbDumpvars call, the dump window, and (if the file was "
+                "merged) whether the individual segments hold any activity. "
+                "Filtering with -l/-L cannot help: the whole file is loaded "
+                "regardless. Use --allow-empty to emit the hierarchy-only FST "
+                "anyway.");
         die("no value data was loaded from the FSDB (0 transitions); the "
             "file may be truncated, or this FsdbReader version needs a "
             "different load path. Use --allow-empty to keep the "
             "hierarchy-only output.");
+    }
     if (rc_fail)
         vlog("warning: %lld records could not be read (ffrGetVarIdcodeXTagVCSeqNum failed)",
              rc_fail);

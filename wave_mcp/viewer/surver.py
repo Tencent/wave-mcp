@@ -69,6 +69,10 @@ class SurverInstance:
         Only a failure to *bind* is worth retrying; other causes (missing
         file, non-executable binary) are deterministic and would just be
         retried to the same outcome, so those surface on the first try.
+
+        The inner probe window grows with the attempt number (2 → 4 → 6 → 8 s)
+        because a cold start on a large FST may need several seconds before
+        surver's HTTP listener is ready.
         """
         retired = []
         last_exc = None
@@ -89,7 +93,8 @@ class SurverInstance:
             # Merely being able to connect is not proof that *our* surver is
             # up: the port may have been taken by an unrelated listener that
             # accepts connections while our own child has already died.
-            deadline = time.time() + 2.0
+            probe_secs = 2.0 + i * 2.0  # cold start gets more headroom
+            deadline = time.time() + probe_secs
             while time.time() < deadline:
                 if proc.poll() is not None:
                     break

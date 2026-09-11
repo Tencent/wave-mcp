@@ -297,9 +297,13 @@ wave-view dump.fst --signals top.u_dma.req_valid --cursor 1523400ps
 
 # 双波形对比视图（上下两个 pane，缩放/游标 lockstep 联动）
 wave-view pass.fst fail.fst --labels pass fail
+
+# VCD / FSDB 直接传，自动转 FST 后打开
+wave-view sim.vcd
 ```
 
 - 命令行打印 URL；桌面环境自动开浏览器，SSH/code agent 场景 IDE 终端自动转发端口点开即看。
+- 波形格式：`.fst` 直接打开，`.vcd` / `.fsdb` 自动转成 FST，转换产物带缓存并与 `prepare_session` 共用，同一个波形先分析后看图还是先看图后分析都只转一次。其他格式在入口直接报错并列出支持的扩展名。
 - agent 典型闭环：case 挂了 → `diff_waveforms(pass, fail)` 定位首分歧 → `signal_fanin` 回溯根因 → `open_wave_view` 双波形 + 分歧 marker + 分析说明弹窗一次呈现。
 - 分析说明是可收起的 log 弹窗，说明里的时刻引用（如 `[85000ps](#t=85000ps)`）点击即跳游标，游标/视口/marker 更新为无闪刷新。
 - 完整指南（MCP 工具参数、双向调试工作流、架构原理、部署与排障）见 [`docs/WAVE_VIEWER.md`](docs/WAVE_VIEWER.md)。

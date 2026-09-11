@@ -28,7 +28,12 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC_DIR="$REPO_ROOT/third_party/fsdb2fst"
+# In a pip/wheel install the sources land under share/wave-mcp/fsdb2fst/ while
+# the build script sits in share/wave-mcp/deploy/, so the dirname-based
+# REPO_ROOT/third_party/fsdb2fst path does not exist.  convert.py resolves the
+# correct layout and passes SRC_DIR via the environment; fall back to the
+# checkout layout only when SRC_DIR is unset (manual invocation).
+SRC_DIR="${SRC_DIR:-$REPO_ROOT/third_party/fsdb2fst}"
 RUNTIME_DIR="$REPO_ROOT/third_party/verdi_runtime/linux64"
 
 log()  { printf '[build_fsdb2fst] %s\n' "$*"; }

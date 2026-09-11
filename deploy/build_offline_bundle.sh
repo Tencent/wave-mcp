@@ -264,7 +264,14 @@ cp "$REPO_ROOT/deploy/install.sh"        "$OUT/install.sh"
 cp "$REPO_ROOT/deploy/wave-mcp.template" "$OUT/wave-mcp.template"
 cp "$REPO_ROOT/deploy/mcp.json.example"  "$OUT/mcp.json.example"
 chmod +x "$OUT/install.sh"
-date -u +"%Y-%m-%dT%H:%M:%SZ" > "$OUT/VERSION"
+# Named BUILD_INFO, not VERSION: this file records WHEN the bundle was built
+# (plus which wave-mcp went into it), not a semantic version. A bare timestamp
+# under the name VERSION read like a broken version string and sent at least
+# one operator looking for a release number that was never here.
+{
+  echo "wave_mcp_version=$(python3 -c 'import wave_mcp; print(wave_mcp.__version__)' 2>/dev/null || echo unknown)"
+  echo "build_time_utc=$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+} > "$OUT/BUILD_INFO"
 
 # 5b) retain project notices at the bundle root and in the source tree.
 # Keep THIRD_PARTY.md beside licenses/ so its license links remain valid.
@@ -277,6 +284,25 @@ cp "$REPO_ROOT/LICENSE" "$REPO_ROOT/README.md" "$REPO_ROOT/README.en.md" \
    "$REPO_ROOT/CHANGELOG.md" "$REPO_ROOT/MANIFEST.in" "$OUT/src/"
 cp "$REPO_ROOT/docs/THIRD_PARTY.md" "$REPO_ROOT/docs/PACKAGING_MATERIALS.md" "$OUT/src/docs/"
 cp -R "$LIC_SRC" "$OUT/src/docs/licenses"
+
+# 5b-2) user guides the runtime errors point at. An air-gapped user cannot open
+# a repository link, so the guides referenced from error messages have to be in
+# the bundle or the guidance is a dead end.
+mkdir -p "$OUT/docs"
+for guide in FSDB_GUIDE.md WAVE_VIEWER.md WAVE_VIEWER.en.md DEPLOY_AIRGAP.md; do
+  [[ -f "$REPO_ROOT/docs/$guide" ]] && cp "$REPO_ROOT/docs/$guide" "$OUT/docs/$guide"
+done
+
+# 5b-3) fsdb2fst build inputs. The Verdi FsdbReader runtime is proprietary and
+# stays on the user's machine, but the converter sources are ours to ship and
+# without them the on-demand build has nothing to compile.
+mkdir -p "$OUT/fsdb2fst-src/fst" "$OUT/fsdb2fst-src/deploy"
+cp "$REPO_ROOT/third_party/fsdb2fst/fsdb2fst.cpp" \
+   "$REPO_ROOT/third_party/fsdb2fst/ffrAPI_stub.h" \
+   "$REPO_ROOT/third_party/fsdb2fst/ffrAPI_stub_impl.cpp" "$OUT/fsdb2fst-src/"
+cp "$REPO_ROOT"/third_party/fsdb2fst/fst/*.c "$REPO_ROOT"/third_party/fsdb2fst/fst/*.h \
+   "$OUT/fsdb2fst-src/fst/"
+cp "$REPO_ROOT/deploy/build_fsdb2fst.sh" "$OUT/fsdb2fst-src/deploy/"
 
 # 5c) retain ALL wheel notices, including declared License-File entries.
 # Preserve both wheel identity and original member path to avoid collisions.

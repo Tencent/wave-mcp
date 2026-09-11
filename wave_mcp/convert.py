@@ -40,6 +40,7 @@ import hashlib
 import json
 import os
 import shutil
+import sys
 import signal
 import subprocess
 import time
@@ -59,8 +60,38 @@ _REPO_FSDB2FST = os.path.normpath(os.path.join(
 # absent in a pip install, where auto-build is simply skipped.
 _REPO_ROOT = os.path.normpath(os.path.join(
     os.path.dirname(os.path.abspath(__file__)), os.pardir))
-_FSDB2FST_SRC_DIR = os.path.join(_REPO_ROOT, "third_party", "fsdb2fst")
-_FSDB2FST_BUILD_SH = os.path.join(_REPO_ROOT, "deploy", "build_fsdb2fst.sh")
+
+
+def _resolve_build_inputs() -> tuple:
+    """Locate the fsdb2fst sources and build script.
+
+    Two layouts have to work. In a git checkout they sit at the repo root; in
+    an installed package they land under ``<prefix>/share/wave-mcp`` via
+    ``data-files``. Before this, only the checkout layout was resolved, so a
+    pip install had nothing to compile and FSDB support was unreachable even
+    with VERDI_HOME set correctly (the auto-build just returned None).
+
+    Returns ``(src_dir, build_script)``; the checkout wins when both exist so
+    local edits are never shadowed by an older installed copy.
+    """
+    candidates = [
+        (os.path.join(_REPO_ROOT, "third_party", "fsdb2fst"),
+         os.path.join(_REPO_ROOT, "deploy", "build_fsdb2fst.sh")),
+    ]
+    # sys.prefix covers a venv; base_prefix covers a --user or system install.
+    for prefix in dict.fromkeys((sys.prefix, getattr(sys, "base_prefix", sys.prefix))):
+        candidates.append((
+            os.path.join(prefix, "share", "wave-mcp", "fsdb2fst"),
+            os.path.join(prefix, "share", "wave-mcp", "deploy", "build_fsdb2fst.sh"),
+        ))
+    for src_dir, script in candidates:
+        if os.path.isfile(os.path.join(src_dir, "fsdb2fst.cpp")) and os.path.isfile(script):
+            return src_dir, script
+    # Nothing usable: keep the checkout paths so error messages stay concrete.
+    return candidates[0]
+
+
+_FSDB2FST_SRC_DIR, _FSDB2FST_BUILD_SH = _resolve_build_inputs()
 
 # Auto-build is on by default; WAVE_MCP_FSDB2FST_AUTOBUILD=0 disables it.
 _AUTOBUILD_ENABLED = os.environ.get(
@@ -290,6 +321,54 @@ def _cache_root() -> str:
     return os.path.join(base, "wave-mcp", "fsdb2fst")
 
 
+# Formats wave-mcp can open. An unknown extension is rejected BY NAME instead
+# of being handed to vcd2fst, whose parse error ("VCD not found" / rc=1 noise)
+# blames the wrong thing and hides the real problem: the format is unsupported.
+WAVEFORM_EXTENSIONS = (".fst", ".vcd", ".fsdb")
+
+
+class UnsupportedWaveformError(ValueError):
+    """Raised when a waveform path is not a format wave-mcp can open."""
+
+
+def _artifact_fallback_root() -> str:
+    """Shared, deterministic dir for converted FSTs when the source dir is not writable.
+
+    Both the analysis path (``prepare_session``) and the viewer path
+    (``open_wave_view``) resolve waveforms through ``resolve_waveform``, so they
+    must agree on where a converted FST lands when it cannot go next to its
+    source. Keying this on a stable user-level dir (not a per-session out_dir)
+    is what makes "convert during analysis, then open in the viewer" and the
+    reverse order share one artifact instead of converting twice.
+    """
+    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(
+        os.path.expanduser("~"), ".cache")
+    return os.path.join(base, "wave-mcp", "fst-cache")
+
+
+def waveform_kind(path: str) -> str:
+    """Classify a waveform path by extension: ``fst`` / ``vcd`` / ``fsdb``.
+
+    Raises ``UnsupportedWaveformError`` naming the supported formats for
+    anything else (GHW, VPD, SHM, no extension, ...) rather than letting it
+    fall through to the VCD converter and fail with a misleading message.
+    """
+    lowered = str(path).lower()
+    if lowered.endswith(".fst"):
+        return "fst"
+    if lowered.endswith(".fsdb"):
+        return "fsdb"
+    if lowered.endswith(".vcd"):
+        return "vcd"
+    ext = os.path.splitext(str(path))[1] or "(none)"
+    raise UnsupportedWaveformError(
+        f"unsupported waveform format: {path} (extension {ext!r}). "
+        f"Supported: {', '.join(WAVEFORM_EXTENSIONS)} — .fst is read "
+        f"directly, .vcd and .fsdb are converted to FST automatically. "
+        f"Convert this file to one of those first, e.g. with the tool that "
+        f"produced it (gtkwave / simvision / fsdb2vcd).")
+
+
 def resolve_fsdb_reader() -> Optional[str]:
     """Locate a usable Verdi FsdbReader package for building fsdb2fst.
 
@@ -355,6 +434,11 @@ def _autobuild_fsdb2fst() -> Optional[str]:
 
     env = dict(os.environ)
     env.setdefault("FSDB2FST_FREADER", reader_dir)
+    # Tell the build script where the sources actually are. In a pip install
+    # they live under share/wave-mcp/fsdb2fst/ (no third_party/ level), but
+    # the script's own dirname-based fallback expects a checkout layout. This
+    # was the root cause of the 0.2.6 "auto-build unusable" defect.
+    env["SRC_DIR"] = _FSDB2FST_SRC_DIR
     # Build straight into the per-user cache. Building into the checkout and
     # copying afterwards would (a) dirty the git tree, (b) make every later
     # resolve short-circuit on the repo-local level so the cache is never
@@ -459,23 +543,35 @@ def _fsdb2fst_missing_error() -> ConversionError:
                "VERDI_HOME (must contain share/FsdbReader/linux64) in your MCP "
                "config, or FSDB2FST_FREADER to a copied share/FsdbReader dir")
     elif not shutil.which("g++"):
-        why = "auto-build skipped: g++ not found in PATH"
+        why = ("auto-build skipped: g++ not found in PATH. Install g++, or build "
+               "the converter on another machine and point $FSDB2FST_BIN at it")
     else:
         detail = _last_autobuild_failure()
         why = ("auto-build attempted but failed"
                + (f":\n    {detail}" if detail else ", see build-failed.log in the cache dir"))
+    # Only offer the build script when it actually exists: telling a pip user to
+    # run a file the package never shipped is what made this error misleading.
+    have_sources = os.path.isfile(_FSDB2FST_BUILD_SH) and os.path.isfile(
+        os.path.join(_FSDB2FST_SRC_DIR, "fsdb2fst.cpp"))
+    options = [
+        "set VERDI_HOME in your MCP config and retry; the converter is then "
+        "built once automatically (needs g++)",
+    ]
+    if have_sources:
+        options.append(f"or build it explicitly: bash {_FSDB2FST_BUILD_SH}")
+    else:
+        options.append("or install a build that ships the converter sources "
+                       "(pip install 'wave-mcp>=0.2.6'), or use a git checkout")
+    options.append("or set $FSDB2FST_BIN to an existing fsdb2fst binary")
+    options.append("or convert manually and pass the .fst instead:\n"
+                   "      fsdb2fst dump.fsdb dump.fst")
     return ConversionError(
         f"'fsdb2fst' not found — needed to convert FSDB -> FST.\n"
         f"Searched: {where}\n"
         f"Why not built automatically: {why}\n"
         f"Options:\n"
-        f"  * set VERDI_HOME in your MCP config and retry; the converter is then "
-        f"built once automatically (needs g++)\n"
-        f"  * or build it explicitly: bash deploy/build_fsdb2fst.sh\n"
-        f"  * or set $FSDB2FST_BIN to an existing fsdb2fst binary\n"
-        f"  * or convert manually and pass the .fst instead:\n"
-        f"      fsdb2fst dump.fsdb dump.fst\n"
-        f"See docs/FSDB_GUIDE.md for the full setup (the FsdbReader runtime "
+        + "".join(f"  * {o}\n" for o in options)
+        + f"See docs/FSDB_GUIDE.md for the full setup (the FsdbReader runtime "
         f"checks out no license).")
 
 
@@ -544,19 +640,30 @@ def _fsdb_failure(binary: str, returncode: int, out: str, *,
     """Distinguish converter/reader crashes from dynamic-loader failures."""
     detail = out.strip()
     operation = "fsdb2fst --info" if info_only else "fsdb2fst"
+    if returncode == 3 and "FsdbReader crashed" in detail:
+        # fsdb2fst caught the fatal signal itself and already printed which
+        # phase crashed and how many signals were selected; passing its own
+        # diagnosis through beats wrapping it in a second, vaguer one.
+        return ConversionError(f"{operation}: {detail}")
     if returncode == -signal.SIGSEGV:
+        startup_crash = not detail
         return ConversionError(
             f"{operation} crashed with SIGSEGV (rc={returncode}); the converter "
             f"or FsdbReader runtime crashed, not necessarily a missing library.\n"
             f"{detail}\n"
-            f"Large file-wide VAR metadata is a known risk even with -l/-L "
-            f"or fsdb_scopes; filters reduce selected value data, not that "
-            f"metadata. Other runtime/file problems can also cause SIGSEGV.\n"
-            f"Rebuild fsdb2fst from current source for the file-wide precheck. "
-            f"Run fsdb2fst --info in the same environment and share sanitized "
+            + ("The process produced no output at all, which points at a crash "
+               "during dynamic loading, before main. That is usually a libc "
+               "mismatch: compare a clean LD_LIBRARY_PATH against this "
+               "environment (an injected glibc is a common cause) and check "
+               "whether gdb reports 'No stack'.\n"
+               if startup_crash else
+               "Two causes are known: a FSDB carrying no value change data at "
+               "all (rebuild fsdb2fst from current source to get a precise "
+               "error instead of this crash), and a libc mismatch at load time "
+               "when LD_LIBRARY_PATH injects a different glibc. Size alone does "
+               "not cause this; -l/-L and fsdb_scopes cannot work around it.\n")
+            + f"Run fsdb2fst --info in the same environment and share sanitized "
             f"counts and the FsdbReader version, not the confidential FSDB. "
-            f"Re-dump fewer scopes into separate files and avoid merging full "
-            f"hierarchies; time-only splitting may retain the same VAR count. "
             f"See docs/FSDB_GUIDE.md.")
     if ("error while loading shared libraries:" in detail
             or "cannot open shared object file" in detail):
@@ -577,8 +684,8 @@ def convert_fsdb(fsdb_path: str, fst_path: Optional[str] = None,
     """Convert an FSDB waveform to FST via the bundled fsdb2fst (single pass).
 
     ``scopes`` maps to ``-l`` (OR over substrings) and ``signals_file`` to
-    ``-L``; both reduce selected value data, not the file-wide VAR metadata.
-    The converter's file-wide safety guard applies even to tiny subsets.
+    ``-L``; both narrow the selected set, which is what the converter's
+    in-core memory guard bounds.
 
     fsdb2fst writes the hierarchy as a ``<fst>.hier`` sidecar, and pylibfst
     cannot open the FST without it, so the sidecar is validated here rather
@@ -784,3 +891,41 @@ def cached_fst(source: str, *, kind: str, fallback_dir: str,
         pass  # cache is an optimisation, never fail the conversion over it
     return {"fst_path": fst_path, "cached": False,
             "cache_dir": out_dir, "detail": res}
+
+
+def resolve_waveform(path: str, *, mode: str = "speed",
+                     scopes: Optional[List[str]] = None,
+                     signals_file: Optional[str] = None,
+                     pack: str = "lz4",
+                     timeout: Optional[float] = None) -> dict:
+    """Resolve any supported waveform path to an openable FST.
+
+    Single entry point shared by the analysis path (``prepare_session``) and
+    the viewer path (``open_wave_view``) so a waveform converted by one is
+    reused by the other instead of being converted again:
+
+        .fst  -> returned as-is
+        .vcd  -> cached_fst(kind="vcd")
+        .fsdb -> cached_fst(kind="fsdb")
+        other -> UnsupportedWaveformError
+
+    Defaults match ``prepare_session`` (mode="speed", no slicing, pack="lz4");
+    callers must not vary them, since the conversion options are part of the
+    cache key and a mismatch silently forces a second conversion.
+
+    Returns ``{fst_path, kind, converted, cached, source}``.
+    """
+    source = os.path.abspath(path)
+    kind = waveform_kind(source)
+    if not os.path.exists(source):
+        raise FileNotFoundError(f"{kind.upper()} not found: {source}")
+    if kind == "fst":
+        return {"fst_path": source, "kind": kind, "converted": False,
+                "cached": False, "source": source}
+    got = cached_fst(
+        source, kind=kind, fallback_dir=_artifact_fallback_root(),
+        scopes=scopes, signals_file=signals_file,
+        mode=mode, pack=pack, timeout=timeout)
+    return {"fst_path": got["fst_path"], "kind": kind, "converted": True,
+            "cached": bool(got.get("cached")), "source": source,
+            "cache_dir": got.get("cache_dir"), "detail": got.get("detail", {})}

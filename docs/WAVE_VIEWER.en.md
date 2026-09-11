@@ -66,17 +66,24 @@ wave-view pass.fst fail.fst --labels pass fail
 
 # print the URL only, don't try to launch a browser
 wave-view dump.fst --no-browser
+
+# pass a VCD / FSDB directly: converted to FST, then opened
+wave-view sim.vcd
 ```
 
 Arguments:
 
 | Argument | Meaning |
 | --- | --- |
-| `fst` (positional) | 1 or 2 FST paths; 2 paths enter the compare view |
+| `fst` (positional) | 1 or 2 waveform paths; 2 paths enter the compare view. `.fst` opens directly, `.vcd` / `.fsdb` are converted to FST first |
 | `--signals` | full signal paths to add initially, space separated |
 | `--cursor` | initial cursor time, `number+unit`, e.g. `1523400ps`, `12ns` |
 | `--labels` | display label per waveform; `pass fail` recommended for compare views |
 | `--no-browser` | don't try to launch a local browser |
+
+Converted output is cached and shared with `prepare_session`: the same waveform is converted once whether you analyse it first and view it later, or the other way round. The cache lands next to the source file, falling back to `~/.cache/wave-mcp/fst-cache` (honouring `XDG_CACHE_HOME`) when the source directory is read-only. A GB-scale FSDB conversion costs minutes; a cache hit costs seconds.
+
+Anything other than `.fst` / `.vcd` / `.fsdb` (`.ghw`, `.vpd`, an SHM directory) is rejected at the entry point with the list of supported extensions, instead of falling through to a converter that reports a problem pointing in the wrong direction.
 
 The command prints three lines: the browser URL, the native Surfer client connection (`surfer <token_url>`), and an SSH port-forward command. On desktops (with `DISPLAY`) it launches the browser via `xdg-open`; in SSH / code-agent sessions, IDE terminals (VS Code, Cursor, etc.) auto-forward localhost ports, so just click the URL. The process stays in the foreground; Ctrl-C exits and reaps all child processes.
 
@@ -89,6 +96,7 @@ Opens a waveform view (or a pair) and returns the URL for the user.
 ```jsonc
 open_wave_view({
   "fst_paths": ["sim/fail.fst"],            // 1 = normal view, 2 = compare view
+                                            // .fst opens directly, .vcd / .fsdb converted to FST
   "signals": [                              // initial signals
     {"path": "top.u_dma.req_valid", "color": "red"},
     {"path": "top.u_dma.grant", "group": "handshake"}
@@ -118,11 +126,12 @@ Returns:
 
 Field notes:
 
+- Each `fst_paths` entry can be `.fst`, `.vcd` or `.fsdb`. FST opens directly; VCD / FSDB are converted to FST first. Converted output is cached and shared with `prepare_session`, so a waveform already converted during analysis is not converted again here. Any other extension (`.ghw`, `.vpd`, an SHM directory) returns `{"available": false, "error": …, "hint": …}` at the entry point, listing the supported formats.
 - Each `signals` entry is `{path, color?, group?, format?, source?}`. In compare views, `source: "a"/"b"` assigns a signal to one waveform; by default it is added to both.
 - Prefer a short ASCII word for `group`. The heading is drawn in Surfer's WASM canvas, whose font carries no CJK glyphs, so a non-ASCII name renders as boxes (the grouping itself still works). Spaces are folded to underscores automatically: the sucl parser rejects a parameter containing whitespace and would silently drop the whole heading. Put prose in `annotation`, which accepts any language.
 - The `diff` parameter takes a `diff_waveforms` result reference `{source_a, source_b, first_divergence}` and automatically places a red marker at the first divergence, no manual conversion needed.
 - `labels` names each waveform, same as the CLI `--labels`.
-- If assets are missing or surver fails to start, the tool returns `{"available": false, "hint": …}` instead of raising.
+- Missing assets, a surver that fails to start, an unsupported format and a failed conversion all return `{"available": false, "hint": …}` instead of raising.
 
 ### 4.2 update_wave_view
 

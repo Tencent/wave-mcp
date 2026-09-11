@@ -156,6 +156,65 @@ bundle 里的 Python 依赖都是 wheel，glibc 兼容性由打包时的 `--targ
 
 ---
 
+## 4b. FSDB 转换器（fsdb2fst，需要 Verdi）
+
+隔离网机器如果有 Synopsys Verdi（`VERDI_HOME` 已设），wave-mcp 可以读 FSDB。
+转换器 `fsdb2fst` 会在**首次转换时自动编译**（约十几秒），编译完落在
+`~/.cache/wave-mcp/` 下，后续复用不再编译。升级 wave-mcp 版本后缓存键会变化，
+下次转换时自动重编。
+
+前提：目标机有 `g++` 和 Verdi FsdbReader 运行时。MCP 配置 `env` 块里加上
+`VERDI_HOME`：
+
+```json
+{
+  "mcpServers": {
+    "wave-mcp": {
+      "command": "/shared/wave-mcp/bin/wave-mcp",
+      "env": { "VERDI_HOME": "/eda/synopsys/verdi/U-2023.03-SP2" }
+    }
+  }
+}
+```
+
+详细的解析顺序、缓存机制和排错见 [FSDB_GUIDE.md](FSDB_GUIDE.md)。
+
+## 4c. fstdumper VPI 插件（Xcelium 直出 FST，可选）
+
+fstdumper 让 Xcelium (xrun) 在仿真时直接产出 FST，跳过 VCD 中间文件。
+它是 GPL-3.0 开源项目，**不随 wave-mcp 分发**（许可不兼容），需要用户
+自行获取源码并编译。
+
+隔离网没有外网，无法在线 clone。做法是**在有网的机器上准备好源码目录，
+整体拷到隔离网**：
+
+```bash
+# ① 有网机器（一次性）
+git clone --depth 1 https://github.com/semify-eda/fstdumper.git /tmp/fstdumper
+
+# ② 拷到隔离网（U 盘 / scp / 共享目录）
+#    同时带上 wave-mcp 仓库中的 Xcelium 修复补丁：
+#    third_party/fstdumper/fstdumper-xcelium-fixes.patch
+#    third_party/fstdumper/fstdumper-perf-opt.patch（可选）
+
+# ③ 隔离网机器上构建（跳过 clone，直接打补丁 + make）
+FSTDUMPER_BUILD_DIR=/path/to/fstdumper bash deploy/build_fstdumper.sh
+```
+
+如果目标机上没有 `deploy/build_fstdumper.sh`（纯 bundle 安装），
+手工执行等价操作：
+
+```bash
+cd /path/to/fstdumper
+patch -p1 < /path/to/fstdumper-xcelium-fixes.patch
+make fstdumper.so
+```
+
+产出的 `fstdumper.so` 可拷给同环境所有人复用。完整使用指南见
+[XCELIUM_FST_GUIDE.md](XCELIUM_FST_GUIDE.md)。
+
+---
+
 ## 5. 升级 / 回滚
 - 升级：在开发机重新 `build_offline_bundle.sh`，拷新 tar，解压到新目录，`install.sh --prefix /shared/wave-mcp-vN`，切换客户端 `command` 指向新路径。
 - 回滚：客户端 `command` 指回旧 `bin/wave-mcp` 即可（旧 bundle 保留）。

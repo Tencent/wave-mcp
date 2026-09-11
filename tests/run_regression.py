@@ -73,6 +73,10 @@ def main():
                        [PY, os.path.join(HERE, "unit", "test_diff.py")]))
     results.append(run("unit/viewer",
                        [PY, os.path.join(HERE, "unit", "test_viewer.py")]))
+    results.append(run("unit/cli_version",
+                       [PY, "-m", "pytest", os.path.join(HERE, "unit", "test_cli_version.py"), "-q"]))
+    results.append(run("unit/fsdb2fst_packaging",
+                       [PY, "-m", "pytest", os.path.join(HERE, "unit", "test_fsdb2fst_packaging.py"), "-q"]))
 
     # ---- viewer browser e2e (self-skips without assets/playwright) ---------
     results.append(run("viewer/e2e",

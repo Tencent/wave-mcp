@@ -1,8 +1,10 @@
 # 波形查看器截图
 
-agent 分析完一个问题、把结论呈现给你时，浏览器里实际长什么样。下面每张图都是
-[examples/viewer_demos](../examples/viewer_demos) 四个 demo 场景的真实抓图，不是效果图：
-信号分组、总线进制、颜色、分析说明弹窗，全部由 `open_wave_view` / `update_wave_view` 生成。
+agent 分析完一个问题、把结论呈现给你时，浏览器里实际长什么样。下面每张图都是真实抓图，
+不是效果图：信号分组、总线进制、颜色、分析说明弹窗，全部由 `open_wave_view` /
+`update_wave_view` 生成。前四个场景来自
+[examples/viewer_demos](../examples/viewer_demos)，最后一个来自
+[examples/regression_demo](../examples/regression_demo)，那是一整轮回归的自动分析。
 
 每个场景背后的调试推理（哪一次工具调用发现了什么）写在
 [demo README](../examples/viewer_demos/README.md) 里，本页只讲你看到的画面。
@@ -40,6 +42,24 @@ X 经 `data_out[7:5]` 一路传到输出。右下角的分析说明弹窗里是 
 两个游标分别标出首分歧和 `crc_err` 拉高的位置，这正是 `diff_waveforms` 为首分歧定位铺好的视图。
 
 ![波形查看器中的 pass/fail 首分歧](images/viewer/crc_diff.png)
+
+## 回归自动分析
+
+前面四个场景是"agent 分析一个已知问题"，这一个是"agent 分析一整轮回归"。
+[examples/regression_demo](../examples/regression_demo) 跑 8 个 seed，同一份 RTL 六过两挂
+（缺陷只在特定 payload 下触发），然后对每个失败用例自动出结论。
+
+波形是分析的证据面：`crc`（红）和 testbench 参考模型 `ref_crc`（绿）在 65ns 之前逐拍一致，
+到游标处分道扬镳（`d` vs `9`）。这一刻远早于包尾那次报错的残差检查，所以报告给出的结论是
+"报出来的残差只是下游症状"，而这句话对不对，看图就能判断。
+
+![回归分析中的失败用例波形证据](images/viewer/regression_triage.png)
+
+同一次分析还会产出一份静态报告：通过率、按症状归组的失败清单，以及每个失败的
+观测事实、推断、证据链三段。事实是工具输出，结论标注为推断，
+证据是可复核的工具调用，三者分开摆，不混成一句"AI 认为"。
+
+![回归分析报告](images/viewer/regression_report.png)
 
 ## 关于界面语言
 
@@ -95,3 +115,11 @@ wave-view examples/viewer_demos/waves/cdc.fst \
 在远程机器上跑时，把查看器打印的端口转发出来
 （`ssh -L 8080:127.0.0.1:<port> <host>`）再在本地打开。完整的 CLI 与工具参考见
 [波形查看器指南](WAVE_VIEWER.md)。
+
+最后那两张回归分析的图来自另一个 demo，它自己会在 `report/` 下写出波形截图和报告：
+
+```bash
+cd examples/regression_demo
+./run_demo.sh                 # 回归 -> 分析 -> report/index.html + report/shots/
+./run_demo.sh --no-shots      # 没有浏览器时跳过截图，分析和报告照常
+```

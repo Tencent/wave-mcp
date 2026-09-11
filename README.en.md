@@ -340,10 +340,18 @@ wave-view dump.fst --signals top.u_dma.req_valid --cursor 1523400ps
 
 # dual-waveform compare view (two panes, lockstep zoom/cursor sync)
 wave-view pass.fst fail.fst --labels pass fail
+
+# pass a VCD / FSDB directly: converted to FST, then opened
+wave-view sim.vcd
 ```
 
 - The CLI prints a URL; desktops auto-open a browser, and in SSH / code-agent
   sessions the IDE terminal auto-forwards the localhost port.
+- Waveform formats: `.fst` opens directly, `.vcd` / `.fsdb` are converted to
+  FST automatically. Converted output is cached and shared with
+  `prepare_session`, so the same waveform is converted once whether you analyse
+  it first or view it first. Other formats are rejected at the entry point with
+  the list of supported extensions.
 - Typical agent loop: a case fails → `diff_waveforms(pass, fail)` pinpoints the
   first divergence → `signal_fanin` backtracks the cause → `open_wave_view`
   presents both waveforms, a divergence marker and the analysis popup at once.

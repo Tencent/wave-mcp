@@ -66,17 +66,24 @@ wave-view pass.fst fail.fst --labels pass fail
 
 # 只打印 URL，不尝试拉起浏览器
 wave-view dump.fst --no-browser
+
+# VCD / FSDB 直接传，自动转 FST 后打开
+wave-view sim.vcd
 ```
 
 参数说明：
 
 | 参数 | 含义 |
 | --- | --- |
-| `fst`（位置参数） | 1 个或 2 个 FST 路径，2 个进入对比视图 |
+| `fst`（位置参数） | 1 个或 2 个波形路径，2 个进入对比视图。`.fst` 直接打开，`.vcd` / `.fsdb` 自动转成 FST |
 | `--signals` | 初始加入的信号完整路径，空格分隔多个 |
 | `--cursor` | 初始游标时刻，格式 `数字+单位`，如 `1523400ps`、`12ns` |
 | `--labels` | 每个波形的显示标签，对比视图建议 `pass fail` |
 | `--no-browser` | 不尝试本机拉起浏览器 |
+
+转换产物带缓存，和 `prepare_session` 共用同一份 FST：同一个波形不管是先分析后看图，还是先看图后分析，都只转一次。缓存优先落在源文件旁边，源目录只读时落到 `~/.cache/wave-mcp/fst-cache`（受 `XDG_CACHE_HOME` 影响）。GB 级 FSDB 转换耗时以分钟计，命中缓存则是秒级。
+
+`.fst` / `.vcd` / `.fsdb` 以外的格式（如 `.ghw`、`.vpd`、SHM 目录）会在入口直接报错并列出支持的扩展名，不会落到转换器里报一个指向错误方向的问题。
 
 命令会打印三行信息：浏览器 URL、原生 Surfer 客户端连接方式（`surfer <token_url>`）、SSH 端口转发命令。桌面环境（有 `DISPLAY`）自动用 `xdg-open` 拉起浏览器；SSH / code agent 场景下 VS Code、Cursor 等 IDE 终端会自动转发 localhost 端口，直接点 URL 即可。进程前台常驻，Ctrl-C 退出并回收全部子进程。
 
@@ -89,6 +96,7 @@ wave-view dump.fst --no-browser
 ```jsonc
 open_wave_view({
   "fst_paths": ["sim/fail.fst"],            // 1 个普通视图，2 个对比视图
+                                            // .fst 直接打开，.vcd / .fsdb 自动转 FST
   "signals": [                              // 初始信号
     {"path": "top.u_dma.req_valid", "color": "red"},
     {"path": "top.u_dma.grant", "group": "handshake"}
@@ -118,11 +126,12 @@ open_wave_view({
 
 字段要点：
 
+- `fst_paths` 每项可以是 `.fst`、`.vcd` 或 `.fsdb`。FST 直接打开，VCD / FSDB 先转成 FST 再打开，转换产物带缓存并与 `prepare_session` 共用，所以分析阶段已经转过的波形在这里不会再转一遍。其他扩展名（`.ghw`、`.vpd`、SHM 目录等）在入口直接返回 `{"available": false, "error": …, "hint": …}` 并列出支持的格式。
 - `signals` 每项 `{path, color?, group?, format?, source?}`；对比视图里用 `source: "a"/"b"` 指定信号属于哪份波形，缺省两边都加。
 - `group` 建议用简短的 ASCII 词。分组标题画在 Surfer 的 WASM 画布里，字体不含 CJK 字形，写中文会显示成方块（分组本身照常生效）。名字里的空格会自动折成下划线，因为 sucl 解析器不接受带空格的参数，原样发过去整条分组标题会被静默丢弃。想写中文说明放到 `annotation` 里，那里不限语言。
 - `diff` 参数直接接 `diff_waveforms` 的结果引用 `{source_a, source_b, first_divergence}`，自动在首分歧时刻打红色 marker，不用手动换算。
 - `labels` 给每份波形起显示名，与 CLI 的 `--labels` 一致。
-- 资产缺失或 surver 启动失败时返回 `{"available": false, "hint": …}`，不抛错。
+- 资产缺失、surver 启动失败、格式不支持或转换失败时都返回 `{"available": false, "hint": …}`，不抛错。
 
 ### 4.2 update_wave_view
 

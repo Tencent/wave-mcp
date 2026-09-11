@@ -351,6 +351,11 @@ def prepare_session(out_dir: str, wave_path: str, *,
     out_dir = resolve_out_dir(out_dir)
     os.makedirs(out_dir, exist_ok=True)
 
+    # Reject unsupported formats up front by name: falling through to the VCD
+    # converter makes a .ghw/.vpd fail as "VCD not found" or inside vcd2fst,
+    # which points at the wrong problem entirely.
+    convert.waveform_kind(wave_path)
+
     lowered = wave_path.lower()
     if lowered.endswith(".fst"):
         # already an FST: read it in place, no conversion step.
@@ -372,7 +377,7 @@ def prepare_session(out_dir: str, wave_path: str, *,
             detail = res
         else:
             got = convert.cached_fst(
-                wave_path, kind="fsdb", fallback_dir=out_dir,
+                wave_path, kind="fsdb", fallback_dir=convert._artifact_fallback_root(),
                 scopes=fsdb_scopes, signals_file=fsdb_signals_file)
             fst_path = got["fst_path"]
             detail = {**got["detail"], "cached": got["cached"],
@@ -380,7 +385,7 @@ def prepare_session(out_dir: str, wave_path: str, *,
         steps.append(StepResult("convert_fsdb_to_fst", True, time.time() - t0,
                                 detail))
     else:
-        # treat as VCD -> convert to FST (cached next to the source when possible).
+        # VCD (anything else is rejected by name in convert.waveform_kind)
         if not os.path.exists(wave_path):
             raise FileNotFoundError(f"VCD not found: {wave_path}")
         t0 = time.time()
@@ -390,7 +395,8 @@ def prepare_session(out_dir: str, wave_path: str, *,
             detail = res.to_dict()
         else:
             got = convert.cached_fst(
-                wave_path, kind="vcd", fallback_dir=out_dir, mode=mode)
+                wave_path, kind="vcd", fallback_dir=convert._artifact_fallback_root(),
+                mode=mode)
             fst_path = got["fst_path"]
             detail = {**got["detail"], "cached": got["cached"],
                       "cache_dir": got["cache_dir"]}

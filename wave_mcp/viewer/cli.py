@@ -39,10 +39,13 @@ def _parse_time(text: str):
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         prog="wave-view",
-        description="Open FST waveform(s) in the wave-mcp browser viewer "
-                    "(streamed via surver; tens-of-GB files open instantly).")
-    ap.add_argument("fst", nargs="+", help="FST waveform path(s); two paths "
-                    "open a comparison view")
+        description="Open waveform(s) in the wave-mcp browser viewer "
+                    "(.fst directly, .vcd/.fsdb auto-converted to FST; "
+                    "streamed via surver, tens-of-GB files open instantly).")
+    ap.add_argument("fst", nargs="+", help="waveform path(s); two paths "
+                    "open a comparison view. .fst opens directly, .vcd and "
+                    ".fsdb are converted to FST (cached, shared with "
+                    "prepare_session)")
     ap.add_argument("--signals", nargs="*", default=None,
                     help="signal paths to add initially")
     ap.add_argument("--cursor", type=_parse_time, default=None,
@@ -53,10 +56,20 @@ def main(argv=None) -> int:
                     help="do not try to open a browser")
     args = ap.parse_args(argv)
 
+    from .. import convert as _convert
+    resolved = []
+    for p in args.fst:
+        try:
+            resolved.append(_convert.resolve_waveform(p)["fst_path"])
+        except (_convert.UnsupportedWaveformError, FileNotFoundError,
+                _convert.ConversionError) as exc:
+            print("error:", exc, file=sys.stderr)
+            return 1
+
     mgr = ViewManager.instance()
     signals = ([{"path": p} for p in args.signals]
                if args.signals else None)
-    result = mgr.open_view(args.fst, signals=signals, cursor=args.cursor,
+    result = mgr.open_view(resolved, signals=signals, cursor=args.cursor,
                            labels=args.labels)
 
     if not result.get("available"):

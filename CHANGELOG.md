@@ -4,6 +4,77 @@ All notable changes to wave-mcp are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.6] - 2026-09-11
+
+### Added
+
+- **The viewer accepts VCD and FSDB, not just FST.** `open_wave_view` and the
+  `wave-view` CLI used to require an FST, so viewing a VCD meant converting it
+  by hand first. They now resolve any supported waveform through one entry
+  point: FST opens directly, VCD and FSDB are converted first.
+- **Conversion results are shared between the analysis and viewer paths.** Both
+  go through the same content-addressed cache, so a waveform converted by
+  `prepare_session` is reused when the viewer opens it, and vice versa. This
+  matters most for GB-scale FSDBs, where a conversion costs minutes: whichever
+  order you use, it happens once.
+
+### Fixed
+
+- **FSDB support was unreachable for anyone who installed from PyPI.** The
+  converter is built on demand because the Verdi FsdbReader runtime cannot be
+  redistributed, but the converter sources and the build script were never
+  packaged, so the auto-build had nothing to compile. FSDB shipped as a
+  supported format in 0.2.0 and stayed unusable through 0.2.5 unless you worked
+  from a git checkout. `third_party/fsdb2fst/` and `deploy/build_fsdb2fst.sh`
+  now ship in both the wheel and the sdist, and the sources are resolved from
+  the installed location as well as from a checkout (a checkout still wins, so
+  local edits are never shadowed).
+- **The "fsdb2fst not found" error told you to run a file you did not have.**
+  It advised `bash deploy/build_fsdb2fst.sh` even when it had just reported
+  that the sources were not shipped. The build script is now only offered when
+  it exists, and the message names its absolute path.
+- **Guides referenced from error messages were missing from the package.**
+  `docs/FSDB_GUIDE.md` and `docs/WAVE_VIEWER.md` are cited in runtime errors
+  and docstrings but shipped in neither the wheel nor the offline bundle. Both,
+  plus `WAVE_VIEWER.en.md` and `DEPLOY_AIRGAP.md`, are now included.
+- **The offline bundle could not build the FSDB converter at all.** It carried
+  no converter sources, which is the worst case for an air-gapped host that
+  cannot clone the repository. The bundle now ships `fsdb2fst-src/` and a
+  `docs/` directory.
+- **Unsupported waveform formats are now rejected by name at the entry point.**
+  A `.ghw` or `.vpd` used to fall through to the VCD converter and fail as
+  "VCD not found" or with a parse error from inside `vcd2fst`, both of which
+  point at the wrong problem. The supported extensions are listed in the error
+  instead.
+- **`wave-session --vcd` no longer converts a second private copy.** The CLI
+  called the converter directly and wrote the FST inside `--out`, so a waveform
+  already converted by `prepare_session` or the viewer was converted again, and
+  the copy it produced was invisible to them. It now goes through the same
+  shared cache as every other entry point. `--vcd` also accepts `.fsdb`.
+- **The fallback cache directory is now stable across sessions.** When the
+  source directory is read-only, conversions previously landed in the
+  per-session output directory, so every new session reconverted the same
+  waveform. They now land in `~/.cache/wave-mcp/fst-cache` (honouring
+  `XDG_CACHE_HOME`). Waveforms in writable source directories are unaffected:
+  their FST still sits next to the source, exactly as before.
+- **`wave-mcp --version` now works.** The server argument parser only knew
+  `--transport`, `--session`, `--host` and `--port`, so the first command most
+  people type failed with `unrecognized arguments` and exit code 2. It now
+  prints `wave-mcp <version>` and exits 0, on both `wave-mcp` and
+  `wave-mcp query`.
+- **The bundle no longer ships a file named `VERSION` holding only a
+  timestamp.** That file recorded when the bundle was built
+  (`2026-09-11T03:21:25Z`), which read like a broken version string and sent at
+  least one operator hunting for a release number that was never in it. It is
+  now `BUILD_INFO` and carries `wave_mcp_version` and `build_time_utc`.
+- **The on-demand fsdb2fst auto-build was broken in installed packages.** The
+  build script derived its source directory from its own filesystem location
+  (`dirname "$0"/../third_party/fsdb2fst`), but after a wheel install the
+  sources land under `share/wave-mcp/fsdb2fst/` (no `third_party/` layer).
+  `convert.py` now passes the resolved `SRC_DIR` to the script via an
+  environment variable, and the script honours it when set, falling back to the
+  checkout layout for manual invocations.
+
 ## [0.2.5] - 2026-09-08
 
 ### Fixed
