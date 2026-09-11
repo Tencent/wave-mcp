@@ -295,7 +295,7 @@ class RtlSource:
 
     # -- cross-hierarchy helpers -----------------------------------------
 
-    #: how many hierarchy hops to follow when a net has no local driver
+    #: how many hops to follow when a net has no local driver or fan-in
     _MAX_HOPS = 4
 
     def _port_direction(self, module_def: Optional[str],
@@ -460,59 +460,73 @@ class RtlSource:
                max_signals: int = 500) -> dict:
         if not self.has_netlist:
             return Unavailable("signal_fanin", "netlist not built").to_dict()
+        res = self._fanin_paths(signal_path, transitive, max_signals, 0, None)
+        if res:
+            return {"available": True, "signal": signal_path,
+                    "fan_in": res}
+        inst, leaf, mod = self._resolve(signal_path)
+        reason, hint = self.engine.classify_empty(inst, leaf, mod, "fanin")
+        return {"available": True, "signal": signal_path,
+                "fan_in": [], "reason": reason, "hint": hint}
+
+    def _fanin_paths(self, signal_path: str, transitive: bool,
+                     max_signals: int, depth: int,
+                     seen: Optional[set]) -> List[str]:
+        """Fan-in as full paths, following boundary nets across the hierarchy.
+
+        A net with no module-local fan-in record is not undriven: it is a
+        boundary net (a struct port such as ``reg2hw``, an aggregated bus,
+        a sub-module output) whose sources sit on the other side of the
+        connection. Report those peer ports instead of an empty answer.
+        """
         inst, leaf, mod = self._resolve(signal_path)
         if not mod or mod not in self.maps["modules"]:
-            reason, hint = self.engine.classify_empty(inst, leaf, mod, "fanin")
-            return {"available": True, "signal": signal_path,
-                    "fan_in": [], "reason": reason, "hint": hint}
+            return []
         fmap = self.maps["modules"][mod].get("fanin", {})
         if not transitive:
             res = fmap.get(leaf, [])
         else:
-            seen, stack = set(), list(fmap.get(leaf, []))
-            while stack and len(seen) < max_signals:
+            known, stack = set(), list(fmap.get(leaf, []))
+            while stack and len(known) < max_signals:
                 s = stack.pop()
-                if s in seen:
+                if s in known:
                     continue
-                seen.add(s)
+                known.add(s)
                 stack.extend(fmap.get(s, []))
-            res = sorted(seen)
-        if not res:
-            # Same asymmetry as drivers(): a net whose cone lives in a
-            # sub-module must follow the connection instead of reporting
-            # "undriven".
-            cross = self._fanin_via_peers(signal_path, transitive,
-                                          max_signals, 0, None)
-            if cross:
-                return cross
-            reason, hint = self.engine.classify_empty(inst, leaf, mod, "fanin")
-            return {"available": True, "signal": signal_path,
-                    "fan_in": [], "reason": reason, "hint": hint}
-        return {"available": True, "signal": signal_path,
-                "fan_in": [self._full(inst, s) for s in res]}
+            res = sorted(known)
+        if res:
+            return [self._full(inst, s) for s in res]
+        return self._fanin_via_peers(signal_path, transitive, max_signals,
+                                     depth, seen)
 
     def _fanin_via_peers(self, signal_path: str, transitive: bool,
                          max_signals: int, depth: int,
-                         seen: Optional[set]) -> Optional[dict]:
+                         seen: Optional[set]) -> List[str]:
+        """Peer ports of a boundary net, one hierarchy hop away.
+
+        Direct mode returns every directly connected peer. Transitive mode
+        returns the peers plus the cone behind each of them, chaining through
+        further boundary hops (bounded by ``_MAX_HOPS`` and ``max_signals``).
+        """
         if depth >= self._MAX_HOPS:
-            return None
+            return []
         seen = set() if seen is None else seen
         seen.add(signal_path)
+        peers = []
         for peer in self._peer_paths(signal_path):
-            if peer in seen:
-                continue
-            sub = self.fan_in(peer, transitive=transitive,
-                              max_signals=max_signals)
-            if sub.get("fan_in"):
-                return {
-                    "available": True,
-                    "signal": signal_path,
-                    "fan_in": sub["fan_in"],
-                    "resolved_via": peer,
-                    "note": (f"no fan-in in this module; followed the "
-                             f"connection to {peer}"),
-                }
-        return None
+            if peer not in seen and peer not in peers:
+                peers.append(peer)
+        if not peers:
+            return []
+        if not transitive:
+            return sorted(set(peers))
+        out = set(peers)
+        for peer in peers:
+            out.update(self._fanin_paths(peer, True, max_signals,
+                                         depth + 1, seen))
+            if len(out) >= max_signals:
+                break
+        return sorted(out)[:max_signals]
 
     def connectivity(self, full_path: str) -> dict:
         if not self.has_netlist:
