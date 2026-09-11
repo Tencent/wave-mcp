@@ -80,6 +80,51 @@ def test_state() -> None:
              if m.get("label") == "first divergence"]
     check("diff auto-marker added once", len(marks) == 1, str(marks))
 
+    # strict time schema: typos and bad values are loud, suffixes normalized
+    st2 = ViewState()
+    st2.update_desired(cursor={"time": "100ns", "unit": "ns"})
+    check("suffixed time normalized",
+          st2.desired["cursor"] == {"time": "100", "unit": "ns"},
+          str(st2.desired["cursor"]))
+    st2.update_desired(cursor={"time": "85ns"})
+    check("suffix derives the unit",
+          st2.desired["cursor"] == {"time": "85", "unit": "ns"},
+          str(st2.desired["cursor"]))
+    try:
+        st2.update_desired(cursor={"time": "85ns", "unit": "ps"})
+        check("suffix/unit conflict rejected", False, "no exception")
+    except ViewStateError as e:
+        check("suffix/unit conflict rejected",
+              "85ns" in str(e) and e.parameter == "cursor", str(e))
+    for bad in ({"time_units": 100}, {"time": None}, {"time": "100.5"},
+                {"time": "100nanoseconds"}, {"time": ""},
+                {"time": "100", "unit": "furlong"}):
+        try:
+            st2.update_desired(cursor=bad)
+            check(f"cursor rejected: {bad!r}", False, "accepted")
+        except ViewStateError:
+            check(f"cursor rejected: {bad!r}", True)
+    try:
+        st2.update_desired(cursor={"time": 100, "time_units": "ns"})
+        check("unknown field not silently ignored", False, "accepted")
+    except ViewStateError as e:
+        check("unknown field not silently ignored",
+              "time_units" in str(e)
+              and getattr(e, "did_you_mean", None) in ("time", "unit"),
+              str(e))
+    for kw in ({"viewport": 5}, {"diff": "abc"}, {"markers": "x"},
+               {"signals": "x"}):
+        try:
+            st2.update_desired(**kw)
+            check(f"type guard {kw}", False, "accepted")
+        except ViewStateError:
+            check(f"type guard {kw}", True)
+    try:
+        st2.update_desired(markers=[{"time": "0"}, {"label": "x"}])
+        check("marker index in error", False, "accepted")
+    except ViewStateError as e:
+        check("marker index in error", "markers[1]" in str(e), str(e))
+
     # validation rejects garbage
     expect_raises("bad color rejected", st.update_desired,
                   signals=[{"path": "x", "color": "pink"}])
@@ -222,6 +267,18 @@ def test_translate() -> None:
     d5 = {"waveform": {"sources": []}, "signals": [], "markers": []}
     check("empty desired -> empty sucl", desired_to_sucl(d5) == "")
 
+    # dropped commands are reported, never silent (defense in depth: the
+    # validated tool path cannot produce these, direct callers can)
+    rep: list = []
+    s_bad = desired_to_sucl({
+        "waveform": {"sources": []},
+        "cursor": {"time": "100", "unit": "furlong"},
+        "markers": [{"time": "100", "unit": "bogus"}],
+    }, -12, report=rep)
+    check("bad unit dropped but reported",
+          "cursor_set" not in s_bad and "marker_set_at" not in s_bad
+          and len(rep) == 2 and any("cursor" in r for r in rep), str(rep))
+
 
 # ----------------------------------------------------- assets/degradation --
 def test_assets() -> None:
@@ -234,7 +291,9 @@ def test_assets() -> None:
 
         hint = unavailable_hint()
         check("degradation payload shape",
-              hint["available"] is False and "pip install" in hint["hint"])
+              hint["available"] is False
+              and hint.get("error_type") == "viewer_unavailable"
+              and "pip install" in hint["hint"], str(hint))
 
         # tool-level degradation via a manager with no assets
         from wave_mcp.viewer.manager import ViewManager
@@ -248,15 +307,81 @@ def test_assets() -> None:
                   "assets installed in env; skipped")
         r = mgr.update_view("nope")
         check("update unknown view: error dict",
-              r["available"] is False)
+              r["status"] == "error" and r["error_type"] == "unknown_view",
+              str(r))
         r = mgr.get_state("nope")
         check("get_state unknown view: error dict",
-              r["available"] is False)
+              r["status"] == "error" and r["error_type"] == "unknown_view",
+              str(r))
     finally:
         if saved is not None:
             os.environ["WAVE_MCP_VIEWER_ASSETS"] = saved
         else:
             os.environ.pop("WAVE_MCP_VIEWER_ASSETS", None)
+
+
+# ---------------------------------------------------- error contract --
+def test_error_contract() -> None:
+    print("\n-- error contract / argument validation --")
+    from wave_mcp.viewer import invalid_argument_payload
+    from wave_mcp.viewer.manager import ViewManager, validate_open_args
+    from wave_mcp.viewer.state import validate_view_inputs
+
+    # pure validators: no viewer process, no assets involved
+    validate_view_inputs(cursor={"time": "100", "unit": "ps"})
+    check("validate_view_inputs accepts a good fragment", True)
+    try:
+        validate_view_inputs(cursor={"time_units": 1})
+        check("validate_view_inputs rejects a typo", False, "accepted")
+    except ViewStateError as e:
+        payload = invalid_argument_payload(e)
+        check("invalid_argument payload shape",
+              payload["status"] == "error"
+              and payload["error_type"] == "invalid_argument"
+              and payload.get("parameter") == "cursor"
+              and "time_units" in payload["error"]
+              and "available" not in payload, str(payload))
+
+    try:
+        validate_open_args(["a.fst", "b.fst", "c.fst"])
+        check("three waveforms rejected", False, "accepted")
+    except ViewStateError as e:
+        check("three waveforms rejected", "at most two" in str(e), str(e))
+    try:
+        validate_open_args(["a.fst"], labels=["x", "y"])
+        check("label count mismatch rejected", False, "accepted")
+    except ViewStateError as e:
+        check("label count mismatch rejected",
+              e.parameter == "labels", str(e))
+    try:
+        validate_open_args([])
+        check("empty fst_paths rejected", False, "accepted")
+    except ViewStateError:
+        check("empty fst_paths rejected", True)
+
+    # open_view answers a bad argument with invalid_argument before anything
+    # is started (no surver, no server); only reachable when assets exist,
+    # because a missing viewer short-circuits with viewer_unavailable.
+    mgr = ViewManager()          # fresh instance, not the singleton
+    if mgr.available:
+        r = mgr.open_view(["/tmp/x.fst"], cursor={"time_units": 1})
+        check("open_view bad cursor -> invalid_argument",
+              r["status"] == "error"
+              and r["error_type"] == "invalid_argument"
+              and r.get("parameter") == "cursor", str(r))
+        r = mgr.open_view(["/tmp/x.fst"], labels=["a", "b"])
+        check("open_view label mismatch -> invalid_argument",
+              r["status"] == "error"
+              and r.get("parameter") == "labels", str(r))
+    else:
+        check("open_view arg-error paths (skipped: no assets)", True)
+
+    from collections import deque
+    from wave_mcp.viewer.surver import _tail_suffix
+    check("surver stderr tail formatting",
+          "boom" in _tail_suffix(deque(["error: boom"]))
+          and _tail_suffix(deque()) == ""
+          and _tail_suffix(deque([""])) == "")
 
 
 # ---------------------------------------------------------- http server --
@@ -456,7 +581,7 @@ def test_lifecycle():
     check("closing last sharer stops surver",
           r["surver_stopped"] is True, str(r))
     check("close_view rejects unknown id",
-          mgr.close_view("nope").get("available") is False)
+          mgr.close_view("nope").get("error_type") == "unknown_view")
 
     # LRU: opening past max_views evicts the oldest
     mgr.open_view([cdc], title="1")
@@ -528,6 +653,7 @@ def main() -> int:
     test_state()
     test_translate()
     test_assets()
+    test_error_contract()
     test_http()
     test_lifecycle()
     test_ports()

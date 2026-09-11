@@ -18,8 +18,72 @@ All notable changes to wave-mcp are documented here. Format follows
   matters most for GB-scale FSDBs, where a conversion costs minutes: whichever
   order you use, it happens once.
 
+### Changed
+
+- **`signal_fanin` now reports every direct peer of a boundary net.** A net
+  with no module-local fan-in record (a struct port such as `reg2hw`, an
+  aggregated bus, a sub-module output) used to resolve to the internal
+  fan-in of one arbitrary peer, one or more levels deeper, so the reply
+  neither matched the hierarchy of `signal_connectivity` nor covered the
+  other branches. Direct mode now returns all directly connected peer
+  ports, and `transitive: true` expands the cone behind each of them;
+  `fan_in` is now a strict subset of `connectivity` for every signal.
+  `signal_drivers` intentionally keeps its record-level answer
+  (kind/file/line/snippet per driver); use it when source locations are
+  what you need.
+
 ### Fixed
 
+- **Viewer parameter mistakes are now actionable and no longer look like an
+  outage.** A cursor passed as `{"time_units": 100}` came back as a generic
+  `available: false` reply whose message named neither the offending field nor
+  the correct shape, and the related `{"time": 100, "time_units": "ns"}` was
+  accepted outright and silently treated as ps. The viewer tools now validate
+  against an allowlist per parameter and return `status: error` with
+  `error_type: invalid_argument`, the failing `parameter`, a `did_you_mean`
+  suggestion, the `expected` shape and an `example`. `available: false` is now
+  reserved for the feature itself being unavailable: missing viewer assets or
+  a surver that cannot start.
+- **Malformed times are rejected instead of dropped later.** Time values must
+  be integer digits with an optional unit suffix (`"1523400"`, `"1523400ps"`);
+  a suffix that conflicts with the declared `unit`, an unknown unit, `None`
+  and fractional values are all errors. Previously these passed state
+  validation and were dropped during command translation, so a view opened
+  without its cursor or marker and said nothing. The suffixed form used by
+  `diff_waveforms` (`first_divergence.time` is `"85ns"`) keeps working and is
+  normalized to `{time, unit}`.
+- **Dropped commands are reported.** `open_wave_view` / `update_wave_view`
+  surface a `warnings` list when a command cannot be generated, so a drop is
+  never silent.
+- **Non-object fragments raise typed errors.** A non-dict `viewport`, `diff`,
+  `signals`, `markers` or `annotations` used to escape as `TypeError` /
+  `AttributeError` past the catch list in the tool layer; they are now
+  `ViewStateError` with the same structured reply.
+- **`labels` and the waveform count are validated.** `labels` must have one
+  entry per waveform and at most two waveforms can be opened; both were
+  silently ignored before.
+- **Analysis tools answer malformed times with the same structured error.**
+  `signal_values_in_range`, `signal_value_at`, `active_drivers`, `trace_value`
+  and `trace_x` no longer raise bare `ValueError`s.
+- **A failed viewer open no longer leaks a surver process.** The reference
+  taken before validation and server setup is released on failure, and surver
+  startup errors now include the last lines of its stderr, which used to be
+  discarded to `/dev/null`.
+- **Viewer asset discovery names the real problem.** An installed but
+  incomplete assets package, or a partial `~/.cache/wave-mcp/viewer`, now
+  produces a hint pointing at the actual directory instead of repeating
+  "pip install wave-mcp[viewer]".
+- **The browser shell survives malformed times and shows state failures.**
+  `bigIntParts` guards its BigInt conversion, and a bad time value can no
+  longer abort a whole state update without a visible sign.
+- **Empty waveform values and extreme times no longer break guard
+  evaluation.** A time past the dump's last change makes FST value lookups
+  return an empty string; branch-guard comparisons crashed on it
+  (`invalid literal for int()`), and `==` guards could read it as equal, a
+  confident wrong answer. Empty now means unknown, so guards stay
+  undecidable and `active_drivers` keeps answering. A time string beyond
+  the 64-bit FST range is rejected with the structured `invalid_argument`
+  reply instead of a raw `OverflowError`.
 - **FSDB support was unreachable for anyone who installed from PyPI.** The
   converter is built on demand because the Verdi FsdbReader runtime cannot be
   redistributed, but the converter sources and the build script were never

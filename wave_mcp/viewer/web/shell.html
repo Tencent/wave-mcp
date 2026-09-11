@@ -59,6 +59,17 @@
   #log-capsule .dot { width: 8px; height: 8px; border-radius: 50%;
                       background: #e06c75; display: none; }
   #log-capsule.unread .dot { display: block; }
+
+  /* ---- error banner: state sync problems must be visible ---- */
+  #wv-error {
+    position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+    z-index: 20; display: none; max-width: 80%;
+    background: rgba(120, 36, 36, 0.95); color: #ffe9e9;
+    border: 1px solid #a05252; border-radius: 8px;
+    padding: 6px 14px; font-size: 12px;
+    box-shadow: 0 4px 16px rgba(0,0,0,.4);
+  }
+  #wv-error.visible { display: block; }
 </style>
 </head>
 <body>
@@ -80,6 +91,7 @@
   </div>
   <div id="log-body"></div>
 </div>
+<div id="wv-error"></div>
 <div id="log-capsule"><span class="dot"></span>Analysis Log</div>
 
 <script src="shell.js"></script>

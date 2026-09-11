@@ -126,12 +126,14 @@ Returns:
 
 Field notes:
 
-- Each `fst_paths` entry can be `.fst`, `.vcd` or `.fsdb`. FST opens directly; VCD / FSDB are converted to FST first. Converted output is cached and shared with `prepare_session`, so a waveform already converted during analysis is not converted again here. Any other extension (`.ghw`, `.vpd`, an SHM directory) returns `{"available": false, "error": …, "hint": …}` at the entry point, listing the supported formats.
+- Each `fst_paths` entry can be `.fst`, `.vcd` or `.fsdb`, one or two in total (two open a comparison view). FST opens directly; VCD / FSDB are converted to FST first. Converted output is cached and shared with `prepare_session`, so a waveform already converted during analysis is not converted again here. Any other extension (`.ghw`, `.vpd`, an SHM directory) returns `{"status": "error", "error_type": "unsupported_format", "error": …, "hint": …}` at the entry point, listing the supported formats.
 - Each `signals` entry is `{path, color?, group?, format?, source?}`. In compare views, `source: "a"/"b"` assigns a signal to one waveform; by default it is added to both.
 - Prefer a short ASCII word for `group`. The heading is drawn in Surfer's WASM canvas, whose font carries no CJK glyphs, so a non-ASCII name renders as boxes (the grouping itself still works). Spaces are folded to underscores automatically: the sucl parser rejects a parameter containing whitespace and would silently drop the whole heading. Put prose in `annotation`, which accepts any language.
-- The `diff` parameter takes a `diff_waveforms` result reference `{source_a, source_b, first_divergence}` and automatically places a red marker at the first divergence, no manual conversion needed.
-- `labels` names each waveform, same as the CLI `--labels`.
-- Missing assets, a surver that fails to start, an unsupported format and a failed conversion all return `{"available": false, "hint": …}` instead of raising.
+- The `diff` parameter takes a `diff_waveforms` result reference `{source_a, source_b, first_divergence}` (these three fields only) and automatically places a red marker at the first divergence, no manual conversion needed; `first_divergence` can be passed back verbatim, and a suffixed time like `"85ns"` is normalized.
+- `labels` names each waveform, same as the CLI `--labels`, one entry per waveform.
+- Time fields are strict `{"time": "1523400", "unit": "ps"}` objects: `time` is a string of integer digits (a suffixed form like `"1523400ps"` is also accepted and normalized) and `unit` is one of `s / ms / us / ns / ps / fs`, default `ps`; `viewport` uses `{from, to, unit}`. Unknown fields, unknown units, a suffix conflicting with `unit` and non-integer time values are all rejected with the correct form spelled out, never silently ignored or defaulted.
+- Every failure carries `status: "error"` and an `error_type` instead of raising: a malformed parameter is `invalid_argument` with `parameter`, `did_you_mean` (when a typo is detected) and `expected` / `example`; waveform-file problems are `file_not_found` / `unsupported_format` / `conversion_failed`; only an unusable feature returns `available: false` with a hint (`viewer_unavailable` for missing assets, `surver_error` for a surver that cannot start).
+- `open_wave_view` / `update_wave_view` return a `warnings` list when a command had to be dropped, naming what was dropped and why; a drop is no longer silent.
 
 ### 4.2 update_wave_view
 
@@ -279,7 +281,7 @@ Key design choices:
 - **Target only Surfer's stable command layer** (startup commands) plus runtime message injection; deliberately avoid depending on GUI internals, keeping the adaptation surface minimal across Surfer upgrades.
 - **Secure by default**: surver and ViewerServer listen on 127.0.0.1 only, URLs carry a random token, and remote access goes explicitly through SSH port forwarding. No bare port is ever exposed.
 - **Lifecycle tied to the host process**: when the MCP server or CLI exits, all surver children are reaped together; no orphan processes.
-- **Graceful degradation**: missing assets, surver startup failure or an unknown view_id all return a structured `available: false` with an actionable hint; the analysis tools are never dragged down.
+- **Graceful degradation**: missing assets or a surver that cannot start return a structured `available: false` with an actionable hint (`viewer_unavailable` / `surver_error`); an unknown view_id returns `unknown_view` and malformed parameters are reported as `invalid_argument` with a fix suggestion. The analysis tools are never dragged down.
 
 Code lives in [wave_mcp/viewer/](../wave_mcp/viewer/) (`manager.py` view orchestration, `surver.py` subprocess management, `server.py` local HTTP, `state.py` dual-state model, `translate.py` Surfer command translation, `web/` the frontend shell); the MCP tools are registered in [wave_mcp/server.py](../wave_mcp/server.py).
 

@@ -86,6 +86,10 @@ def main() -> int:
                           "confidence": "high",
                           "evidence": ["e1", "e2"]}])
         check("A: view opened", res.get("available"), str(res))
+        bad = mgr.open_view([fst_fail], cursor={"time_units": 1})
+        check("A: bad cursor rejected with guidance",
+              bad.get("error_type") == "invalid_argument"
+              and "time_units" in bad.get("error", ""), str(bad))
         page = browser.new_page(viewport={"width": 1500, "height": 800})
         page.on("console", lambda m: console.append(m.text[:200]))
         page.goto(res["url"], wait_until="domcontentloaded", timeout=45000)

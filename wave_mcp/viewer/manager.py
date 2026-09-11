@@ -11,8 +11,9 @@ import secrets
 import time
 from typing import Any, Dict, List, Optional
 
-from . import find_assets, shell_web_dir, unavailable_hint
-from .state import ViewState
+from . import (find_assets, invalid_argument_payload, shell_web_dir,
+               unavailable_hint)
+from .state import ViewState, ViewStateError, validate_view_inputs
 from .surver import SurverManager
 from .server import ViewerServer
 from .translate import desired_to_sucl
@@ -34,6 +35,28 @@ def _fst_meta(path: str):
     except Exception:
         return None, None
 
+def validate_open_args(fst_paths: List[str],
+                       labels: Optional[List[str]] = None) -> None:
+    """Reject open-wave-view argument mistakes before any process starts.
+
+    The viewer shows one waveform, or two as a comparison. A third waveform
+    would silently not be shown, and a ``labels`` list whose length did not
+    match used to be ignored entry by entry, so both are validated here and
+    reported instead. Pure function: nothing is started, which also keeps it
+    directly testable without viewer assets."""
+    n = len(fst_paths)
+    if n < 1:
+        raise ViewStateError("fst_paths must contain at least one waveform "
+                             "path", parameter="fst_paths")
+    if n > 2:
+        raise ViewStateError(
+            f"{n} waveform paths were given; the viewer shows at most two "
+            "(one plain view, or two as a comparison)",
+            parameter="fst_paths")
+    if labels and len(labels) != n:
+        raise ViewStateError(
+            f"labels has {len(labels)} entries but there are {n} waveform(s);"
+            " one label per waveform is required", parameter="labels")
 
 class ViewManager:
     _instance: Optional["ViewManager"] = None
@@ -69,6 +92,26 @@ class ViewManager:
 
     # -- public API ------------------------------------------------------
 
+    def _release_surver(self, surver: Any) -> None:
+        """Return the reference get_or_start took for a view that never opened.
+
+        get_or_start increments the refcount before the view exists, so an
+        abandoned open used to leak a surver process (and its port) until the
+        owning process exited. Best effort: cleanup must never mask the real
+        error."""
+        try:
+            self._surver().release(surver)
+        except Exception:
+            pass
+
+    def _cleanup_failed_open(self, surver: Any, server: Any) -> None:
+        if server is not None:
+            try:
+                server.stop()
+            except Exception:
+                pass
+        self._release_surver(surver)
+
     def open_view(
         self,
         fst_paths: List[str],
@@ -85,42 +128,63 @@ class ViewManager:
         if not self.available:
             return unavailable_hint()
 
+        # Argument mistakes are answered before anything is started, with the
+        # parameter named. This keeps a typo from spinning up a surver (or
+        # from failing silently), and must run before any side effect.
+        try:
+            validate_open_args(list(fst_paths or []), labels)
+            validate_view_inputs(signals=signals, cursor=cursor,
+                                 viewport=viewport, markers=markers,
+                                 diff=diff, annotations=annotations)
+        except ViewStateError as exc:
+            return invalid_argument_payload(exc)
+
         from .surver import SurverError
         try:
             surver = self._surver().get_or_start(fst_paths)
         except SurverError as exc:
-            return {"available": False, "feature": "wave viewer",
-                    "error": str(exc),
+            return {"status": "error", "available": False,
+                    "error_type": "surver_error", "error": str(exc),
                     "hint": "surver failed to start; check the waveform "
                             "paths and that the surver binary is executable "
                             "(chmod +x) and runs on this host"}
 
         state = ViewState()
-        sources = []
-        for i, p in enumerate(surver.fst_paths):   # resolved absolute paths
-            end_time, ts = _fst_meta(p)
-            entry = {
-                "id": chr(ord("a") + i),
-                "path": p,
-                "label": (labels[i] if labels and i < len(labels) else ""),
-                "end_time": end_time,
-            }
-            if ts is not None:
-                entry["timescale_exp"] = ts
-            sources.append(entry)
-        state.set_sources(sources)
-        state.update_desired(signals=signals, cursor=cursor,
-                             viewport=viewport, markers=markers,
-                             diff=diff, annotations=annotations)
+        server = None
+        try:
+            sources = []
+            for i, p in enumerate(surver.fst_paths):   # resolved absolute paths
+                end_time, ts = _fst_meta(p)
+                entry = {
+                    "id": chr(ord("a") + i),
+                    "path": p,
+                    "label": (labels[i] if labels and i < len(labels) else ""),
+                    "end_time": end_time,
+                }
+                if ts is not None:
+                    entry["timescale_exp"] = ts
+                sources.append(entry)
+            state.set_sources(sources)
+            state.update_desired(signals=signals, cursor=cursor,
+                                 viewport=viewport, markers=markers,
+                                 diff=diff, annotations=annotations)
 
-        server = ViewerServer(
-            wasm_dir=self.assets["wasm"],
-            shell_dir=shell_web_dir(),
-            surver_base=surver.base_url,
-            state=state,
-            token=surver.token,
-        )
-        server.start()
+            server = ViewerServer(
+                wasm_dir=self.assets["wasm"],
+                shell_dir=shell_web_dir(),
+                surver_base=surver.base_url,
+                state=state,
+                token=surver.token,
+            )
+            server.start()
+        except ViewStateError as exc:
+            # Already validated above; kept for safety so a failure here can
+            # never strand the surver reference or leave a half-open view.
+            self._cleanup_failed_open(surver, server)
+            return invalid_argument_payload(exc)
+        except Exception:
+            self._cleanup_failed_open(surver, server)
+            raise
 
         view_id = secrets.token_hex(4)
         url = f"{server.base_url}/view.html?token={surver.token}"
@@ -135,7 +199,7 @@ class ViewManager:
             "fst_paths": list(surver.fst_paths),
         }
         self._evict_if_needed(keep=view_id)
-        return {
+        out = {
             "available": True,
             "view_id": view_id,
             "url": url,
@@ -143,24 +207,35 @@ class ViewManager:
             "ssh_hint": (f"ssh -L {server.port}:localhost:{server.port} "
                          f"<this-host>  # then open {url}"),
         }
+        if state.warnings:
+            out["warnings"] = list(state.warnings)
+        return out
 
     def update_view(self, view_id: str, **kwargs) -> Dict[str, Any]:
         if not self.available:
             return unavailable_hint()
         view = self._views.get(view_id)
         if view is None:
-            return {"available": False, "error": f"unknown view_id {view_id}",
+            return {"status": "error", "error_type": "unknown_view",
+                    "error": f"unknown view_id {view_id}",
                     "known_views": list(self._views)}
-        rev = view["state"].update_desired(**kwargs)
-        return {"available": True, "view_id": view_id, "revision": rev,
-                "url": view["url"]}
+        try:
+            rev = view["state"].update_desired(**kwargs)
+        except ViewStateError as exc:
+            return invalid_argument_payload(exc)
+        out = {"available": True, "view_id": view_id, "revision": rev,
+               "url": view["url"]}
+        if view["state"].warnings:
+            out["warnings"] = list(view["state"].warnings)
+        return out
 
     def get_state(self, view_id: str) -> Dict[str, Any]:
         if not self.available:
             return unavailable_hint()
         view = self._views.get(view_id)
         if view is None:
-            return {"available": False, "error": f"unknown view_id {view_id}",
+            return {"status": "error", "error_type": "unknown_view",
+                    "error": f"unknown view_id {view_id}",
                     "known_views": list(self._views)}
         snap = view["state"].snapshot()
         return {
@@ -211,7 +286,8 @@ class ViewManager:
             return unavailable_hint()
         view = self._views.pop(view_id, None)
         if view is None:
-            return {"available": False, "error": f"unknown view_id {view_id}",
+            return {"status": "error", "error_type": "unknown_view",
+                    "error": f"unknown view_id {view_id}",
                     "known_views": list(self._views)}
         errors = []
         try:

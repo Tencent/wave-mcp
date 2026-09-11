@@ -119,6 +119,13 @@ def _valid(root: Path) -> bool:
 #: user who did configure the env var to "set WAVE_MCP_VIEWER_ASSETS".
 _env_miss: Optional[str] = None
 
+#: Why the installed assets package / the user cache was rejected, if either
+#: was found but incomplete. Without these, a user whose pip package was
+#: installed but broken was told to "pip install wave-mcp[viewer]" again,
+#: which pointed away from the actual problem.
+_pip_miss: Optional[str] = None
+_cache_miss: Optional[str] = None
+
 def _record_env_miss(raw: str, resolved: Path) -> None:
     global _env_miss
     detail = f"WAVE_MCP_VIEWER_ASSETS={raw!r}"
@@ -130,9 +137,9 @@ def _record_env_miss(raw: str, resolved: Path) -> None:
         detail += " is missing surver and/or wasm/index.html"
     _env_miss = detail
 
-
 def find_assets() -> Optional[Dict[str, Any]]:
     """Locate viewer assets; return {root, surver, wasm, origin} or None."""
+    global _pip_miss, _cache_miss
     # 1. explicit env (air-gapped bundle)
     env = os.environ.get("WAVE_MCP_VIEWER_ASSETS")
     if env:
@@ -153,12 +160,17 @@ def find_assets() -> Optional[Dict[str, Any]]:
         root = Path(wave_mcp_viewer_assets.__file__).parent / "data"
         if _valid(root):
             return _hit(root, "pip")
+        _pip_miss = (f"the installed viewer assets package at {root} is "
+                     "missing surver and/or wasm/index.html")
     except ImportError:
         pass
 
     # 3. user cache (first-run download target)
     if _valid(_CACHE_DIR):
         return _hit(_CACHE_DIR, "cache")
+    if _CACHE_DIR.exists():
+        _cache_miss = (f"the cached viewer assets at {_CACHE_DIR} are "
+                       "incomplete (need surver and wasm/index.html)")
 
     return None
 
@@ -173,13 +185,30 @@ def _hit(root: Path, origin: str) -> Dict[str, Any]:
 
 
 def unavailable_hint() -> Dict[str, Any]:
-    """Uniform degradation payload, style-aligned with _no_waveform."""
+    """Uniform degradation payload, style-aligned with _no_waveform.
+
+    ``available: false`` is reserved for the viewer feature itself being
+    unusable; parameter mistakes return ``invalid_argument_payload`` instead,
+    so a typo never reads as an outage."""
     if _env_miss:
         hint = (
             f"viewer assets not found: {_env_miss}. Point "
             "WAVE_MCP_VIEWER_ASSETS at a directory containing `surver` and "
             "`wasm/index.html` (use an absolute path), or install with "
             "`pip install wave-mcp[viewer]`. Analysis tools are unaffected."
+        )
+    elif _pip_miss:
+        hint = (
+            f"viewer assets not usable: {_pip_miss}. Reinstall with "
+            "`pip install --force-reinstall wave-mcp[viewer]`, or point "
+            "WAVE_MCP_VIEWER_ASSETS at a complete asset directory. Analysis "
+            "tools are unaffected."
+        )
+    elif _cache_miss:
+        hint = (
+            f"viewer assets not usable: {_cache_miss}. Delete that directory "
+            "and reinstall `wave-mcp[viewer]` to re-download, or set "
+            "WAVE_MCP_VIEWER_ASSETS. Analysis tools are unaffected."
         )
     else:
         hint = (
@@ -189,10 +218,30 @@ def unavailable_hint() -> Dict[str, Any]:
             f"assets under {_CACHE_DIR}. Analysis tools are unaffected."
         )
     return {
+        "status": "error",
         "available": False,
+        "error_type": "viewer_unavailable",
         "feature": "wave viewer",
         "hint": hint,
     }
+
+def invalid_argument_payload(exc: BaseException) -> Dict[str, Any]:
+    """Structured reply for a rejected viewer request.
+
+    Format aligned with the other tools ("status" plus "error"), extended
+    with the failing ``parameter`` and whatever the validator can offer:
+    ``did_you_mean`` for a typo, ``expected`` / ``example`` for a time or
+    shape problem. ``available`` is deliberately absent here: it answers
+    whether the viewer works, and a malformed argument says nothing about
+    that."""
+    out: Dict[str, Any] = {"status": "error",
+                           "error_type": "invalid_argument",
+                           "error": str(exc)}
+    for key in ("parameter", "did_you_mean", "expected", "example"):
+        val = getattr(exc, key, None)
+        if val is not None:
+            out[key] = val
+    return out
 
 
 def shell_web_dir() -> str:

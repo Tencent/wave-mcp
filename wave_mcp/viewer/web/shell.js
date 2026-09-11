@@ -35,16 +35,24 @@
 
   function bigIntParts(numStr) {
     // Surfer's num::BigInt serializes as (sign, [u32 little-endian digits])
-    var n = BigInt(numStr);
-    var sign = n < 0n ? -1 : 1;
-    if (n < 0n) n = -n;
-    var digits = [];
-    while (n > 0n) {
-      digits.push(Number(n & 0xFFFFFFFFn));
-      n >>= 32n;
+    // A malformed time (never produced by the validated tool path, but the
+    // shell is also reachable over plain HTTP) must not abort the whole
+    // state update: return null and let call sites skip that injection.
+    try {
+      var n = BigInt(numStr);
+      var sign = n < 0n ? -1 : 1;
+      if (n < 0n) n = -n;
+      var digits = [];
+      while (n > 0n) {
+        digits.push(Number(n & 0xFFFFFFFFn));
+        n >>= 32n;
+      }
+      if (digits.length === 0) digits.push(0);
+      return [sign, digits];
+    } catch (e) {
+      console.warn("wave-mcp viewer: bad time value", numStr, e);
+      return null;
     }
-    if (digits.length === 0) digits.push(0);
-    return [sign, digits];
   }
 
   function injectTo(fr, obj) {
@@ -157,8 +165,10 @@
   // ---- flicker-free runtime navigation --------------------------------
 
   function jumpCursor(time) {
-    inject({ CursorSet: bigIntParts(time) });
-    inject({ GoToTime: [bigIntParts(time), 0] });
+    var parts = bigIntParts(time);
+    if (!parts) return;      // malformed value: skip, never abort the batch
+    inject({ CursorSet: parts });
+    inject({ GoToTime: [parts, 0] });
   }
 
   function applyNavigation(desired) {
@@ -170,15 +180,18 @@
     // viewport
     var vp = desired.viewport;
     if (vp && vp.from !== undefined && vp.to !== undefined) {
-      inject({ ZoomToRange: { start: bigIntParts(vp.from),
-                              end: bigIntParts(vp.to),
-                              viewport_idx: 0 } });
+      var from = bigIntParts(vp.from);
+      var to = bigIntParts(vp.to);
+      if (from && to) {
+        inject({ ZoomToRange: { start: from, end: to, viewport_idx: 0 } });
+      }
     }
     // markers: SetMarker is idempotent per id
     var marks = desired.markers || [];
     for (var i = 0; i < marks.length; i++) {
-      inject({ SetMarker: { id: i + 1,
-                            time: bigIntParts(marks[i].time) } });
+      var mt = bigIntParts(marks[i].time);
+      if (!mt) continue;     // skip this marker, keep the rest
+      inject({ SetMarker: { id: i + 1, time: mt } });
     }
   }
 
@@ -200,7 +213,37 @@
                            desired.markers]);
   }
 
+  function showError(msg) {
+    var el = document.getElementById("wv-error");
+    if (!el) return;
+    el.textContent = msg;
+    el.classList.add("visible");
+  }
+
+  function clearError() {
+    var el = document.getElementById("wv-error");
+    if (el) el.classList.remove("visible");
+  }
+
+  // Last-resort visibility: an unexpected script error must not leave a
+  // silently stale page.
+  window.addEventListener("error", function (e) {
+    showError("viewer script error: " + (e.message || "unknown"));
+  });
+
   function applySnapshot(snap) {
+    try {
+      applySnapshotInner(snap);
+    } catch (e) {
+      // A throw mid-apply used to drop the whole update with no visible
+      // sign (the poll loop just retried and threw again). Show it and
+      // keep the loop alive.
+      showError("state update failed: " + e.message);
+      console.warn("wave-mcp viewer: applySnapshot failed", e);
+    }
+  }
+
+  function applySnapshotInner(snap) {
     // Some embedded browsers (IDE preview panes) drop the query string on
     // navigation, which used to leave the shell with an empty token, a
     // /surver/ URL that 404s and a permanently blank viewer. The server
@@ -251,9 +294,15 @@
       .then(function (r) { return r.json(); })
       .then(function (snap) {
         applySnapshot(snap);
+        clearError();
         setTimeout(poll, 200);
       })
-      .catch(function () { setTimeout(poll, 2000); });
+      .catch(function () {
+        // Backend unreachable (server stopped, port forward dropped): say so
+        // instead of polling a dead endpoint in silence forever.
+        showError("viewer backend unreachable; retrying...");
+        setTimeout(poll, 2000);
+      });
   }
 
   // ---- actual write-back (bidirectional awareness) ---------------------
@@ -358,9 +407,12 @@
         var key = from + ":" + to + ":" + (cm ? cm[2] : "");
         if (key !== lastSync && to > from) {
           lastSync = key;
-          injectTo(frameB, { ZoomToRange: {
-            start: bigIntParts(String(Math.max(0, from))),
-            end: bigIntParts(String(to)), viewport_idx: 0 } });
+          var zFrom = bigIntParts(String(Math.max(0, from)));
+          var zTo = bigIntParts(String(to));
+          if (zFrom && zTo) {
+            injectTo(frameB, { ZoomToRange: {
+              start: zFrom, end: zTo, viewport_idx: 0 } });
+          }
           if (cm) {
             var digits = cm[2].split(",").map(function (x) {
               return x.trim();
@@ -369,7 +421,8 @@
             for (var i = digits.length - 1; i >= 0; i--) {
               val = (val << 32n) + BigInt(digits[i]);
             }
-            injectTo(frameB, { CursorSet: bigIntParts(val.toString()) });
+            var cB = bigIntParts(val.toString());
+            if (cB) injectTo(frameB, { CursorSet: cB });
           }
         }
       }
@@ -382,5 +435,8 @@
   fetch("/api/view-state")
     .then(function (r) { return r.json(); })
     .then(function (snap) { applySnapshot(snap); poll(); })
-    .catch(function () { setTimeout(function () { location.reload(); }, 3000); });
+    .catch(function () {
+      showError("viewer backend not reachable; reloading...");
+      setTimeout(function () { location.reload(); }, 3000);
+    });
 })();

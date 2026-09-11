@@ -29,7 +29,12 @@ _LIT_RE = re.compile(r"^\s*(\d+)?\s*'\s*([sS]?)([bodhBODH])\s*([0-9a-fA-FxXzZ_]+
 def _norm(bits: Optional[str]) -> Optional[str]:
     if bits is None:
         return None
-    return bits.strip().lower().replace("_", "")
+    s = bits.strip().lower().replace("_", "")
+    # The FST layer returns an empty string when the waveform holds no value
+    # for a signal at the requested time (e.g. the time lies past the dump's
+    # last change). That is "unknown", not a value: map it to None so guards
+    # stay undecidable instead of crashing or answering confidently.
+    return s or None
 
 
 def parse_literal(lit: str) -> Optional[str]:

@@ -126,12 +126,14 @@ open_wave_view({
 
 字段要点：
 
-- `fst_paths` 每项可以是 `.fst`、`.vcd` 或 `.fsdb`。FST 直接打开，VCD / FSDB 先转成 FST 再打开，转换产物带缓存并与 `prepare_session` 共用，所以分析阶段已经转过的波形在这里不会再转一遍。其他扩展名（`.ghw`、`.vpd`、SHM 目录等）在入口直接返回 `{"available": false, "error": …, "hint": …}` 并列出支持的格式。
+- `fst_paths` 每项可以是 `.fst`、`.vcd` 或 `.fsdb`，最多两份（一份普通视图，两份对比视图）。FST 直接打开，VCD / FSDB 先转成 FST 再打开，转换产物带缓存并与 `prepare_session` 共用，所以分析阶段已经转过的波形在这里不会再转一遍。其他扩展名（`.ghw`、`.vpd`、SHM 目录等）在入口直接返回 `{"status": "error", "error_type": "unsupported_format", "error": …, "hint": …}` 并列出支持的格式。
 - `signals` 每项 `{path, color?, group?, format?, source?}`；对比视图里用 `source: "a"/"b"` 指定信号属于哪份波形，缺省两边都加。
 - `group` 建议用简短的 ASCII 词。分组标题画在 Surfer 的 WASM 画布里，字体不含 CJK 字形，写中文会显示成方块（分组本身照常生效）。名字里的空格会自动折成下划线，因为 sucl 解析器不接受带空格的参数，原样发过去整条分组标题会被静默丢弃。想写中文说明放到 `annotation` 里，那里不限语言。
-- `diff` 参数直接接 `diff_waveforms` 的结果引用 `{source_a, source_b, first_divergence}`，自动在首分歧时刻打红色 marker，不用手动换算。
-- `labels` 给每份波形起显示名，与 CLI 的 `--labels` 一致。
-- 资产缺失、surver 启动失败、格式不支持或转换失败时都返回 `{"available": false, "hint": …}`，不抛错。
+- `diff` 参数直接接 `diff_waveforms` 的结果引用 `{source_a, source_b, first_divergence}`（只认这三个字段），自动在首分歧时刻打红色 marker，不用手动换算；`first_divergence` 原样回填即可，`"85ns"` 这类带后缀的时间会被规范化。
+- `labels` 给每份波形起显示名，与 CLI 的 `--labels` 一致；数量必须与波形数一致。
+- 时间字段是严格的 `{"time": "1523400", "unit": "ps"}` 对象：`time` 为整数字符串（`"1523400ps"` 这种带单位后缀的写法同样接受并自动规范化），`unit` 取 `s / ms / us / ns / ps / fs`，缺省 `ps`；`viewport` 用 `{from, to, unit}`。未知字段、未知单位、后缀与 `unit` 冲突、非整数的时间值都会被拒绝并指出正确写法，不会静默忽略或落到默认值。
+- 失败时都返回 `status: "error"` 和 `error_type`，不抛错：参数写错是 `invalid_argument`，附 `parameter`（哪个参数）、`did_you_mean`（能给出时）、`expected` / `example`（正确写法）；波形文件问题分别是 `file_not_found` / `unsupported_format` / `conversion_failed`；功能不可用才返回 `available: false` 加 hint（资产缺失 `viewer_unavailable`、surver 起不来 `surver_error`）。
+- 打开或更新时，若有命令因故未能生成，返回值里会带 `warnings` 列表说明丢弃了什么、为什么，不再静默。
 
 ### 4.2 update_wave_view
 
@@ -291,7 +293,7 @@ ViewManager（单例，view_id 注册表）
 - **只面向 Surfer 的稳定命令层**（startup commands）加运行时消息注入，刻意不依赖 GUI 内部结构，将来升级 Surfer 版本时适配面最小。
 - **安全默认**：surver 与 ViewerServer 都只监听 127.0.0.1，URL 带随机 token，远程访问显式走 SSH 端口转发，不存在裸端口暴露。
 - **生命周期与宿主绑定**：MCP server 或 CLI 进程退出时所有 surver 子进程统一回收，不留孤儿进程。
-- **优雅降级**：资产缺失、surver 启动失败、view_id 不存在，一律返回结构化的 `available: false` 加可执行的 hint，分析工具永不受牵连。
+- **优雅降级**：资产缺失或 surver 启动失败返回结构化的 `available: false` 加可执行 hint（`viewer_unavailable` / `surver_error`）；view_id 不存在返回 `unknown_view`，参数写错返回 `invalid_argument` 并附修正建议；分析工具永不受牵连。
 
 代码位置：[wave_mcp/viewer/](../wave_mcp/viewer/)（`manager.py` 视图编排、`surver.py` 子进程管理、`server.py` 本地 HTTP、`state.py` 双状态模型、`translate.py` Surfer 命令翻译、`web/` 前端 shell），MCP 工具注册在 [wave_mcp/server.py](../wave_mcp/server.py)。
 

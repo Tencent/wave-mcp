@@ -7,9 +7,11 @@ on exit, matching the zero-ops philosophy of the stdio deployment mode.
 from __future__ import annotations
 
 import atexit
+import collections
 import secrets
 import socket
 import subprocess
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -42,6 +44,18 @@ def _free_port(exclude: Optional[Sequence[int]] = None) -> int:
     from . import alloc_port
     return alloc_port(exclude=exclude)
 
+def _tail_suffix(tail: "collections.deque") -> str:
+    """Format the last captured stderr lines for an error message.
+
+    surver's stderr used to go to DEVNULL, so a failed start surfaced as a
+    bare exit code and the real cause (missing library, bad permissions)
+    stayed invisible. A drain thread keeps the last lines; this renders up to
+    three of them."""
+    lines = [ln for ln in list(tail)[-3:] if ln.strip()]
+    if not lines:
+        return ""
+    return "; stderr: " + " | ".join(lines)
+
 
 class SurverInstance:
     def __init__(self, binary: str, fst_paths: List[str]) -> None:
@@ -58,10 +72,43 @@ class SurverInstance:
         # socket makes the child's own bind fail with EADDRINUSE. So the race
         # is handled where it actually materialises: if the child fails to
         # come up, retire that port and retry on a different one.
+        self._tail: "collections.deque[str]" = collections.deque(maxlen=40)
         proc, port = self._spawn_with_retry(binary)
         self.port = port
         self.proc = proc
         self._wait_ready()
+
+    def _spawn(self, binary: str, port: int):
+        """Start surver on ``port``; capture a bounded stderr tail.
+
+        stderr used to go to DEVNULL, so a failed start surfaced only as an
+        exit code and the real cause stayed invisible. A daemon drain thread
+        keeps the last lines without ever blocking the child (a full pipe
+        would stall it); the deque is bounded so a chatty child cannot grow
+        it without limit."""
+        proc = subprocess.Popen(
+            [binary, "--port", str(port), "--bind-address", "127.0.0.1",
+             "--token", self.token, *self.fst_paths],
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            text=True, errors="replace",
+            preexec_fn=_die_with_parent,
+        )
+        tail: "collections.deque[str]" = collections.deque(maxlen=40)
+
+        def _drain() -> None:
+            try:
+                for line in iter(proc.stderr.readline, ""):
+                    tail.append(line.rstrip())
+            except Exception:
+                pass
+            finally:
+                try:
+                    proc.stderr.close()
+                except Exception:
+                    pass
+
+        threading.Thread(target=_drain, daemon=True).start()
+        return proc, tail
 
     def _spawn_with_retry(self, binary: str, attempts: int = 4):
         """Start surver, retrying on a fresh port when a spawn fails.
@@ -79,12 +126,7 @@ class SurverInstance:
         for i in range(attempts):
             port = _free_port(exclude=retired)
             try:
-                proc = subprocess.Popen(
-                    [binary, "--port", str(port), "--bind-address", "127.0.0.1",
-                     "--token", self.token, *self.fst_paths],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                    preexec_fn=_die_with_parent,
-                )
+                proc, tail = self._spawn(binary, port)
             except OSError as exc:
                 last_exc = exc
                 retired.append(port)
@@ -99,16 +141,18 @@ class SurverInstance:
                 if proc.poll() is not None:
                     break
                 if self._surver_ready(port):
+                    self._tail = tail
                     return proc, port
                 time.sleep(0.05)
             if proc.poll() is not None:
                 last_exc = SurverError(
                     f"surver exited early (code {proc.returncode}) "
-                    f"on port {port}")
+                    f"on port {port}{_tail_suffix(tail)}")
                 retired.append(port)
                 continue
             # still running but not answering yet: let _wait_ready give it
             # the full timeout rather than restarting on a fresh port
+            self._tail = tail
             return proc, port
         raise last_exc or SurverError("could not start surver on any port")
 
@@ -135,9 +179,10 @@ class SurverInstance:
         while time.time() < deadline:
             if self.proc.poll() is not None:
                 raise SurverError(
-                    f"surver exited early (code {self.proc.returncode}); "
-                    "check that the binary is executable (chmod +x) and that "
-                    "the waveform files are readable and intact")
+                    f"surver exited early (code {self.proc.returncode})"
+                    f"{_tail_suffix(self._tail)}; check that the binary is "
+                    "executable (chmod +x) and that the waveform files are "
+                    "readable and intact")
             try:
                 with urllib.request.urlopen(url, timeout=2) as r:
                     if r.status == 200:
@@ -145,7 +190,8 @@ class SurverInstance:
             except OSError:
                 time.sleep(0.2)
         self.stop()
-        raise SurverError("surver did not become ready in time")
+        raise SurverError("surver did not become ready in time"
+                          + _tail_suffix(self._tail))
 
     def alive(self) -> bool:
         return self.proc.poll() is None

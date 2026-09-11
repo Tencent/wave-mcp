@@ -634,20 +634,31 @@ def signal_values_in_range(full_path: str, start_time_as_string: str,
                                     end_time_as_string: str,
                                     max_number_of_values: int = 5000,
                                     session_id: Optional[str] = None) -> dict[str, Any]:
-    """Get value changes of a signal within [start, end] (e.g. "100ns".."500ns")."""
+    """Get value changes of a signal within [start, end] (e.g. "100ns".."500ns").
+
+    A malformed time string is answered with a structured invalid_argument
+    error naming the parameter instead of raising.
+    """
     s = _sess(session_id)
     if s.fst is None:
         return _no_waveform("signal_values_in_range")
     exp = s.fst.timescale_exp
-    start = (s.fst.start_time if start_time_as_string in ("min", "")
-             else timeutil.time_to_fst_units(start_time_as_string, exp))
-    end = (s.fst.end_time if end_time_as_string in ("max", "")
-           else timeutil.time_to_fst_units(end_time_as_string, exp))
+    try:
+        start = (s.fst.start_time if start_time_as_string in ("min", "")
+                 else timeutil.time_to_fst_units(start_time_as_string, exp))
+    except ValueError as exc:
+        return {"status": "error", "error_type": "invalid_argument",
+                "error": str(exc), "parameter": "start_time_as_string"}
+    try:
+        end = (s.fst.end_time if end_time_as_string in ("max", "")
+               else timeutil.time_to_fst_units(end_time_as_string, exp))
+    except ValueError as exc:
+        return {"status": "error", "error_type": "invalid_argument",
+                "error": str(exc), "parameter": "end_time_as_string"}
     rows = s.fst.values_between(full_path, start, end, max_number_of_values)
     if rows is None:
         return {"error": f"signal not found: {full_path}"}
     return {"count": len(rows), "values": rows}
-
 
 @mcp.tool()
 def signal_value_at(full_path: str, time_as_string: str,
@@ -656,13 +667,18 @@ def signal_value_at(full_path: str, time_as_string: str,
 
     Unlike ``signal_values_in_range`` which returns all changes, this returns a
     single value: the signal's value held at exactly that time (last change at
-    or before the time point).
+    or before the time point). A malformed time string is answered with a
+    structured invalid_argument error instead of raising.
     """
     s = _sess(session_id)
     if s.fst is None:
         return _no_waveform("signal_value_at")
     exp = s.fst.timescale_exp
-    t = timeutil.time_to_fst_units(time_as_string, exp)
+    try:
+        t = timeutil.time_to_fst_units(time_as_string, exp)
+    except ValueError as exc:
+        return {"status": "error", "error_type": "invalid_argument",
+                "error": str(exc), "parameter": "time_as_string"}
     val = s.fst.value_at(full_path, t)
     if val is None:
         return {"error": f"signal not found: {full_path}"}
@@ -695,6 +711,11 @@ def signal_fanin(signal_path: str, transitive: bool = False,
                  session_id: Optional[str] = None) -> dict[str, Any]:
     """Get all signals that can affect the given signal (fan-in; needs UHDM).
 
+    Boundary nets (struct ports such as ``reg2hw``, aggregated buses,
+    sub-module outputs) resolve to the peer ports one hop away; direct mode
+    returns every peer, transitive mode the cone behind each. For source
+    locations rather than signal names use signal_drivers.
+
     Args:
         transitive: if True, recursively expand fan-in across hierarchy levels
             (cross-module fan-in). Default False (direct fan-in only).
@@ -705,11 +726,19 @@ def signal_fanin(signal_path: str, transitive: bool = False,
 @mcp.tool()
 def active_drivers(signal_full_path: str, time_as_string: str,
                                  session_id: Optional[str] = None) -> dict[str, Any]:
-    """Get the active driver(s) of a signal at a time point (dynamic; needs UHDM+FST)."""
+    """Get the active driver(s) of a signal at a time point (dynamic; needs UHDM+FST).
+
+    A malformed time string is answered with a structured invalid_argument
+    error instead of raising.
+    """
     s = _sess(session_id)
     if s.fst is None:
         return _no_waveform("active_drivers")
-    return s.rtl.active_drivers(signal_full_path, time_as_string)
+    try:
+        return s.rtl.active_drivers(signal_full_path, time_as_string)
+    except ValueError as exc:
+        return {"status": "error", "error_type": "invalid_argument",
+                "error": str(exc), "parameter": "time_as_string"}
 
 
 @mcp.tool()
@@ -728,6 +757,9 @@ def trace_value(signal_path: str, time_point: str,
                 session_id: Optional[str] = None) -> dict[str, Any]:
     """Trace how a signal's value at a time point was produced (needs UHDM+FST).
 
+    A malformed time string is answered with a structured invalid_argument
+    error instead of raising.
+
     Args:
         max_depth: maximum recursion depth for the trace tree (default 12, range 1-50).
             Increase for deep designs; decrease for faster, shallower traces.
@@ -736,14 +768,20 @@ def trace_value(signal_path: str, time_point: str,
     if s.fst is None:
         return _no_waveform("trace_value")
     depth = max(1, min(int(max_depth), 50))
-    return s.rtl.trace_value(signal_path, time_point, max_depth=depth)
-
+    try:
+        return s.rtl.trace_value(signal_path, time_point, max_depth=depth)
+    except ValueError as exc:
+        return {"status": "error", "error_type": "invalid_argument",
+                "error": str(exc), "parameter": "time_point"}
 
 @mcp.tool()
 def trace_x(signal_path: str, time_point: str,
             max_depth: int = 12,
             session_id: Optional[str] = None) -> dict[str, Any]:
     """Trace the root cause of an X value on a signal (approximate; needs UHDM+FST).
+
+    A malformed time string is answered with a structured invalid_argument
+    error instead of raising.
 
     Args:
         max_depth: maximum recursion depth for the X-trace tree (default 12, range 1-50).
@@ -752,7 +790,11 @@ def trace_x(signal_path: str, time_point: str,
     if s.fst is None:
         return _no_waveform("trace_x")
     depth = max(1, min(int(max_depth), 50))
-    return s.rtl.trace_x(signal_path, time_point, max_depth=depth)
+    try:
+        return s.rtl.trace_x(signal_path, time_point, max_depth=depth)
+    except ValueError as exc:
+        return {"status": "error", "error_type": "invalid_argument",
+                "error": str(exc), "parameter": "time_point"}
 
 
 # =============================================================================
@@ -823,6 +865,23 @@ def _viewer():
     from .viewer.manager import ViewManager
     return ViewManager.instance()
 
+def _viewer_fail(exc: BaseException) -> dict[str, Any]:
+    """Turn any viewer-layer exception into a structured reply.
+
+    Parameter mistakes become ``invalid_argument`` payloads carrying the
+    failing parameter and a fix; a missing viewer install degrades to the
+    standard unavailable shape; anything else reports as ``internal_error``
+    with the exception type kept in the message, so a bug is loud instead of
+    surfacing as a bare ``available: false``.
+    """
+    from .viewer import invalid_argument_payload, unavailable_hint
+    from .viewer.state import ViewStateError
+    if isinstance(exc, ViewStateError):
+        return invalid_argument_payload(exc)
+    if isinstance(exc, ImportError):
+        return unavailable_hint()
+    return {"status": "error", "error_type": "internal_error",
+            "error": f"{type(exc).__name__}: {exc}"}
 
 @mcp.tool()
 def open_wave_view(fst_paths: List[str],
@@ -839,11 +898,18 @@ def open_wave_view(fst_paths: List[str],
     milliseconds. Give the returned URL to the user; IDE terminals
     auto-forward localhost ports. Two fst_paths open a comparison view.
 
+    Time fields are strict objects: {"time": <digits>, "unit": "ps"} (unit
+    one of s / ms / us / ns / ps / fs, default ps). A suffixed value like
+    "1523400ps" is accepted and normalized. Unknown fields, unknown units,
+    conflicting suffixes and malformed values are rejected with a structured
+    error naming the parameter, never silently ignored or defaulted.
+
     Args:
         fst_paths: one waveform (normal view) or two (diff view, e.g.
-            [pass, fail]). FST is opened directly; VCD and FSDB are converted
-            to FST first and cached, so the same waveform converted during
-            analysis is reused here instead of being converted again.
+            [pass, fail]); at most two. FST is opened directly; VCD and FSDB
+            are converted to FST first and cached, so the same waveform
+            converted during analysis is reused here instead of being
+            converted again.
         signals: initial signals, each {path, color?, group?, format?, source?}.
             Prefer a short ASCII word for ``group``: the heading is drawn in the
             waveform canvas, whose font has no CJK glyphs, so non-ASCII names
@@ -853,28 +919,48 @@ def open_wave_view(fst_paths: List[str],
         cursor: {time, unit} to pin the cursor (e.g. the failure time).
         viewport: {from, to, unit} visible time window.
         markers: [{time, unit, label?, color?}] annotations on the timeline.
-        diff: diff_waveforms result reference {source_a, source_b,
+        diff: diff_waveforms result reference exactly {source_a, source_b,
             first_divergence} — auto-adds a red marker at the divergence.
+            first_divergence may be passed back verbatim ("85ns" is accepted
+            and normalized).
         annotation: {markdown, confidence?, evidence?} analysis note shown in
             the log popup next to the waveform. Any language: written in your
             own words, rendered as-is.
-        labels: display labels per waveform (e.g. ["pass", "fail"]).
+        labels: display labels per waveform, one per waveform (e.g.
+            ["pass", "fail"]).
+
+    Returns available:true plus view_id and url on success, and lists any
+    ``warnings`` when a command had to be dropped. Failures return
+    {"status": "error", "error_type": ...}: invalid_argument for a malformed
+    parameter, file_not_found / unsupported_format / conversion_failed for
+    waveform-file problems, surver_error when the viewer backend cannot
+    start, and viewer_unavailable (with available:false) when the viewer
+    feature is not installed at all.
     """
     from . import convert as _convert
+    if isinstance(fst_paths, str):
+        return {"status": "error", "error_type": "invalid_argument",
+                "error": "fst_paths must be a list of waveform paths, e.g. "
+                         '["sim/fail.fst"]; a bare string would be read as '
+                         "separate characters",
+                "parameter": "fst_paths"}
     resolved: List[str] = []
     for p in fst_paths:
         try:
             got = _convert.resolve_waveform(p)
         except _convert.UnsupportedWaveformError as exc:
-            return {"available": False, "error": str(exc),
+            return {"status": "error", "error_type": "unsupported_format",
+                    "error": str(exc),
                     "hint": "convert this file to .fst / .vcd / .fsdb first"}
         except _convert.ConversionError as exc:
-            return {"available": False, "error": str(exc),
+            return {"status": "error", "error_type": "conversion_failed",
+                    "error": str(exc),
                     "hint": "conversion to FST failed; check the waveform "
                             "file and converter dependencies (vcd2fst / "
                             "fsdb2fst)"}
         except FileNotFoundError as exc:
-            return {"available": False, "error": str(exc),
+            return {"status": "error", "error_type": "file_not_found",
+                    "error": str(exc),
                     "hint": "check the waveform path"}
         resolved.append(got["fst_path"])
 
@@ -884,9 +970,8 @@ def open_wave_view(fst_paths: List[str],
             markers=markers, diff=diff,
             annotations=[annotation] if annotation else None,
             labels=labels)
-    except (FileNotFoundError, ValueError, RuntimeError) as exc:
-        return {"available": False, "error": str(exc)}
-
+    except Exception as exc:
+        return _viewer_fail(exc)
 
 @mcp.tool()
 def update_wave_view(view_id: str,
@@ -898,17 +983,18 @@ def update_wave_view(view_id: str,
     """Update an open wave view in place (same URL, no reload for the user).
 
     Omitted args keep their current value; lists replace entirely except
-    annotations, which append to the analysis log popup. Same ``group`` and
-    ``annotation`` conventions as open_wave_view.
+    annotations, which append to the analysis log popup. Same ``group``,
+    ``annotation`` and time-schema conventions as open_wave_view; returns
+    ``warnings`` when a command had to be dropped, and structured errors on
+    bad input.
     """
     try:
         return _viewer().update_view(
             view_id, signals=signals, cursor=cursor, viewport=viewport,
             markers=markers,
             annotations=[annotation] if annotation else None)
-    except (ValueError, RuntimeError) as exc:
-        return {"available": False, "error": str(exc)}
-
+    except Exception as exc:
+        return _viewer_fail(exc)
 
 @mcp.tool()
 def get_view_state(view_id: str) -> dict[str, Any]:
@@ -921,9 +1007,8 @@ def get_view_state(view_id: str) -> dict[str, Any]:
     """
     try:
         return _viewer().get_state(view_id)
-    except (ValueError, RuntimeError) as exc:
-        return {"available": False, "error": str(exc)}
-
+    except Exception as exc:
+        return _viewer_fail(exc)
 
 @mcp.tool()
 def list_wave_views() -> dict[str, Any]:
@@ -936,9 +1021,8 @@ def list_wave_views() -> dict[str, Any]:
     """
     try:
         return _viewer().list_views()
-    except (ValueError, RuntimeError) as exc:
-        return {"available": False, "error": str(exc)}
-
+    except Exception as exc:
+        return _viewer_fail(exc)
 
 @mcp.tool()
 def close_wave_view(view_id: Optional[str] = None,
@@ -957,11 +1041,12 @@ def close_wave_view(view_id: Optional[str] = None,
         if all_views:
             return _viewer().close_all()
         if not view_id:
-            return {"available": False,
-                    "error": "provide view_id, or set all_views=true"}
+            return {"status": "error", "error_type": "invalid_argument",
+                    "error": "provide view_id, or set all_views=true",
+                    "parameter": "view_id"}
         return _viewer().close_view(view_id)
-    except (ValueError, RuntimeError) as exc:
-        return {"available": False, "error": str(exc)}
+    except Exception as exc:
+        return _viewer_fail(exc)
 
 
 # =============================================================================

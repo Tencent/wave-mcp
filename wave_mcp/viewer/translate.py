@@ -24,7 +24,9 @@ from typing import Any, Dict, List, Optional
 # ps as the canonical schema unit; revisit if a non-ps timescale shows up.
 
 
-def _raw(obj: Dict[str, Any], timescale_exp: int = 0) -> Optional[str]:
+def _raw(obj: Dict[str, Any], timescale_exp: int = 0,
+         report: Optional[List[str]] = None,
+         what: str = "time") -> Optional[str]:
     """Convert a schema time {time, unit} into waveform-native units.
 
     Schema times carry a unit (default ps); Surfer's batch commands take
@@ -36,17 +38,27 @@ def _raw(obj: Dict[str, Any], timescale_exp: int = 0) -> Optional[str]:
     drops that one command. Emitting the bare number instead would move the
     cursor or marker to an arbitrary time and look like a rendering bug, so
     an omitted command is both safer and self-evident in the command string.
+
+    ``report``, when given, receives one human-readable note per dropped
+    command naming ``what`` and the reason. State-level validation should
+    make drops unreachable, but this layer stays honest for direct callers
+    and as a defense in depth: a drop is reported, never silent.
     """
     from ..timeutil import time_to_fst_units, VALID_UNITS
 
     val = str(obj["time"])
     unit = str(obj.get("unit") or "ps")
     if unit.lower() not in VALID_UNITS:
+        if report is not None:
+            report.append(f"dropped {what}: unknown time unit {unit!r} "
+                          f"(expected one of {', '.join(VALID_UNITS)})")
         return None
     text = val if val.endswith(unit) else f"{val}{unit}"
     try:
         return str(time_to_fst_units(text, int(timescale_exp)))
     except ValueError:
+        if report is not None:
+            report.append(f"dropped {what}: invalid time value {val!r}")
         return None
 
 
@@ -67,12 +79,17 @@ def _divider_name(group: str) -> str:
 
 
 def desired_to_sucl(desired: Dict[str, Any],
-                    timescale_exp: int = 0) -> str:
+                    timescale_exp: int = 0,
+                    report: Optional[List[str]] = None) -> str:
     """Build the startup_commands string for the current desired state.
 
     ``timescale_exp`` is the FST timescale exponent (10**exp native units
     per second); it is required to turn schema times into the raw numbers
     Surfer's batch layer expects.
+
+    ``report``, when given, collects one note per command that had to be
+    dropped (unknown unit, malformed value) so callers can surface the loss
+    instead of it staying invisible.
     """
     cmds: List[str] = []
 
@@ -117,8 +134,10 @@ def desired_to_sucl(desired: Dict[str, Any],
     vp = desired.get("viewport")
     if vp:
         vunit = vp.get("unit", "ps")
-        lo = _raw({"time": vp["from"], "unit": vunit}, timescale_exp)
-        hi = _raw({"time": vp["to"], "unit": vunit}, timescale_exp)
+        lo = _raw({"time": vp["from"], "unit": vunit}, timescale_exp,
+                  report, "viewport.from")
+        hi = _raw({"time": vp["to"], "unit": vunit}, timescale_exp,
+                  report, "viewport.to")
         if lo is not None and hi is not None:
             cmds.append(f"zoom_to {lo} {hi}")
     elif desired.get("signals"):
@@ -126,7 +145,7 @@ def desired_to_sucl(desired: Dict[str, Any],
 
     cur = desired.get("cursor")
     if cur:
-        t = _raw(cur, timescale_exp)
+        t = _raw(cur, timescale_exp, report, "cursor")
         if t is not None:
             cmds.append(f"cursor_set {t}")
             cmds.append(f"goto_time {t}")
@@ -134,8 +153,8 @@ def desired_to_sucl(desired: Dict[str, Any],
     # number markers over the *accepted* ones only, so a rejected time cannot
     # shift every subsequent marker onto the wrong id
     nxt = 1
-    for mk in desired.get("markers", []):
-        t = _raw(mk, timescale_exp)
+    for i, mk in enumerate(desired.get("markers", [])):
+        t = _raw(mk, timescale_exp, report, f"markers[{i}]")
         if t is None:
             continue
         cmds.append(f"marker_set_at {t} {nxt}")
