@@ -59,8 +59,11 @@ VIEWER_MATERIALS=/path/to/viewer-materials \
 ```
 
 The asset wheel carries the materials under wave_mcp_viewer_assets/redistribution/.
-Packaging removes upstream service workers and sample waveforms; provenance
-must describe such packaging changes rather than claim that every file is
+Release builds ship two variants of the same wheel: the slim one uploaded to
+PyPI keeps the notices, inventories and manifest but omits sources/, and the
+full one attached to the GitHub release carries the complete set. Packaging
+removes upstream service workers and sample waveforms; provenance must
+describe such packaging changes rather than claim that every file is
 unmodified.
 
 ## Verification and release review
