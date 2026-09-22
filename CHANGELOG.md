@@ -4,6 +4,28 @@ All notable changes to wave-mcp are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-09-22
+
+### 中文
+
+#### 修复
+
+- `install.sh` 安装到共享盘（NFS）前缀时改为原子替换并加安装锁：先整树staged 复制再 rename 换入，旧树留待下次安装清扫；`flock` 拒绝并发安装；检测到本机仍有运行中的 wave-mcp 时提示其重启后生效。此前在有进程运行的共享前缀上覆盖安装可能中途失败并留下损坏的安装。
+
+#### 变更
+
+- 两个项目级验证脚本（`tests/functional_verify.py`、`tests/full_quality_check_all_tools.py`）入库并随离线 bundle 分发，装机后可直接跑功能验证。
+
+### English
+
+#### Fixed
+
+- `install.sh` now performs atomic swaps with an install lock for shared (NFS) prefixes: new trees are staged then renamed into place, stale trees are swept by the next install, `flock` rejects concurrent installs, and a notice is printed when running wave-mcp processes are detected on the host. Previously, overwriting a live shared prefix could abort mid-install and leave a corrupted tree.
+
+#### Changed
+
+- Two project-level verification scripts (`tests/functional_verify.py`, `tests/full_quality_check_all_tools.py`) are now tracked and shipped in offline bundles for post-install functional checks.
+
 ## [1.0.0] - 2026-09-22
 
 本段先中文后英文。1.0 之后的每个版本都按这个顺序写。

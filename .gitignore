@@ -42,15 +42,14 @@ wave-mcp-bundle*/
 # third_party/fsdb2fst/, this dir is a copy for machines that have Verdi)
 deploy/verdi_test/
 
-# project-level test harnesses & reports (not published)
+# project-level test data & reports (not published; the harnesses
+# functional_verify.py / full_quality_check_all_tools.py ARE tracked)
 tests/projects/
 tests/reports/
 tests/archive/
 tests/fourstate/sim/
 tests/fourstate/session/
 tests/fourstate/session_ext/
-tests/functional_verify.py
-tests/full_quality_check_all_tools.py
 tests/project_assets.txt
 
 # fieldkit run artifacts (the tool itself IS published)

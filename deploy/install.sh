@@ -36,6 +36,54 @@ fi
 PREFIX="$(cd "$PREFIX" && pwd)"
 echo "[*] install prefix: $PREFIX"
 
+# 0a) single-writer lock ----------------------------------------------------
+# Two concurrent installs into one shared-drive prefix interleave their copy
+# and rename steps and corrupt each other. flock works on NFSv4 (and NFSv3
+# with lockd); refuse to run in parallel rather than race.
+exec 9>"$PREFIX/.install.lock"
+if ! flock -n 9; then
+  echo "ERROR: another install is already running for $PREFIX"
+  echo "       (lock: $PREFIX/.install.lock). Retry after it finishes."
+  exit 1
+fi
+
+# 0b) sweep leftovers from earlier installs ---------------------------------
+# The atomic swaps below park the previous tree as *.old.<pid> and stage the
+# new one as *.new.<pid>. On NFS the parked tree may be undeletable while a
+# running process still holds files open (.nfsXXXX placeholders); it becomes
+# removable once that process exits, so each install retries the cleanup.
+rm -rf "$PREFIX"/python.old.* "$PREFIX"/python.new.* \
+       "$PREFIX"/bin/lib.old.* "$PREFIX"/bin/lib.new.* \
+       "$PREFIX"/bin/vcd2fst.new.* "$PREFIX"/bin/wave-mcp.new.* \
+       2>/dev/null || true
+
+# 0c) atomic directory swap -------------------------------------------------
+# Never "rm -rf then cp" into a live prefix: on NFS the rm fails on .nfsXXXX
+# placeholders left for files a running wave-mcp still has open, aborting the
+# install halfway with the old tree already gone. rename() succeeds even for
+# busy trees (old processes keep their inodes), so stage a full copy and swap.
+swap_in() {  # swap_in <staged_new_tree> <final_path>
+  local new="$1"
+  local final="$2"
+  local old="$final.old.$$"
+  if [[ -e "$final" ]]; then
+    mv "$final" "$old"
+  fi
+  mv "$new" "$final"
+  if ! rm -rf "$old" 2>/dev/null; then
+    echo "[!] residue left at $old (files still open by a running process);"
+    echo "    harmless, a future install will sweep it."
+  fi
+}
+
+# 0d) advisory: running processes keep the OLD version ----------------------
+# Only this host is visible; processes on other machines sharing the prefix
+# cannot be detected, which is why every swap above must stay atomic.
+if command -v pgrep >/dev/null 2>&1 && pgrep -f 'wave_mcp\.cli\.main' >/dev/null 2>&1; then
+  echo "[!] running wave-mcp process(es) detected on this host. They keep"
+  echo "    using the old files and pick up this install after a restart."
+fi
+
 # 1) pick a python interpreter ---------------------------------------------
 # Priority: --python arg > bundled standalone python > user-selected env
 # (VIRTUAL_ENV / PYTHON) > python3 on PATH > versioned python3.X cascade.
@@ -90,8 +138,8 @@ elif [[ -x "$HERE/python/bin/python3" ]]; then
   # in the install prefix first and anchor the venv on that copy.
   if [[ "$HERE" != "$PREFIX" ]]; then
     echo "[*] copying bundled python into $PREFIX/python ..."
-    rm -rf "$PREFIX/python"
-    cp -r "$HERE/python" "$PREFIX/python"
+    cp -r "$HERE/python" "$PREFIX/python.new.$$"
+    swap_in "$PREFIX/python.new.$$" "$PREFIX/python"
     BASE_PY="$PREFIX/python/bin/python3"
   else
     BASE_PY="$HERE/python/bin/python3"
@@ -158,17 +206,21 @@ echo "[*] installing wave-mcp + deps from offline wheelhouse ..."
 # persistent prefix so the converter survives a bundle cleanup.
 if [[ -x "$HERE/bin/vcd2fst" && "$HERE" != "$PREFIX" ]]; then
   echo "[*] copying vcd2fst into $PREFIX/bin ..."
-  cp -f "$HERE/bin/vcd2fst" "$PREFIX/bin/vcd2fst"
-  chmod +x "$PREFIX/bin/vcd2fst"
+  cp "$HERE/bin/vcd2fst" "$PREFIX/bin/vcd2fst.new.$$"
+  chmod +x "$PREFIX/bin/vcd2fst.new.$$"
+  mv -f "$PREFIX/bin/vcd2fst.new.$$" "$PREFIX/bin/vcd2fst"
   if [[ -d "$HERE/bin/lib" ]]; then
-    rm -rf "$PREFIX/bin/lib"
-    cp -r "$HERE/bin/lib" "$PREFIX/bin/lib"
+    cp -r "$HERE/bin/lib" "$PREFIX/bin/lib.new.$$"
+    swap_in "$PREFIX/bin/lib.new.$$" "$PREFIX/bin/lib"
   fi
 fi
 
 # 4) generate launcher ------------------------------------------------------
-sed -e "s#@RUNTIME@#$RUNTIME#g" -e "s#@BUNDLE@#$HERE#g" -e "s#@PREFIX@#$PREFIX#g" "$HERE/wave-mcp.template" > "$PREFIX/bin/wave-mcp"
-chmod +x "$PREFIX/bin/wave-mcp"
+# Write-then-rename: a remote client spawning the launcher mid-write would
+# otherwise read a truncated script (shows up as an opaque -32000).
+sed -e "s#@RUNTIME@#$RUNTIME#g" -e "s#@BUNDLE@#$HERE#g" -e "s#@PREFIX@#$PREFIX#g" "$HERE/wave-mcp.template" > "$PREFIX/bin/wave-mcp.new.$$"
+chmod +x "$PREFIX/bin/wave-mcp.new.$$"
+mv -f "$PREFIX/bin/wave-mcp.new.$$" "$PREFIX/bin/wave-mcp"
 
 # 5) sanity check -----------------------------------------------------------
 # Check the import surface first, then the launcher itself. The launcher check

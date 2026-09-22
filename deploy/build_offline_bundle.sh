@@ -218,6 +218,7 @@ cp -r "$REPO_ROOT/tests/unit"     "$OUT/tests/unit"
 cp -r "$REPO_ROOT/tests/protocol" "$OUT/tests/protocol"
 cp    "$REPO_ROOT/tests/run_regression.py" "$OUT/tests/"
 cp    "$REPO_ROOT/tests/functional_verify.py" "$OUT/tests/"
+cp    "$REPO_ROOT/tests/full_quality_check_all_tools.py" "$OUT/tests/"
 cp    "$REPO_ROOT/tests/viewer_e2e.py" "$OUT/tests/" 2>/dev/null || true
 cp    "$REPO_ROOT/tests/README.md"         "$OUT/tests/" 2>/dev/null || true
 mkdir -p "$OUT/tests/fourstate"
