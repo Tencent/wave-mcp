@@ -119,21 +119,22 @@ class Report:
         return "|".join(parts)
 
     def l1_text(self) -> str:
-        L = ["=" * 62, f" wave-mcp FIELDKIT v{KIT_VERSION} sanitized report", "=" * 62]
+        lines = ["=" * 62, f" wave-mcp FIELDKIT v{KIT_VERSION} sanitized report",
+                 "=" * 62]
         for name, kv in self.sections.items():
-            L.append(f"[{name}]")
+            lines.append(f"[{name}]")
             for k, v in kv.items():
-                L.append(f"  {k:24s} {v}")
+                lines.append(f"  {k:24s} {v}")
         if self.errors:
-            L.append("[errors]")
+            lines.append("[errors]")
             for e in self.errors:
-                L.append(f"  {e['code']:22s} {e['ctx']}")
+                lines.append(f"  {e['code']:22s} {e['ctx']}")
         else:
-            L.append("[errors]  none")
-        L.append("-" * 62)
-        L.append(" L0: " + self.l0_line())
-        L.append("=" * 62)
-        return "\n".join(L)
+            lines.append("[errors]  none")
+        lines.append("-" * 62)
+        lines.append(" L0: " + self.l0_line())
+        lines.append("=" * 62)
+        return "\n".join(lines)
 
     def l2_json(self) -> dict:
         return {"fieldkit": KIT_VERSION, "generated_unix": int(time.time()),
@@ -152,7 +153,7 @@ def stage_env(rep: Report):
         try:
             m = __import__(mod)
             rep.sec("env", **{f"{mod}_ver": getattr(m, "__version__", "?")})
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # pylint: disable=broad-except
             rep.err("E-ENV-IMPORT", f"{mod}:{_exc_code(exc)}")
     import shutil as sh
     missing = [c for c in ("wave-mcp", "wave-session", "wave-vcd2fst")
@@ -181,70 +182,67 @@ def stage_selftest(rep: Report):
         ck(s.rtl.has_netlist)
         ck(bool(s.rtl.drivers(sig)))
         s.close()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # pylint: disable=broad-except
         rep.err("E-TOOL-CRASH", f"selftest:{_exc_code(exc)}")
     rep.sec("selftest", checks=checks, passed=passed)
 
 
-def stage_fingerprint(rep: Report, wave, session):
-    """Structural fingerprints for OFF-SITE synthetic reproduction.
-
-    Everything emitted is a statistic over format/enum tokens (var types,
-    bucketed counts, naming-pattern classes). No identifier is ever emitted;
-    identifier NAMES are reduced to charset-class counts only.
-    """
+def _fingerprint_vcd(rep: Report, wave: str) -> None:
+    """VCD dialect fingerprint: header scan over the first text block."""
     import re
 
-    # -- VCD dialect fingerprint (header scan, first 4 MB of text) ----------
-    if wave and not wave.lower().endswith(".fst") and os.path.exists(wave):
-        var_types = {}
-        id_classes = {"plain": 0, "escaped": 0, "with_range": 0,
-                      "with_index": 0}
-        scope_types = {}
-        depth = 0
-        max_depth = 0
-        extras = set()
-        try:
-            with open(wave, "r", errors="replace") as fh:
-                for _ in range(200000):
-                    line = fh.readline()
-                    if not line or line.startswith("#"):
-                        break
-                    t = line.split()
-                    if not t:
-                        continue
-                    if t[0] == "$var" and len(t) >= 5:
-                        var_types[t[1]] = var_types.get(t[1], 0) + 1
-                        name = " ".join(t[4:-1])
-                        if name.startswith("\\"):
-                            id_classes["escaped"] += 1
-                        elif re.search(r"\[\d+:\d+\]", name):
-                            id_classes["with_range"] += 1
-                        elif re.search(r"\[\d+\]", name):
-                            id_classes["with_index"] += 1
-                        else:
-                            id_classes["plain"] += 1
-                    elif t[0] == "$scope" and len(t) >= 2:
-                        scope_types[t[1]] = scope_types.get(t[1], 0) + 1
-                        depth += 1
-                        max_depth = max(max_depth, depth)
-                    elif t[0] == "$upscope":
-                        depth = max(0, depth - 1)
-                    elif t[0] in ("$dumpoff", "$dumpon", "$comment",
-                                  "$timescale", "$version"):
-                        extras.add(t[0])
-            rep.sec("fingerprint.vcd",
-                    var_types=_hist(var_types),
-                    identifier_classes=_hist(id_classes),
-                    scope_types=_hist(scope_types),
-                    max_scope_depth=max_depth,
-                    header_directives=",".join(sorted(extras)) or "none")
-        except OSError as exc:
-            rep.err("E-FST-OPEN", f"fingerprint:{_exc_code(exc)}")
-
-    # -- waveform / netlist structure fingerprint ----------------------------
-    if session is None:
+    if not wave or wave.lower().endswith(".fst") or not os.path.exists(wave):
         return
+    var_types = {}
+    id_classes = {"plain": 0, "escaped": 0, "with_range": 0,
+                  "with_index": 0}
+    scope_types = {}
+    depth = 0
+    max_depth = 0
+    extras = set()
+    try:
+        with open(wave, "r", errors="replace") as fh:
+            for _ in range(200000):
+                line = fh.readline()
+                if not line or line.startswith("#"):
+                    break
+                t = line.split()
+                if not t:
+                    continue
+                if t[0] == "$var" and len(t) >= 5:
+                    var_types[t[1]] = var_types.get(t[1], 0) + 1
+                    name = " ".join(t[4:-1])
+                    if name.startswith("\\"):
+                        id_classes["escaped"] += 1
+                    elif re.search(r"\[\d+:\d+\]", name):
+                        id_classes["with_range"] += 1
+                    elif re.search(r"\[\d+\]", name):
+                        id_classes["with_index"] += 1
+                    else:
+                        id_classes["plain"] += 1
+                elif t[0] == "$scope" and len(t) >= 2:
+                    scope_types[t[1]] = scope_types.get(t[1], 0) + 1
+                    depth += 1
+                    max_depth = max(max_depth, depth)
+                elif t[0] == "$upscope":
+                    depth = max(0, depth - 1)
+                elif t[0] in ("$dumpoff", "$dumpon", "$comment",
+                              "$timescale", "$version"):
+                    extras.add(t[0])
+        rep.sec("fingerprint.vcd",
+                var_types=_hist(var_types),
+                identifier_classes=_hist(id_classes),
+                scope_types=_hist(scope_types),
+                max_scope_depth=max_depth,
+                header_directives=",".join(sorted(extras)) or "none")
+    except OSError as exc:
+        rep.err("E-FST-OPEN", f"fingerprint:{_exc_code(exc)}")
+
+
+def _fingerprint_session(rep: Report, session) -> None:
+    """Waveform / netlist structure fingerprint (statistics only)."""
+    import re
+
     s = session
     try:
         widths = {}
@@ -291,8 +289,21 @@ def stage_fingerprint(rep: Report, wave, session):
                     driver_kind_hist=_hist(drv_kinds),
                     drivers_per_module_hist=_hist(per_mod_drv),
                     modules_with_skips=_hist(skipped))
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # pylint: disable=broad-except
         rep.err("E-TOOL-CRASH", f"fingerprint:{_exc_code(exc)}")
+
+
+def stage_fingerprint(rep: Report, wave, session):
+    """Structural fingerprints for OFF-SITE synthetic reproduction.
+
+    Everything emitted is a statistic over format/enum tokens (var types,
+    bucketed counts, naming-pattern classes). No identifier is ever emitted;
+    identifier NAMES are reduced to charset-class counts only.
+    """
+    _fingerprint_vcd(rep, wave)
+    if session is None:
+        return
+    _fingerprint_session(rep, session)
 
 
 def stage_project(rep: Report, wave, filelist, top, budget_s, fingerprint=False):
@@ -305,7 +316,7 @@ def stage_project(rep: Report, wave, filelist, top, budget_s, fingerprint=False)
     try:
         res = pipeline.prepare_session(out_dir, wave, top=top or "",
                                        filelist_path=filelist)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # pylint: disable=broad-except
         code = "E-VCD-CONVERT" if not wave.lower().endswith(".fst") else "E-FST-OPEN"
         rep.err(code, _exc_code(exc))
         return
@@ -313,7 +324,7 @@ def stage_project(rep: Report, wave, filelist, top, budget_s, fingerprint=False)
 
     try:
         s = open_session(res["manifest"])
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # pylint: disable=broad-except
         rep.err("E-FST-OPEN", _exc_code(exc))
         return
     info = s.summary()
@@ -381,7 +392,7 @@ def stage_project(rep: Report, wave, filelist, top, budget_s, fingerprint=False)
                 rep.err("E-TOOL-EMPTY", name)
             else:
                 tools_pass += 1
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # pylint: disable=broad-except
             rep.err("E-TOOL-CRASH", f"{name}:{_exc_code(exc)}")
 
     sweep("value_at", lambda p: s.fst.value_at(p, mid_t), expect_data=True)
@@ -440,7 +451,7 @@ def main():
 if __name__ == "__main__":
     try:
         sys.exit(main())
-    except Exception as exc:  # noqa: BLE001 - last resort: still sanitized
+    except Exception as exc:  # pylint: disable=broad-except
         print(f"WMFK{KIT_VERSION}|FATAL|{type(exc).__name__}@"
               f"{hashlib.sha1(str(exc).encode()).hexdigest()[:8]}")
         traceback.print_exc(file=open(os.devnull, "w"))

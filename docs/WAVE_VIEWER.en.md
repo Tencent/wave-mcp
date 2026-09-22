@@ -2,7 +2,7 @@
 
 [中文版](WAVE_VIEWER.md)
 
-wave-mcp's analysis tools answer "why is it wrong"; the wave viewer makes you see it with your own eyes. Once the agent has located the failure time, a single `open_wave_view` pops a waveform in your browser: suspect signals already added, cursor pinned at the failure time, and the agent's analysis note in a popup right next to it. As you drag the cursor around, the agent can even tell where you are looking via `get_view_state` and continue the conversation from there.
+wave-mcp's analysis tools answer "why is it wrong"; the wave viewer makes you see it with your own eyes. Once the agent has located the failure time, a single `open_wave_view` pops a waveform in your browser: suspect signals already added, cursor pinned at the failure time, and the agent's analysis note in a popup right next to it. The agent can then append analysis and move the cursor in place via `update_wave_view`, and confirm the page is connected and up to date via `get_view_state`.
 
 This guide covers installation, the CLI, the three MCP tools, agent workflows, architecture, deployment scenarios and troubleshooting. For a quick start, the "Wave viewer" section of the [README](../README.en.md) is enough; this document is the full detail.
 
@@ -26,25 +26,21 @@ This guide covers installation, the CLI, the three MCP tools, agent workflows, a
 
 - **Tens-of-GB FSTs open in seconds**: waveform data never enters the browser. A local surver process streams it on demand, and the browser fetches only what is currently on screen. Open time is essentially independent of file size.
 - **Agent-driven presentation**: signal list, cursor position, visible time window, timeline markers and the analysis note are all set by the agent through MCP tools. The user opens the link and sees the conclusion.
-- **Dual-waveform compare**: pass/fail waveforms in two stacked panes with lockstep zoom and cursor sync; combined with `diff_waveforms`, a red marker lands on the first divergence automatically.
-- **Two-way awareness**: `get_view_state` reports the user's current cursor position, displayed signals and viewport back to the agent, enabling "I explain what you are looking at" conversational debugging.
+- **Dual-waveform compare**: pass/fail waveforms in two stacked panes; agent-set zoom and cursor are injected into both panes, and combined with `diff_waveforms` a red marker lands on the first divergence automatically.
+- **Delivery awareness**: `get_view_state` reports page connectivity and the applied revision back to the agent, confirming the user actually sees the latest state.
 - **Flicker-free updates**: when the agent later adjusts the cursor/window/markers/notes, the page does not reload and the waveform does not flash.
 
-The viewer is optional: without the assets package, the three viewer tools return a clear hint and degrade gracefully, and the 28 analysis tools are completely unaffected.
+The viewer is optional: without the assets package, the five viewer tools return a clear hint and degrade gracefully, and the other 32 analysis tools are completely unaffected.
 
 ## 2. Installation
 
-The viewer needs a separate assets package (the Surfer WASM frontend + the surver streaming backend):
-
-```bash
-pip install wave-mcp[viewer]
-```
+The viewer needs a separate asset directory (the Surfer WASM frontend + the surver streaming backend, EUPL-1.2). **wave-mcp does not distribute these assets**: build them yourself with the in-repo scripts following [SELF_BUILD.en.md](SELF_BUILD.en.md); build once, use long-term, one copy shareable across a team.
 
 Assets are discovered in this order (first hit wins):
 
-1. the directory pointed to by the `WAVE_MCP_VIEWER_ASSETS` env var (set automatically by the offline bundle installer)
-2. the pip-installed `wave-mcp-viewer-assets` package
-3. the user cache directory `~/.cache/wave-mcp/viewer/`
+1. the directory pointed to by the `WAVE_MCP_VIEWER_ASSETS` env var
+2. the pip-installed `wave-mcp-viewer-assets` package (historical installs are still recognized; no longer provided)
+3. the user cache directory `~/.wave-mcp/cache/viewer/` (the recommended place for self-built assets)
 
 A valid asset directory contains an executable `surver` and `wasm/index.html`. Air-gapped environments simply build the offline bundle with `deploy/build_offline_bundle.sh --viewer <asset_dir>`; see [DEPLOY_AIRGAP.md](DEPLOY_AIRGAP.md).
 
@@ -81,7 +77,7 @@ Arguments:
 | `--labels` | display label per waveform; `pass fail` recommended for compare views |
 | `--no-browser` | don't try to launch a local browser |
 
-Converted output is cached and shared with `prepare_session`: the same waveform is converted once whether you analyse it first and view it later, or the other way round. The cache lands next to the source file, falling back to `~/.cache/wave-mcp/fst-cache` (honouring `XDG_CACHE_HOME`) when the source directory is read-only. A GB-scale FSDB conversion costs minutes; a cache hit costs seconds.
+Converted output is cached and shared with `prepare_session`: the same waveform is converted once whether you analyse it first and view it later, or the other way round. The cache lives under `~/.wave-mcp/cache/fst/` (honouring `WAVE_MCP_CACHE_ROOT`) and is never written next to the source, so read-only regression areas work as-is. A GB-scale FSDB conversion costs minutes; a cache hit costs seconds.
 
 Anything other than `.fst` / `.vcd` / `.fsdb` (`.ghw`, `.vpd`, an SHM directory) is rejected at the entry point with the list of supported extensions, instead of falling through to a converter that reports a problem pointing in the wrong direction.
 
@@ -151,7 +147,7 @@ Omitted parameters keep their current value. `signals` / `markers` replace entir
 
 ### 4.3 get_view_state
 
-Reads what the user is actually looking at:
+Reads the delivery status of a view:
 
 ```jsonc
 get_view_state({"view_id": "a1b2c3d4"})
@@ -160,23 +156,23 @@ get_view_state({"view_id": "a1b2c3d4"})
   "available": true,
   "revision": 7,
   "actual": {                       // written back by the browser
-    "cursor": {"time": "1544800", "unit": "ps"},
-    "viewport": {…},
-    "selected_signals": […],
-    "displayed_signals": […],
-    "user_dirty": true              // the user has touched the view (vs. agent-set state)
+    "applied_revision": 7,          // revision the frontend has applied
+    "page_ready": true,             // whether the page reached the streaming backend
+    "page_error": null
   },
   "desired_summary": {…}            // summary of the agent-side desired state, for comparison
 }
 ```
 
-Typical use: the user says "the value at my cursor looks wrong". The agent first calls `get_view_state` to grab the cursor time, then continues with `signal_value_at` / `active_drivers` from that moment. `user_dirty: true` means the user has manually adjusted the view; before updating, the agent may choose to respect the user's current viewpoint and only touch markers and notes without stealing the cursor.
+Typical use: after `open_wave_view` / `update_wave_view`, confirm the page actually reached the streaming backend (`page_ready`) and has applied the latest state (compare `applied_revision` with `revision`). A blank or unreachable page reports `page_ready: false` with the reason in `page_error`.
+
+> For license isolation from the EUPL viewer, the shell page no longer reads state out of the viewer app; `actual` does not report the user's cursor position or `user_dirty`.
 
 ### 4.4 list_wave_views / close_wave_view
 
 `list_wave_views()` returns every open view (`view_id`, `url`, `title`, `fst_paths`, `revision`, `surver_alive`), newest first. `close_wave_view(view_id)` closes one; `close_wave_view(all_views=True)` closes them all. These matter for batch work such as regression triage, where views would otherwise pile up.
 
-Two details worth knowing. First, a streaming backend is shared by waveform file set, so closing a view only stops that backend when it was the last user of it; the response reports this as `surver_stopped`. Second, there is a safety cap: at most 8 views are kept open by default and the oldest is evicted beyond that. Tune it with `WAVE_MCP_MAX_VIEWS`, or set 0 to disable the cap.
+Two details worth knowing. First, a streaming backend is shared by waveform file set, so closing a view only stops that backend when it was the last user of it; the response reports this as `surver_stopped`. Second, there is a safety cap: at most 8 views are kept open by default and the oldest is evicted beyond that. Tune it with `WAVE_MCP_MAX_VIEWS`, or set 0 to disable the cap. The evicted page itself is not notified, so the `open_wave_view` reply carries `evicted_view_id` (`evicted_view_ids` when several go at once) for the caller to relay or reopen from.
 
 ### 4.5 Port configuration
 
@@ -207,7 +203,7 @@ a case fails
 
 ```
 one passing and one failing waveform of the same case
-→ diff_waveforms(pass.fst, fail.fst, scope="top.u_dma", clock="top.clk")
+→ diff_waveforms([pass.fst, fail.fst], scope="top.u_dma", clock="top.clk")
     returns the first divergence time + earliest diverging signals
     (prime suspects; later divergers are usually downstream contagion)
 → signal_fanin / active_drivers backtrack the earliest diverger
@@ -215,15 +211,15 @@ one passing and one failing waveform of the same case
     two-pane compare + red marker at the divergence + conclusion popup, all at once
 ```
 
-**Scenario 3: conversational two-way debugging**
+**Scenario 3: conversational debugging**
 
 ```
 the user browses around dragging the cursor
-→ user: "why is grant 0 here at my cursor?"
-→ agent: get_view_state to grab the cursor time
-→ active_drivers(grant, t=cursor time) to find which driving statement is active
-→ update_wave_view appends an annotation + adds a marker at the key moment
-  (without disturbing the user's viewpoint)
+→ user: "why is grant 0 at 1544800ps?" (time read off the waveform UI)
+→ active_drivers(grant, t=1544800ps) to find which driving statement is active
+→ update_wave_view appends an annotation (with a [1544800ps](#t=1544800ps)
+  anchor) + adds a marker at the key moment
+→ the user clicks the anchor; the cursor jumps there, seeing is believing
 ```
 
 ## 6. Analysis popup and time anchors
@@ -240,7 +236,7 @@ Time references in the body use the anchor format `[85000ps](#t=85000ps)`, rende
 
 ## 7. Dual-waveform compare view
 
-Passing two paths in `fst_paths` enters the compare view: two stacked panes, one waveform each, with zoom, pan and cursor in full lockstep. The cursor points at the same moment in both waveforms, so visual alignment takes zero effort.
+Passing two paths in `fst_paths` enters the compare view: two stacked panes, one waveform each. Agent-set zoom, cursor and markers are injected into both panes, pointing at the same moment, so visual alignment takes zero effort. (For license isolation from the EUPL viewer, the shell does not read viewer-internal state; a manual zoom in one pane does not automatically drive the other. Ask the agent to update the viewport to sync both panes.)
 
 - Pass explicit `labels` like `["pass", "fail"]` so the pane titles are self-explanatory.
 - By default `signals` adds the same-named signal to both panes; set `source` to add it to one side only.
@@ -255,7 +251,7 @@ After `update_wave_view`, the user's page does not reload and the waveform does 
 - **Signal add/remove**: rebuilt through Surfer's startup command layer; popup and view state are preserved.
 - **Annotations**: go to the log popup only, never touching the waveform.
 
-Under the hood, the frontend shell long-polls `/api/view-state` (25-second hold, returns immediately on change), then dispatches desired-state deltas through the channels above. Meanwhile it writes Surfer's actual cursor state back to `/api/view-state/actual` about once a second; that is the `actual` you read via `get_view_state`. Desired and actual are stored separately, so the agent's intent and the user's interactions never overwrite each other.
+Under the hood, the frontend shell long-polls `/api/view-state` (25-second hold, returns immediately on change), then dispatches desired-state deltas through the channels above. It periodically writes page connectivity and the applied revision back to `/api/view-state/actual`; that is the `actual` you read via `get_view_state`. For license isolation from the EUPL viewer, the shell talks to the viewer only through page-load URL parameters and standard postMessage, and does not read viewer-internal state.
 
 ## 9. Architecture
 
@@ -310,27 +306,34 @@ export WAVE_MCP_VIEWER_PORT_BASE=45400   # uses 45400-45463
 export WAVE_MCP_VIEWER_PORT_BASE=45500   # uses 45500-45563
 ```
 
-Two more notes. Conversion artifacts are cached next to the source waveform, so several people analysing the same regression dump share one `.fst`, which saves time but requires that directory to be writable by them; when it is read-only, each falls back to its own session directory and converts separately, with no loss of function. And `WAVE_MCP_MAX_VIEWS` is a per-process cap rather than a per-host one, so keep an eye on the total number of browser and backend processes when several people work at once.
+Two more notes. Conversion artifacts are cached under each user's own `~/.wave-mcp/cache/`, never next to the source waveform, so several people analysing the same regression dump each convert once; to share one artifact, point `WAVE_MCP_CACHE_ROOT` at a common writable directory, where concurrent conversions of the same key build exactly once. And `WAVE_MCP_MAX_VIEWS` is a per-process cap rather than a per-host one, so keep an eye on the total number of browser and backend processes when several people work at once.
 
 If what you want is one server on a host handing out links to other people, that is not supported yet: the viewer binds to loopback only. That mode is on the roadmap.
 
 ## 11. Licensing
 
-The wave-mcp core (including the viewer's Python orchestration layer and the frontend shell) is MIT. The Surfer WASM bundle and the surver binary come from the [Surfer project](https://surfer-project.org/) under EUPL-1.2, and are therefore distributed in a **separate** `wave-mcp-viewer-assets` package. The relationship with the MIT core is aggregation, not linking, so the core license is unaffected. Skipping the assets package costs zero core functionality. Build reproduction paths and the full legal notes are in [THIRD_PARTY.md](THIRD_PARTY.md).
+The wave-mcp core (including the viewer's Python orchestration layer and the frontend shell) is Apache-2.0 licensed. The Surfer WASM bundle and the surver binary come from the [Surfer project](https://surfer-project.org/) under EUPL-1.2 and are **not distributed by wave-mcp**; you build them locally per [SELF_BUILD.en.md](SELF_BUILD.en.md). The shell communicates with the viewer only through page-load URL parameters and standard postMessage. Skipping the assets costs zero core functionality. Full notes in [THIRD_PARTY.md](THIRD_PARTY.md).
 
 ## 12. Troubleshooting
 
 **Tools return "viewer assets not found"**
-Follow the hint: `pip install wave-mcp[viewer]`, or point `WAVE_MCP_VIEWER_ASSETS` at an asset directory, or place assets under `~/.cache/wave-mcp/viewer/`. Verify the directory contains an executable `surver` and `wasm/index.html`.
+Follow the hint: build the assets per [SELF_BUILD.en.md](SELF_BUILD.en.md), then point `WAVE_MCP_VIEWER_ASSETS` at the asset directory or place it under `~/.wave-mcp/cache/viewer/`. Verify the directory contains an executable `surver` and `wasm/index.html`.
 
 **surver exited early / did not become ready**
 First run `<asset_dir>/surver --help` manually to see whether it executes at all. The bundled surver is statically linked with no glibc dependency, so a failure to execute is usually not a library version problem: check first that the executable bit survived the copy (`chmod +x`), and that it was not replaced by a dynamically linked build of your own (`file surver` should report static-pie). Otherwise check that the FST path exists and the file is intact.
 
 **URL won't open (remote scenarios)**
-The service listens on 127.0.0.1 only, which is intended. IDE terminals usually auto-forward; if not, set up forwarding manually with the returned `ssh_hint` and open the URL from your local browser.
+The service listens on 127.0.0.1 only, which is intended. IDE terminals usually auto-forward; if not, set up forwarding manually with the returned `ssh_hint` and open the URL from your local browser. Forward the port of the page URL (the one serving `view.html` / `shell.html`); the waveform stream goes through the page's own same-origin proxy, so the surver port does not need its own forwarding rule. Forwarding both does no harm.
+
+**Blank page, or stuck on the loading screen**
+The entry page bounds its wait for the browser service worker (which restores headers that gateways rewrite) at about 4 seconds, then enters the viewer either way. Once the viewer is up, if the waveform backend is unreachable it retries once automatically (after the worker takes control) and, if it still fails, shows the reason and what to try instead of a blank page. When you see a blank page:
+- reload once first; most environments recover on the automatic retry;
+- if the page reports the backend unreachable, check that port forwarding is in place and that the MCP server process is alive (a dead process invalidates the URL; open the view again);
+- a few embedded browsers block background workers while a gateway rewrites backend headers; there automatic recovery is impossible, so open the URL in a regular browser tab instead.
 
 **Page opens but no waveform**
-Make sure you opened the full URL including `?token=`; surver refuses to serve data on a wrong token. If the browser console reports a WASM load failure, check that the assets package version matches wave-mcp (reinstall `wave-mcp[viewer]`).
+Make sure you opened the full URL including `?token=`; surver refuses to serve data on a wrong token. If the browser console reports a WASM load failure, check that the assets match the Surfer version wave-mcp pins (rebuild from the `deploy/viewer-pin.sh` pin per [SELF_BUILD.en.md](SELF_BUILD.en.md)).
+Also, a signal name that does not exist in the waveform is listed in the `warnings` of `open_wave_view` / `update_wave_view` and shown as a page-level notice; Surfer ignores such signals silently, so this is not a page failure. With no signals requested at all, the page says so as well.
 
 **update_wave_view reports unknown view_id**
 A view's lifecycle follows the process that opened it. After an MCP server restart, old view_ids are gone; just call `open_wave_view` again. The `known_views` field in the response lists currently valid views.
@@ -338,9 +341,10 @@ A view's lifecycle follows the process that opened it. After an MCP server resta
 ## 13. Known limitations
 
 - Signal add/remove goes through the startup command layer; with many signals there is one noticeable list reload (cursor/viewport/marker updates are always flicker-free).
-- The `actual` in `get_view_state` is written back by the browser about once a second, so the cursor position can lag by up to 1 second.
+- For license isolation from the EUPL viewer, the shell does not read viewer-internal state: `get_view_state` does not report the user's cursor position or `user_dirty`, and compare panes do not follow manual zooming in one pane (agent viewport updates sync both).
 - The compare view supports 2 waveforms; 3 or more are not supported.
 - A Surfer upgrade may change its internal message encoding (BigInt serialization) and command set, so the assets package and the core must be upgraded as a pair. We only depend on the stable command layer, keeping the adaptation cost manageable but not zero.
+- In a very narrow browser pane (below roughly 460px) the upstream viewer collapses the waveform area and draws nothing; widen the pane in the IDE split and it comes back. Everything else keeps working.
 - Browser-side rendering limits come from Surfer WASM itself; when expanding thousands of signals on one screen, use groups and fold them.
 
 ---

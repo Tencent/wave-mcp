@@ -1,0 +1,44 @@
+fstdumper patch files: attribution and license notice
+
+Upstream project: fstdumper, https://github.com/semify-eda/fstdumper
+Upstream revision: 3c7506333d2c9ad098d4526209621ea401a077ba
+
+Patches in this repository (third_party/fstdumper/):
+
+1. fstdumper-xcelium-fixes.patch
+   Fixes Xcelium VPI compatibility and final-time value changes. Key
+   changes: skip no-op transitions, handle vpiNamedEvent without calling
+   vpi_get_value (Xcelium aborts otherwise), fix a one byte buffer
+   overrun when dumping X values, traverse vpiInterface scopes, guard
+   unsupported VPI iterators on Xcelium, flush pending value changes
+   before $finish, add a regression testbench.
+
+2. fstdumper-perf-opt.patch (optional)
+   Caches vpiType and vpiSize at registration time and reuses a
+   per-signal buffer in the hot path, removing per value change
+   vpi_get calls and malloc/free.
+
+Original copyright of the patched files:
+
+src/sys_fst.c carries its own header:
+
+  Copyright (c) 1999-2021 Stephen Williams (steve@icarus.com)
+  Licensed under GPL-2.0-or-later.
+
+Modifications:
+
+  Copyright (c) 2026 The wave-mcp project contributors (Tencent).
+  Modified 2026-08-31 for Xcelium compatibility and dump performance.
+
+License of these patches:
+
+The patched file header permits GPL-2.0 or any later version. These
+patch files exercise that option and are distributed under GPL-3.0,
+consistent with the upstream repository top level license. They are not
+covered by the MIT license of wave-mcp.
+
+License texts shipped alongside:
+
+- fstdumper-GPL-3.0.txt: GPL-3.0 full text (upstream top level).
+- GPL-2.0.txt: GPL-2.0 full text (the file header option).
+- fstdumper-sys_fst.NOTICE: verbatim header of src/sys_fst.c.

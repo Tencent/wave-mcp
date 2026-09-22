@@ -49,25 +49,9 @@ def check(area, cond, desc, detail=None):
         print(f"    FAIL [{area}] {desc}: {str(detail)[:200]}")
 
 
-def main():
-    t0 = time.time()
-    print("== build session (Icarus VCD, extended design) ==")
-    mp = pipeline.prepare_session(SESSION_DIR, VCD, top="tb_fourstate_ext",
-                                  filelist=[RTL])["manifest"]
-    s = open_session(mp)
-    fst, rtl = s.fst, s.rtl
-    check("session", rtl.has_netlist, "netlist built")
-    ns = 10 ** (-9 - fst.timescale_exp)
-
-    def vat(path, t_ns):
-        v = fst.value_at(path, int(t_ns * ns))
-        return (v or {}).get("value")
-
-    P = "tb_fourstate_ext.dut"
-
-    # ---- A. always-block guards under X reset ------------------------------
+def _stage_guards(fst, rtl, dut, vat):
     print("== A. if/else guards under X / known reset ==")
-    q = f"{P}.u_guard.q"
+    q = f"{dut}.u_guard.q"
     check("guards", vat(q, 30) is not None and "x" in str(vat(q, 30)),
           "q is X while rst_n undriven (t=30)", vat(q, 30))
     check("guards", vat(q, 75) == "00000000",
@@ -84,10 +68,11 @@ def main():
     check("guards", True in ga or False in ga,
           "guards decidable under known reset (t=75)", ga)
 
-    # ---- B. case / casez ----------------------------------------------------
+
+def _stage_case(fst, rtl, dut, vat):
     print("== B. case / casez drivers ==")
-    y = f"{P}.u_case.y"
-    yz = f"{P}.u_case.yz"
+    y = f"{dut}.u_case.y"
+    yz = f"{dut}.u_case.yz"
     check("case", vat(y, 30) == "0011",
           "plain case: sel=X -> default w2 in Icarus (t=30)", vat(y, 30))
     check("case", vat(y, 100) == "0001", "case sel=00 -> w0 (t=100)", vat(y, 100))
@@ -104,9 +89,10 @@ def main():
     check("case", any(x.endswith(".sel") for x in fi),
           "fan_in(y) includes selector", fi)
 
-    # ---- C. bit/part-select drivers + partial-X bus -------------------------
+
+def _stage_bitsel(fst, rtl, dut, vat):
     print("== C. part-select drivers, partial-X bus ==")
-    mixed = f"{P}.u_bitsel.mixed"
+    mixed = f"{dut}.u_bitsel.mixed"
     v3 = vat(mixed, 3)
     check("bitsel", v3 is not None and set(str(v3)) == {"x"},
           "whole bus X before first clock edge (t=3)", v3)
@@ -119,12 +105,13 @@ def main():
           "full value after lo_en: 0xEC (t=150)", v150)
     drv = rtl.drivers(mixed)
     check("bitsel", len(drv.get("drivers", [])) >= 2,
-          "part-select writes produce >=2 driver records", 
+          "part-select writes produce >=2 driver records",
           [(d.get("line"), d.get("kind")) for d in drv.get("drivers", [])])
 
-    # ---- D. latch under X gate ----------------------------------------------
+
+def _stage_latch(fst, rtl, dut, vat):
     print("== D. latch, X gate ==")
-    lq = f"{P}.u_latch.q"
+    lq = f"{dut}.u_latch.q"
     check("latch", vat(lq, 110) == "1001", "latch transparent lq=ld (t=110)",
           vat(lq, 110))
     check("latch", vat(lq, 165) == "1001", "latch holds after close (t=165)",
@@ -135,12 +122,13 @@ def main():
         r = rtl.trace_x(lq, "185ns")
         check("latch", isinstance(r, dict) and r.get("available"),
               "trace_x on latch under X gate: no crash", str(r)[:120])
-    except Exception as e:  # noqa: BLE001
-        check("latch", False, "trace_x on latch must not crash", e)
+    except Exception as exc:  # pylint: disable=broad-except
+        check("latch", False, "trace_x on latch must not crash", exc)
 
-    # ---- E. for-generate per-bit tri-state ----------------------------------
+
+def _stage_generate(fst, rtl, dut, vat):
     print("== E. for-generate per-bit tri-state array ==")
-    go = f"{P}.u_gen.o"
+    go = f"{dut}.u_gen.o"
     v100 = vat(go, 100)
     check("generate", v100 is not None and set(str(v100)) == {"z"},
           "all bits Z with en=0000 (t=100)", v100)
@@ -158,9 +146,10 @@ def main():
         x.endswith(".v") or ".v" in x for x in fi),
           "fan_in(go) includes en and v", fi)
 
-    # ---- F. wired-OR --------------------------------------------------------
+
+def _stage_wor(fst, rtl, dut, vat):
     print("== F. wired-OR resolution ==")
-    w = f"{P}.u_wor.w"
+    w = f"{dut}.u_wor.w"
     check("wor", vat(w, 30) == "z", "wor floats Z, no driver (t=30)", vat(w, 30))
     check("wor", vat(w, 185) == "1", "wor: A drives 1 (t=185)", vat(w, 185))
     check("wor", vat(w, 220) == "1",
@@ -170,9 +159,9 @@ def main():
     check("wor", ga.count(True) == 2,
           "both wor drivers guard_active=True at contention (t=220)", ga)
 
-    # ---- G. conflict expansion regression (first design) --------------------
+
+def _stage_conflict(s1):
     print("== G. conflict-expansion regression on fourstate_top session ==")
-    s1 = open_session(os.path.join(HERE, "session"))
     bus = "tb_fourstate.dut.u_tri.bus"
     r = s1.rtl.trace_x(bus, "180ns")
     tree = r.get("tree", {})
@@ -196,8 +185,10 @@ def main():
     check("conflict", all(v in (False, None) for v in ga20.values()),
           "no driver reported active while enables X/0 (t=20)", ga20)
 
-    # ---- H. ternary control extraction regression ---------------------------
+
+def _stage_ternary(s1):
     print("== H. ternary control regression ==")
+    bus = "tb_fourstate.dut.u_tri.bus"
     fi = s1.rtl.fan_in(bus).get("fan_in", [])
     check("ternary", any(x.endswith("drv_a_en") for x in fi)
           and any(x.endswith("drv_b_en") for x in fi),
@@ -207,13 +198,45 @@ def main():
         check("ternary", len(d.get("control", [])) > 0,
               f"assign L{d.get('line')} control non-empty", d.get("control"))
 
+
+def main():
+    t0 = time.time()
+    print("== build session (Icarus VCD, extended design) ==")
+    mp = pipeline.prepare_session(SESSION_DIR, VCD, top="tb_fourstate_ext",
+                                  filelist=[RTL])["manifest"]
+    s = open_session(mp)
+    fst, rtl = s.fst, s.rtl
+    check("session", rtl.has_netlist, "netlist built")
+    ns = 10 ** (-9 - fst.timescale_exp)
+
+    def vat(path, t_ns):
+        v = fst.value_at(path, int(t_ns * ns))
+        return (v or {}).get("value")
+
+    dut = "tb_fourstate_ext.dut"
+
+    _stage_guards(fst, rtl, dut, vat)
+    _stage_case(fst, rtl, dut, vat)
+    _stage_bitsel(fst, rtl, dut, vat)
+    _stage_latch(fst, rtl, dut, vat)
+    _stage_generate(fst, rtl, dut, vat)
+    _stage_wor(fst, rtl, dut, vat)
+
+    # G/H reuse the FIRST suite's session (cross-session regression)
+    s1 = open_session(os.path.join(HERE, "session"))
+    _stage_conflict(s1)
+    _stage_ternary(s1)
+
     # ---- report -------------------------------------------------------------
     total = sum(r["checks"] for r in results.values())
     passed = sum(r["passed"] for r in results.values())
-    report = {"suite": "fourstate-ext (Icarus, strict)", 
+    report = {"suite": "fourstate-ext (Icarus, strict)",
               "elapsed_sec": round(time.time() - t0, 2),
               "total_checks": total, "passed": passed,
               "failed": total - passed, "areas": results}
+    # the reports dir is gitignored and not shipped in the bundle: create it
+    # here so a fresh checkout or bundle install can write its report
+    os.makedirs(os.path.dirname(REPORT), exist_ok=True)
     with open(REPORT, "w") as fh:
         json.dump(report, fh, indent=2)
     print(f"\n{'='*60}")

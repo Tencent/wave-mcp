@@ -13,7 +13,7 @@
 // The FAIL run asserts crc_err at the first bad packet; PASS never does.
 //
 // Agent workflow this demo exercises:
-//   diff_waveforms(pass.fst, fail.fst, clock=clk, after=reset)
+//   diff_waveforms([pass.fst, fail.fst], clock=clk, after=reset)
 //   -> first_divergence + diverging_signals -> open_wave_view with BOTH
 //   FSTs (labels pass/fail), diff reference, red marker at divergence,
 //   cursor there, annotation with the fanin conclusion.

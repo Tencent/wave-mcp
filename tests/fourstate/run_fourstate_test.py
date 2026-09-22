@@ -69,16 +69,18 @@ def value_near(fst, path, t_ns):
     return fst.value_at(path, int(t_ns * scale))
 
 
-def main():
-    t0 = time.time()
+def _checked(tool, why, fn, is_ok, detail_fn=None):
+    """Run a probe; any exception becomes a FAIL with the message attached."""
+    try:
+        value = fn()
+        check(tool, is_ok(value), why, detail_fn(value) if detail_fn else value)
+    except Exception as exc:  # pylint: disable=broad-except
+        check(tool, False, why, f"CRASH: {exc}")
 
-    # ---- 1. Icarus VCD -> FST -> session (dialect + pipeline check) -------
+
+def _stage_prepare(fst, rtl):
+    """Build the Icarus session and return the key signal paths (or None)."""
     print("== prepare_session from Icarus VCD ==")
-    manifest_path = pipeline.prepare_session(
-        SESSION_DIR, VCD, top="tb_fourstate", filelist=[RTL])["manifest"]
-    s = open_session(manifest_path)
-    fst, rtl = s.fst, s.rtl
-
     check("convert_vcd_to_fst", fst is not None, "Icarus VCD converted and opened")
     check("convert_vcd_to_fst", fst.timescale_exp == -12,
           "1ps timescale preserved", f"exp={fst.timescale_exp}")
@@ -101,65 +103,71 @@ def main():
         check("prepare_session", p is not None, f"signal {name} found in FST", p)
     if not all([din, dout, stage, bus]):
         print("FATAL: key signals missing, aborting")
-        _write_report(t0)
-        return 1
+        return None
+    return {"din": din, "dout": dout, "stage": stage, "bus": bus,
+            "sigs": sigs}
 
-    # ---- 2. X values through value_at / values_between --------------------
+
+def _stage_x(fst, sig):
     print("== 4-state values: X ==")
+    din, stage, dout = sig["din"], sig["stage"], sig["dout"]
     v = value_near(fst, din, 20)
-    check("signal_value_at", has_x(v.get("value") if v else None),
+    check("signal_values(time=)", has_x(v.get("value") if v else None),
           "din is X before being driven (t=20ns)", v)
     v = value_near(fst, stage, 60)
-    check("signal_value_at", has_x(v.get("value") if v else None),
+    check("signal_values(time=)", has_x(v.get("value") if v else None),
           "stage register X before din driven (t=60ns)", v)
     v = value_near(fst, dout, 70)
-    check("signal_value_at", has_x(v.get("value") if v else None),
+    check("signal_values(time=)", has_x(v.get("value") if v else None),
           "X propagates through XOR into dout (t=70ns)", v)
     v = value_near(fst, dout, 115)
-    check("signal_value_at", v and not has_x(v.get("value")),
+    check("signal_values(time=)", v and not has_x(v.get("value")),
           "X cleared after din driven (t=115ns)", v)
     if v and not has_x(v.get("value")):
         got = int(str(v["value"]), 2)
-        check("signal_value_at", got == (0x3C ^ 0x5A),
+        check("signal_values(time=)", got == (0x3C ^ 0x5A),
               "post-X value correct: 0x3C^0x5A", hex(got))
 
-    # ---- 3. Z and contention on the tri-state bus --------------------------
+
+def _stage_z(fst, bus):
     print("== 4-state values: Z / contention ==")
     v = value_near(fst, bus, 20)
-    check("signal_value_at", has_z(v.get("value") if v else None),
+    check("signal_values(time=)", has_z(v.get("value") if v else None),
           "bus floats Z with no driver (t=20ns)", v)
     v = value_near(fst, bus, 140)
     if v and not (has_x(v.get("value")) or has_z(v.get("value"))):
-        check("signal_value_at", int(str(v["value"]), 2) == 0xA,
+        check("signal_values(time=)", int(str(v["value"]), 2) == 0xA,
               "single driver: bus = a_val (t=140ns)", v)
     else:
-        check("signal_value_at", False, "single driver: bus = a_val (t=140ns)", v)
+        check("signal_values(time=)", False, "single driver: bus = a_val (t=140ns)", v)
     v = value_near(fst, bus, 180)
-    check("signal_value_at", has_x(v.get("value") if v else None),
+    check("signal_values(time=)", has_x(v.get("value") if v else None),
           "contention -> bus X (t=180ns)", v)
     v = value_near(fst, bus, 220)
-    check("signal_value_at", has_z(v.get("value") if v else None),
+    check("signal_values(time=)", has_z(v.get("value") if v else None),
           "drivers off -> bus back to Z (t=220ns)", v)
 
     # full timeline must contain x and z states without crashing
     exp = fst.timescale_exp
     rows = fst.values_between(bus, 0, 240 * 10 ** (-9 - exp), max_values=500)
-    check("signal_values_in_range", rows is not None and len(rows) >= 4,
+    check("signal_values(start,end)", rows is not None and len(rows) >= 4,
           "bus timeline retrieved", len(rows) if rows else None)
     if rows:
         seen = "".join(str(r.get("value", "")) for r in rows).lower()
-        check("signal_values_in_range", "x" in seen, "timeline contains X states")
-        check("signal_values_in_range", "z" in seen, "timeline contains Z states")
+        check("signal_values(start,end)", "x" in seen, "timeline contains X states")
+        check("signal_values(start,end)", "z" in seen, "timeline contains Z states")
 
-    # ---- 4. trace_x on real X data -----------------------------------------
+
+def _stage_trace_x(rtl, sig):
     print("== trace_x on real 4-state data ==")
-    for t_ns, sig, expect_x, why in [
+    dout, bus = sig["dout"], sig["bus"]
+    for t_ns, target, expect_x, why in [
             (70, dout, True, "dout X at 70ns (from un-driven din)"),
             (180, bus, True, "bus X at 180ns (contention)"),
             (115, dout, False, "dout valid at 115ns (no X to trace)")]:
+        init("trace_x")
         try:
-            r = rtl.trace_x(sig, f"{t_ns}ns")
-            init("trace_x")
+            r = rtl.trace_x(target, f"{t_ns}ns")
             if expect_x:
                 ok = isinstance(r, dict) and (
                     r.get("tree") or r.get("root") or r.get("is_x")
@@ -170,27 +178,29 @@ def main():
                 ok = isinstance(r, dict) and ("no-x" in txt or "not" in txt
                                               or r.get("is_x") is False)
                 check("trace_x", ok, why, str(r)[:200])
-        except Exception as e:  # noqa: BLE001 - crash IS the failure signal here
-            check("trace_x", False, why, f"CRASH: {e}")
+        except Exception as exc:  # pylint: disable=broad-except
+            check("trace_x", False, why, f"CRASH: {exc}")
 
-    # ---- 5. active_drivers with 4-state guards ------------------------------
+
+def _stage_active_drivers(rtl, bus):
     print("== active_drivers under X/Z ==")
     for t_ns, why in [(20, "all-X time"), (180, "contention time")]:
         try:
             r = rtl.active_drivers(bus, f"{t_ns}ns")
             check("active_drivers", isinstance(r, dict),
                   f"no crash at {why}", str(r)[:150])
-        except Exception as e:  # noqa: BLE001
-            check("active_drivers", False, f"no crash at {why}", f"CRASH: {e}")
+        except Exception as exc:  # pylint: disable=broad-except
+            check("active_drivers", False, f"no crash at {why}", f"CRASH: {exc}")
     try:
         r = rtl.drivers(bus)
         n = len(r.get("drivers", [])) if isinstance(r, dict) else 0
         check("signal_drivers", n >= 2,
               "both tri-state drivers found on bus", n)
-    except Exception as e:  # noqa: BLE001
-        check("signal_drivers", False, "both tri-state drivers found", str(e))
+    except Exception as exc:  # pylint: disable=broad-except
+        check("signal_drivers", False, "both tri-state drivers found", str(exc))
 
-    # ---- 6. partial dump: RTL-only signal ----------------------------------
+
+def _stage_partial_dump(fst, rtl, sigs):
     print("== partial dump (u_inner not in waveform) ==")
     inner = [p for p in sigs if "u_inner" in p]
     check("partial_dump", len(inner) == 0,
@@ -205,31 +215,32 @@ def main():
         v = value_near(fst, ghost, 100)
         check("partial_dump", v is None or v == {} or not v.get("value"),
               "not-dumped signal returns empty, no crash", v)
-    except Exception as e:  # noqa: BLE001
-        check("partial_dump", False, "not-dumped signal must not crash", str(e))
+    except Exception as exc:  # pylint: disable=broad-except
+        check("partial_dump", False, "not-dumped signal must not crash", str(exc))
     # drivers (static) still work for the not-dumped scope
     try:
         r = rtl.drivers("tb_fourstate.dut.u_hidden.u_inner.shadow")
         ok = isinstance(r, dict)
         check("partial_dump", ok, "static drivers for not-dumped signal",
               str(r)[:150])
-    except Exception as e:  # noqa: BLE001
+    except Exception as exc:  # pylint: disable=broad-except
         check("partial_dump", False, "static drivers for not-dumped signal",
-              f"CRASH: {e}")
+              f"CRASH: {exc}")
 
-    # ---- 7. negative paths ---------------------------------------------------
+
+def _stage_negative(fst, bus):
     print("== negative paths ==")
     try:
         v = fst.value_at("no.such.signal[1:0]", 100)
         check("negative", v is None or v == {},
               "nonexistent signal -> None, no crash", v)
-    except Exception as e:  # noqa: BLE001
-        check("negative", False, "nonexistent signal must not crash", str(e))
+    except Exception as exc:  # pylint: disable=broad-except
+        check("negative", False, "nonexistent signal must not crash", str(exc))
     try:
         v = value_near(fst, bus, 10_000)  # way past end_time
         check("negative", True, "out-of-range time: no crash", v)
-    except Exception as e:  # noqa: BLE001
-        check("negative", False, "out-of-range time must not crash", str(e))
+    except Exception as exc:  # pylint: disable=broad-except
+        check("negative", False, "out-of-range time must not crash", str(exc))
 
     corrupt = os.path.join(HERE, "sim", "corrupt.fst")
     with open(corrupt, "wb") as fh:
@@ -238,13 +249,33 @@ def main():
         from wave_mcp.sources.fst_source import FstSource
         FstSource(corrupt)
         check("negative", False, "corrupted FST must raise a clean error")
-    except Exception as e:  # noqa: BLE001 - a typed error is the PASS here
-        check("negative", "fst" in str(e).lower() or "open" in str(e).lower()
-              or "read" in str(e).lower(),
-              "corrupted FST raises informative error", str(e)[:120])
+    except Exception as exc:  # pylint: disable=broad-except
+        check("negative", "fst" in str(exc).lower() or "open" in str(exc).lower()
+              or "read" in str(exc).lower(),
+              "corrupted FST raises informative error", str(exc)[:120])
     finally:
         os.remove(corrupt)
 
+
+def main():
+    t0 = time.time()
+
+    print("== prepare_session from Icarus VCD ==")
+    manifest_path = pipeline.prepare_session(
+        SESSION_DIR, VCD, top="tb_fourstate", filelist=[RTL])["manifest"]
+    s = open_session(manifest_path)
+    fst, rtl = s.fst, s.rtl
+
+    sig = _stage_prepare(fst, rtl)
+    if sig is None:
+        return _write_report(t0)
+
+    _stage_x(fst, sig)
+    _stage_z(fst, sig["bus"])
+    _stage_trace_x(rtl, sig)
+    _stage_active_drivers(rtl, sig["bus"])
+    _stage_partial_dump(fst, rtl, sig["sigs"])
+    _stage_negative(fst, sig["bus"])
     return _write_report(t0)
 
 
@@ -259,6 +290,9 @@ def _write_report(t0):
         "failed": total - passed,
         "tools": results,
     }
+    # the reports dir is gitignored and not shipped in the bundle: create it
+    # here so a fresh checkout or bundle install can write its report
+    os.makedirs(os.path.dirname(REPORT), exist_ok=True)
     with open(REPORT, "w") as fh:
         json.dump(report, fh, indent=2)
     print(f"\n{'='*60}")

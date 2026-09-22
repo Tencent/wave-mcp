@@ -8,13 +8,17 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
 
 import pytest
 
 from wave_mcp import convert
 
 REPO = os.path.normpath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
+#: True only in a source checkout: the offline bundle does not ship
+#: MANIFEST.in / pyproject.toml at its root, so assertions that read the
+#: packaging config itself must skip there. The install-layout assertions in
+#: TestBuildInputsResolvable still run and still guard the shipped sources.
+_IS_CHECKOUT = os.path.isfile(os.path.join(REPO, "pyproject.toml"))
 
 
 class TestBuildInputsResolvable:
@@ -45,6 +49,8 @@ class TestBuildInputsResolvable:
             os.path.abspath(os.path.join(REPO, "third_party", "fsdb2fst"))
 
 
+@pytest.mark.skipif(not _IS_CHECKOUT,
+                    reason="packaging config not shipped in the offline bundle")
 class TestPackagingDeclaresBuildInputs:
     """The packaging config itself must keep shipping these files."""
 

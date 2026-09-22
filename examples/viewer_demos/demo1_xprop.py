@@ -13,7 +13,6 @@ data_out carries X in its upper bits on EVERY packet. The agent:
 Run:  python3 demo1_xprop.py
 """
 import json
-import subprocess
 import sys
 
 from common import DemoDriver, HERE, as_time
@@ -28,16 +27,16 @@ def main() -> int:
 
     # ---- 1. open the session and locate the X --------------------------
     print(d.call("open_session", {"session_path": str(SESSION)}))
-    d.call("signal_values", {"full_path": "xprop_tb.data_out"})
-    values = d.last_structured().get("values", [])
+    d.call("signal_values", {"paths": "xprop_tb.data_out"})
+    values = d.value_rows()
     x_rows = [v for v in values if "x" in v.get("value", "")]
     assert x_rows, "expected X values on data_out"
     first_x_time = as_time(x_rows[0]["time"])
     print(f"[demo1] data_out X on every packet; first X at {first_x_time}")
 
     # ---- 2. root cause: trace_x backtracks through the RTL -------------
-    d.call("trace_x", {"signal_path": "xprop_tb.dut.data_out",
-                       "time_point": first_x_time})
+    d.call("trace_x", {"path": "xprop_tb.dut.data_out",
+                       "time": first_x_time})
     trace = d.last_structured()
     suspects = json.dumps(trace)
     cause = ("byte_cnt never reset" if "byte_cnt" in suspects
@@ -45,7 +44,7 @@ def main() -> int:
     print(f"[demo1] trace_x root cause: {cause}")
 
     # also show WHERE the counter is driven (declaration + assignments)
-    d.call("signal_drivers", {"full_path": "xprop_tb.dut.byte_cnt"})
+    d.call("signal_drivers", {"path": "xprop_tb.dut.byte_cnt"})
 
     # ---- 3. present in the viewer --------------------------------------
     # signals: grouped datapath vs control, X-carrying bus in hex

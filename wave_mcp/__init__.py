@@ -7,4 +7,4 @@ Data sources aggregated by the server:
   * RTL static analysis    -> connectivity / driver / trace (pyslang netlist)
 """
 
-__version__ = "0.2.6"
+__version__ = "1.0.0"

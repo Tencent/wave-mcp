@@ -20,6 +20,58 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 from ..netlist.trace_engine import TraceEngine
+from ..runtime import storage
+from ..runtime.identity import file_version
+from ..runtime.storage import StoragePolicy
+
+try:  # optional C-accelerated cache; installed via the "perf" extra
+    import msgpack as _msgpack
+except ImportError:  # installs without it keep working on plain JSON
+    _msgpack = None
+
+
+def _maps_cache_path(maps_path: str) -> str:
+    """Derived-cache location of the msgpack form of ``maps_path``.
+
+    Keyed by the maps file's ``file_version``: a rebuilt netlist gets a new
+    file, an unchanged one keeps hitting the same entry, and nothing is ever
+    written next to the user's session artefacts.
+    """
+    pol = storage.policy()
+    return os.path.join(pol.cache_dir("netlist-cache", create=True),
+                        file_version(maps_path) + ".msgpack")
+
+
+def _load_maps_json(maps_path: str) -> dict:
+    """Load a netlist maps.json, through its msgpack cache when available.
+
+    msgpack parses the same structure several times faster than JSON; the
+    cache is written lazily on the first JSON load. Any problem with the cache
+    falls back to plain JSON (and the entry is replaced), and any problem with
+    both yields ``{}`` exactly as the old inline loader did.
+    """
+    cache_path = None
+    if _msgpack is not None and os.path.exists(maps_path):
+        try:
+            cache_path = _maps_cache_path(maps_path)
+            if os.path.exists(cache_path):
+                with open(cache_path, "rb") as fh:
+                    return _msgpack.unpack(fh, raw=False)
+        except Exception:  # pylint: disable=broad-except
+            if cache_path:
+                StoragePolicy.discard(cache_path)  # corrupt: rebuild below
+    try:
+        with open(maps_path) as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    if _msgpack is not None and data and cache_path:
+        try:
+            StoragePolicy.atomic_write_bytes(
+                cache_path, _msgpack.packb(data, use_bin_type=True))
+        except OSError:
+            pass  # cache is an optimisation; never fail the load over it
+    return data
 
 
 @dataclass
@@ -45,11 +97,11 @@ class RtlSource:
             self._load_maps(maps_path)
 
     def _load_maps(self, maps_path: str):
-        try:
-            with open(maps_path) as fh:
-                self.maps = json.load(fh)
-        except (OSError, ValueError):
-            self.maps = {}
+        # msgpack sidecar when available; plain JSON otherwise (see
+        # _load_maps_json). An empty result keeps the previous behaviour:
+        # degrade gracefully, never raise.
+        self.maps = _load_maps_json(maps_path)
+        if not self.maps:
             return
         self._maps_dir = os.path.dirname(os.path.abspath(maps_path))
         self._normalize_map_paths()
@@ -164,6 +216,34 @@ class RtlSource:
                 return int(info["width"])
         return None
 
+    def _unavailable_health(self) -> dict:
+        return {
+            "available": False,
+            "status": "unavailable",
+            "trust": "none",
+            "modules": 0,
+            "reason": "netlist not built (elaboration failed or no sources)",
+            "hint": "pass a filelist with +incdir+/+define+ (or incdirs=/"
+                    "defines= to prepare_session); connectivity/driver/trace "
+                    "are disabled until the netlist builds",
+        }
+
+    def _extend_health_guidance(self, health: dict, dsum: dict) -> None:
+        """Attach actionable hints, top diagnostic codes and self-healing info."""
+        if dsum.get("actionable_hints"):
+            health["actionable_hints"] = dsum["actionable_hints"]
+        if dsum.get("by_code"):
+            health["top_diagnostic_codes"] = dict(
+                list(dsum["by_code"].items())[:6])
+        # self-healing report: incdirs/package-files the builder auto-discovered
+        # (so the user can fold them back into the .f) and any tops that failed.
+        auto = self.maps.get("auto_resolved") or {}
+        if (auto.get("added_incdirs") or auto.get("added_files")
+                or auto.get("rounds") or auto.get("uvm_incdirs")):
+            health["auto_resolved"] = auto
+        if self.maps.get("failed_tops"):
+            health["failed_tops"] = self.maps["failed_tops"]
+
     def netlist_health(self) -> dict:
         """Netlist-build health so callers know whether to trust connectivity /
         driver / trace answers (and why they might be limited).
@@ -173,16 +253,7 @@ class RtlSource:
         ``status``/``trust`` verdict with an actionable hint on failure.
         """
         if not self.has_netlist:
-            return {
-                "available": False,
-                "status": "unavailable",
-                "trust": "none",
-                "modules": 0,
-                "reason": "netlist not built (elaboration failed or no sources)",
-                "hint": "pass a filelist with +incdir+/+define+ (or incdirs=/"
-                        "defines= to prepare_session); connectivity/driver/trace "
-                        "are disabled until the netlist builds",
-            }
+            return self._unavailable_health()
         mods = self.maps.get("modules", {})
         diagnostics = int(self.maps.get("diagnostics", 0) or 0)
         skipped = sum(int(m.get("skipped_members", 0) or 0) for m in mods.values())
@@ -222,21 +293,7 @@ class RtlSource:
                      "connectivity/trace paths may be incomplete only if "
                      "errors > 0."),
         }
-        # surface actionable guidance (missing include/define/package) so the
-        # user knows exactly what to add to make the netlist complete.
-        if dsum.get("actionable_hints"):
-            health["actionable_hints"] = dsum["actionable_hints"]
-        if dsum.get("by_code"):
-            health["top_diagnostic_codes"] = dict(
-                list(dsum["by_code"].items())[:6])
-        # self-healing report: incdirs/package-files the builder auto-discovered
-        # (so the user can fold them back into the .f) and any tops that failed.
-        auto = self.maps.get("auto_resolved") or {}
-        if (auto.get("added_incdirs") or auto.get("added_files")
-                or auto.get("rounds") or auto.get("uvm_incdirs")):
-            health["auto_resolved"] = auto
-        if self.maps.get("failed_tops"):
-            health["failed_tops"] = self.maps["failed_tops"]
+        self._extend_health_guidance(health, dsum)
         return health
 
     # -- category 8: files -------------------------------------------------
@@ -456,11 +513,22 @@ class RtlSource:
         return {"available": True, "signal": full_path,
                 "loads": [self._full(inst, s) for s in lds]}
 
-    def fan_in(self, signal_path: str, transitive: bool = False,
-               max_signals: int = 500) -> dict:
+    #: Upper bound on ``max_depth`` for fan-in / fan-out walks.
+    MAX_DEPTH = 8
+
+    @classmethod
+    def _hops(cls, max_depth: int) -> int:
+        """Boundary hops a ``max_depth`` allows: 1 is direct only (0 hops)."""
+        return max(0, min(int(max_depth), cls.MAX_DEPTH) - 1)
+
+    def fan_in(self, signal_path: str, max_depth: int = 1,
+               limit: int = 500) -> dict:
+        """Signals that can affect this one; ``max_depth=1`` is the direct set."""
         if not self.has_netlist:
             return Unavailable("signal_fanin", "netlist not built").to_dict()
-        res = self._fanin_paths(signal_path, transitive, max_signals, 0, None)
+        transitive = max_depth > 1
+        res = self._fanin_paths(signal_path, transitive, limit, 0, None,
+                                self._hops(max_depth))
         if res:
             return {"available": True, "signal": signal_path,
                     "fan_in": res}
@@ -471,7 +539,7 @@ class RtlSource:
 
     def _fanin_paths(self, signal_path: str, transitive: bool,
                      max_signals: int, depth: int,
-                     seen: Optional[set]) -> List[str]:
+                     seen: Optional[set], hops: Optional[int] = None) -> List[str]:
         """Fan-in as full paths, following boundary nets across the hierarchy.
 
         A net with no module-local fan-in record is not undriven: it is a
@@ -497,18 +565,19 @@ class RtlSource:
         if res:
             return [self._full(inst, s) for s in res]
         return self._fanin_via_peers(signal_path, transitive, max_signals,
-                                     depth, seen)
+                                     depth, seen, hops)
 
     def _fanin_via_peers(self, signal_path: str, transitive: bool,
                          max_signals: int, depth: int,
-                         seen: Optional[set]) -> List[str]:
+                         seen: Optional[set], hops: Optional[int] = None) -> List[str]:
         """Peer ports of a boundary net, one hierarchy hop away.
 
         Direct mode returns every directly connected peer. Transitive mode
         returns the peers plus the cone behind each of them, chaining through
-        further boundary hops (bounded by ``_MAX_HOPS`` and ``max_signals``).
+        further boundary hops (bounded by ``hops`` and ``max_signals``).
         """
-        if depth >= self._MAX_HOPS:
+        cap = self._MAX_HOPS if hops is None else hops
+        if depth > cap:
             return []
         seen = set() if seen is None else seen
         seen.add(signal_path)
@@ -518,12 +587,87 @@ class RtlSource:
                 peers.append(peer)
         if not peers:
             return []
-        if not transitive:
+        if not transitive or depth >= cap:
             return sorted(set(peers))
         out = set(peers)
         for peer in peers:
             out.update(self._fanin_paths(peer, True, max_signals,
-                                         depth + 1, seen))
+                                         depth + 1, seen, hops))
+            if len(out) >= max_signals:
+                break
+        return sorted(out)[:max_signals]
+
+    def fan_out(self, signal_path: str, max_depth: int = 1,
+                limit: int = 500) -> dict:
+        """Signals this one can affect (forward reachability).
+
+        The mirror of :meth:`fan_in`. ``loads`` answers one hop of the same
+        question but stops at the module-local record; this follows the chain,
+        including across hierarchy boundaries, so "what does this signal
+        eventually reach" is one call.
+        """
+        if not self.has_netlist:
+            return Unavailable("signal_downstream", "netlist not built").to_dict()
+        transitive = max_depth > 1
+        res = self._fanout_paths(signal_path, transitive, limit, 0, None,
+                                 self._hops(max_depth))
+        if res:
+            return {"available": True, "signal": signal_path, "fan_out": res}
+        inst, leaf, mod = self._resolve(signal_path)
+        reason, hint = self.engine.classify_empty(inst, leaf, mod, "loads")
+        return {"available": True, "signal": signal_path,
+                "fan_out": [], "reason": reason, "hint": hint}
+
+    def _fanout_paths(self, signal_path: str, transitive: bool,
+                      max_signals: int, depth: int,
+                      seen: Optional[set], hops: Optional[int] = None) -> List[str]:
+        """Fan-out as full paths, following boundary nets across the hierarchy.
+
+        Mirrors :meth:`_fanin_paths`: a net with no module-local loads record is
+        not a dead end, it is a boundary net whose consumers sit on the other
+        side of the connection.
+        """
+        inst, leaf, mod = self._resolve(signal_path)
+        if not mod or mod not in self.maps["modules"]:
+            return []
+        lmap = self.maps["modules"][mod].get("loads", {})
+        if not transitive:
+            res = lmap.get(leaf, [])
+        else:
+            known, stack = set(), list(lmap.get(leaf, []))
+            while stack and len(known) < max_signals:
+                s = stack.pop()
+                if s in known:
+                    continue
+                known.add(s)
+                stack.extend(lmap.get(s, []))
+            res = sorted(known)
+        if res:
+            return [self._full(inst, s) for s in res]
+        return self._fanout_via_peers(signal_path, transitive, max_signals,
+                                      depth, seen, hops)
+
+    def _fanout_via_peers(self, signal_path: str, transitive: bool,
+                          max_signals: int, depth: int,
+                          seen: Optional[set], hops: Optional[int] = None) -> List[str]:
+        """Peer ports a boundary net drives, one hierarchy hop away."""
+        cap = self._MAX_HOPS if hops is None else hops
+        if depth > cap:
+            return []
+        seen = set() if seen is None else seen
+        seen.add(signal_path)
+        peers = []
+        for peer in self._peer_paths(signal_path, "loads"):
+            if peer not in seen and peer not in peers:
+                peers.append(peer)
+        if not peers:
+            return []
+        if not transitive or depth >= cap:
+            return sorted(set(peers))
+        out = set(peers)
+        for peer in peers:
+            out.update(self._fanout_paths(peer, True, max_signals,
+                                          depth + 1, seen, hops))
             if len(out) >= max_signals:
                 break
         return sorted(out)[:max_signals]

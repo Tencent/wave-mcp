@@ -74,7 +74,11 @@ def format_fst_time(units: int, timescale_exp: int) -> str:
     """
     seconds = fst_units_to_seconds(units, timescale_exp)
     if seconds == 0:
-        return "0"
+        # Zero carries the waveform's own unit so every rendered time has one.
+        # (100ps -> ps): the largest unit not coarser than the timescale.
+        unit = min((u for u, e in _UNIT_EXP.items() if e <= timescale_exp),
+                   key=lambda u: -_UNIT_EXP[u], default="fs")
+        return f"0{unit}"
     for unit, exp in sorted(_UNIT_EXP.items(), key=lambda kv: kv[1], reverse=True):
         scaled = seconds / (10.0 ** exp)
         if abs(scaled) >= 1.0:

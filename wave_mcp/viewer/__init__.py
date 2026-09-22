@@ -5,7 +5,7 @@ separately from the MIT core). Lookup order (first hit wins):
 
 1. ``WAVE_MCP_VIEWER_ASSETS`` env var (offline bundle sets this)
 2. installed ``wave_mcp_viewer_assets`` pip package
-3. ``~/.cache/wave-mcp/viewer/`` (populated by first-run download)
+3. ``~/.wave-mcp/cache/viewer/`` (populated by first-run download)
 
 A valid asset dir contains ``surver`` (executable) and ``wasm/index.html``.
 """
@@ -17,7 +17,9 @@ import socket
 from pathlib import Path
 from typing import Any, Dict, Optional, Sequence
 
-_CACHE_DIR = Path.home() / ".cache" / "wave-mcp" / "viewer"
+from ..runtime import storage
+
+_CACHE_DIR = Path(storage.policy().cache_dir("viewer", create=False))
 
 #: Port range size when a deterministic base is configured. Two ports are
 #: needed per view (shell HTTP server + streaming backend), so a window of 64
@@ -114,20 +116,22 @@ def alloc_port_socket(host: str = "127.0.0.1") -> socket.socket:
 def _valid(root: Path) -> bool:
     return (root / "surver").is_file() and (root / "wasm" / "index.html").is_file()
 
+
 #: Why an explicitly configured WAVE_MCP_VIEWER_ASSETS was rejected, if it was.
 #: Kept so the degradation hint can name the real cause instead of telling a
 #: user who did configure the env var to "set WAVE_MCP_VIEWER_ASSETS".
-_env_miss: Optional[str] = None
+_ENV_MISS: Optional[str] = None
 
 #: Why the installed assets package / the user cache was rejected, if either
 #: was found but incomplete. Without these, a user whose pip package was
 #: installed but broken was told to "pip install wave-mcp[viewer]" again,
 #: which pointed away from the actual problem.
-_pip_miss: Optional[str] = None
-_cache_miss: Optional[str] = None
+_PIP_MISS: Optional[str] = None
+_CACHE_MISS: Optional[str] = None
+
 
 def _record_env_miss(raw: str, resolved: Path) -> None:
-    global _env_miss
+    global _ENV_MISS
     detail = f"WAVE_MCP_VIEWER_ASSETS={raw!r}"
     if str(resolved) != raw:
         detail += f" (resolved to {resolved})"
@@ -135,11 +139,12 @@ def _record_env_miss(raw: str, resolved: Path) -> None:
         detail += " does not exist"
     else:
         detail += " is missing surver and/or wasm/index.html"
-    _env_miss = detail
+    _ENV_MISS = detail
+
 
 def find_assets() -> Optional[Dict[str, Any]]:
     """Locate viewer assets; return {root, surver, wasm, origin} or None."""
-    global _pip_miss, _cache_miss
+    global _PIP_MISS, _CACHE_MISS
     # 1. explicit env (air-gapped bundle)
     env = os.environ.get("WAVE_MCP_VIEWER_ASSETS")
     if env:
@@ -147,9 +152,7 @@ def find_assets() -> Optional[Dict[str, Any]]:
         # relative value here would resolve against a cwd nobody intended and
         # then silently degrade to "viewer unavailable". Anchor it on $HOME
         # (a stable, user-owned base) and keep the reason retrievable.
-        root = Path(env).expanduser()
-        if not root.is_absolute():
-            root = Path.home() / root
+        root = Path(storage.user_path(env, home_relative=True))
         if _valid(root):
             return _hit(root, "env")
         _record_env_miss(env, root)
@@ -160,7 +163,7 @@ def find_assets() -> Optional[Dict[str, Any]]:
         root = Path(wave_mcp_viewer_assets.__file__).parent / "data"
         if _valid(root):
             return _hit(root, "pip")
-        _pip_miss = (f"the installed viewer assets package at {root} is "
+        _PIP_MISS = (f"the installed viewer assets package at {root} is "
                      "missing surver and/or wasm/index.html")
     except ImportError:
         pass
@@ -169,7 +172,7 @@ def find_assets() -> Optional[Dict[str, Any]]:
     if _valid(_CACHE_DIR):
         return _hit(_CACHE_DIR, "cache")
     if _CACHE_DIR.exists():
-        _cache_miss = (f"the cached viewer assets at {_CACHE_DIR} are "
+        _CACHE_MISS = (f"the cached viewer assets at {_CACHE_DIR} are "
                        "incomplete (need surver and wasm/index.html)")
 
     return None
@@ -190,32 +193,35 @@ def unavailable_hint() -> Dict[str, Any]:
     ``available: false`` is reserved for the viewer feature itself being
     unusable; parameter mistakes return ``invalid_argument_payload`` instead,
     so a typo never reads as an outage."""
-    if _env_miss:
+    if _ENV_MISS:
         hint = (
-            f"viewer assets not found: {_env_miss}. Point "
+            f"viewer assets not found: {_ENV_MISS}. Point "
             "WAVE_MCP_VIEWER_ASSETS at a directory containing `surver` and "
-            "`wasm/index.html` (use an absolute path), or install with "
-            "`pip install wave-mcp[viewer]`. Analysis tools are unaffected."
+            "`wasm/index.html` (use an absolute path). wave-mcp does not "
+            "distribute these EUPL-1.2 assets; build them locally, see "
+            "docs/SELF_BUILD.md. Analysis tools are unaffected."
         )
-    elif _pip_miss:
+    elif _PIP_MISS:
         hint = (
-            f"viewer assets not usable: {_pip_miss}. Reinstall with "
-            "`pip install --force-reinstall wave-mcp[viewer]`, or point "
-            "WAVE_MCP_VIEWER_ASSETS at a complete asset directory. Analysis "
+            f"viewer assets not usable: {_PIP_MISS}. The assets package is "
+            "no longer distributed; build the assets locally (see "
+            "docs/SELF_BUILD.md), then set WAVE_MCP_VIEWER_ASSETS or place "
+            f"them under {_CACHE_DIR}. Analysis tools are unaffected."
+        )
+    elif _CACHE_MISS:
+        hint = (
+            f"viewer assets not usable: {_CACHE_MISS}. Delete that "
+            "directory and rebuild the assets locally (see "
+            "docs/SELF_BUILD.md), or set WAVE_MCP_VIEWER_ASSETS. Analysis "
             "tools are unaffected."
-        )
-    elif _cache_miss:
-        hint = (
-            f"viewer assets not usable: {_cache_miss}. Delete that directory "
-            "and reinstall `wave-mcp[viewer]` to re-download, or set "
-            "WAVE_MCP_VIEWER_ASSETS. Analysis tools are unaffected."
         )
     else:
         hint = (
-            "viewer assets not found; install with `pip install "
-            "wave-mcp[viewer]`, or set WAVE_MCP_VIEWER_ASSETS to an asset "
-            "directory (absolute path; offline bundles ship one), or place "
-            f"assets under {_CACHE_DIR}. Analysis tools are unaffected."
+            "viewer assets not found. wave-mcp does not distribute the "
+            "EUPL-1.2 viewer assets (Surfer WASM + surver); build them "
+            "locally following docs/SELF_BUILD.md, then set "
+            "WAVE_MCP_VIEWER_ASSETS to the asset directory (absolute path) "
+            f"or place it under {_CACHE_DIR}. Analysis tools are unaffected."
         )
     return {
         "status": "error",
@@ -224,6 +230,7 @@ def unavailable_hint() -> Dict[str, Any]:
         "feature": "wave viewer",
         "hint": hint,
     }
+
 
 def invalid_argument_payload(exc: BaseException) -> Dict[str, Any]:
     """Structured reply for a rejected viewer request.

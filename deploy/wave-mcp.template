@@ -7,6 +7,7 @@ set -euo pipefail
 
 BUNDLE="@BUNDLE@"
 RUNTIME="@RUNTIME@"
+PREFIX="@PREFIX@"
 
 # An MCP client spawns this launcher with its own cwd (usually the project
 # directory), not the install directory. A relative RUNTIME would then resolve
@@ -35,12 +36,19 @@ if [[ ! -x "$PY" ]]; then
   exit 127
 fi
 
-# make the bundled vcd2fst (+ its libs) discoverable for VCD->FST conversion
-if [[ -x "$BUNDLE/bin/vcd2fst" ]]; then
-  export PATH="$BUNDLE/bin:$PATH"
-  export VCD2FST_BIN="$BUNDLE/bin/vcd2fst"
-  [[ -d "$BUNDLE/bin/lib" ]] && export LD_LIBRARY_PATH="$BUNDLE/bin/lib:${LD_LIBRARY_PATH:-}"
-fi
+# make vcd2fst (+ its libs) discoverable for VCD->FST conversion. install.sh
+# copies bin/vcd2fst + bin/lib into the (persistent) install prefix; prefer
+# that copy so a cleaned-up unpack directory (e.g. /tmp) cannot break
+# conversion. The original bundle location stays as a fallback for old
+# installs whose prefix predates the copy.
+for VCDROOT in "$PREFIX" "$BUNDLE"; do
+  if [[ -x "$VCDROOT/bin/vcd2fst" ]]; then
+    export PATH="$VCDROOT/bin:$PATH"
+    export VCD2FST_BIN="$VCDROOT/bin/vcd2fst"
+    [[ -d "$VCDROOT/bin/lib" ]] && export LD_LIBRARY_PATH="$VCDROOT/bin/lib:${LD_LIBRARY_PATH:-}"
+    break
+  fi
+done
 
 # dispatch through the CLI entry: `wave-mcp` (no args) starts the stdio
 # server; `wave-mcp query ...` runs the terminal tool surface; any other

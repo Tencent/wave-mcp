@@ -149,57 +149,65 @@ def _eval_unary(node: dict, vf: ValueFn) -> Optional[str]:
     return None
 
 
-def _eval_binary(node: dict, vf: ValueFn) -> Optional[str]:
-    op = node.get("op", "")
-    l = evaluate(node.get("l"), vf)
-    r = evaluate(node.get("r"), vf)
+def _eval_logical(op: str, l: Optional[str], r: Optional[str]) -> Optional[str]:
+    tl, tr = truth(l), truth(r)
     if op == "LogicalAnd":
-        tl, tr = truth(l), truth(r)
         if tl == "0" or tr == "0":
             return "0"
         if tl == "1" and tr == "1":
             return "1"
         return "x"
-    if op == "LogicalOr":
-        tl, tr = truth(l), truth(r)
-        if tl == "1" or tr == "1":
-            return "1"
-        if tl == "0" and tr == "0":
-            return "0"
+    if tl == "1" or tr == "1":
+        return "1"
+    if tl == "0" and tr == "0":
+        return "0"
+    return "x"
+
+
+def _eval_equality(op: str, l: Optional[str], r: Optional[str],
+                   case: bool) -> Optional[str]:
+    if l is None or r is None:
         return "x"
+    a, b = _align(l, r)
+    if not case and ("x" in a + b or "z" in a + b):
+        return "x"
+    eq = a == b
+    if op in ("Inequality", "CaseInequality"):
+        eq = not eq
+    return "1" if eq else "0"
+
+
+def _eval_bitwise_binary(op: str, l: Optional[str],
+                         r: Optional[str]) -> Optional[str]:
+    if l is None or r is None:
+        return None
+    a, b = _align(l, r)
+    return "".join(_bit_op(op, x, y) for x, y in zip(a, b))
+
+
+def _eval_compare(op: str, l: Optional[str], r: Optional[str]) -> Optional[str]:
+    if l is None or r is None or "x" in (l + r) or "z" in (l + r):
+        return "x"
+    iv, jv = int(l, 2), int(r, 2)
+    res = {"LessThan": iv < jv, "GreaterThan": iv > jv,
+           "LessThanEqual": iv <= jv, "GreaterThanEqual": iv >= jv}[op]
+    return "1" if res else "0"
+
+
+def _eval_binary(node: dict, vf: ValueFn) -> Optional[str]:
+    op = node.get("op", "")
+    l = evaluate(node.get("l"), vf)
+    r = evaluate(node.get("r"), vf)
+    if op in ("LogicalAnd", "LogicalOr"):
+        return _eval_logical(op, l, r)
     if op in ("Equality", "Inequality"):
-        if l is None or r is None:
-            return "x"
-        a, b = _align(l, r)
-        if "x" in a + b or "z" in a + b:
-            return "x"
-        eq = a == b
-        if op == "Inequality":
-            eq = not eq
-        return "1" if eq else "0"
+        return _eval_equality(op, l, r, case=False)
     if op in ("CaseEquality", "CaseInequality"):
-        if l is None or r is None:
-            return "x"
-        a, b = _align(l, r)
-        eq = a == b
-        if op == "CaseInequality":
-            eq = not eq
-        return "1" if eq else "0"
+        return _eval_equality(op, l, r, case=True)
     if op in ("BinaryAnd", "BinaryOr", "BinaryXor"):
-        if l is None or r is None:
-            return None
-        a, b = _align(l, r)
-        out = []
-        for x, y in zip(a, b):
-            out.append(_bit_op(op, x, y))
-        return "".join(out)
+        return _eval_bitwise_binary(op, l, r)
     if op in ("LessThan", "GreaterThan", "LessThanEqual", "GreaterThanEqual"):
-        if l is None or r is None or "x" in (l + r) or "z" in (l + r):
-            return "x"
-        iv, jv = int(l, 2), int(r, 2)
-        res = {"LessThan": iv < jv, "GreaterThan": iv > jv,
-               "LessThanEqual": iv <= jv, "GreaterThanEqual": iv >= jv}[op]
-        return "1" if res else "0"
+        return _eval_compare(op, l, r)
     return None
 
 

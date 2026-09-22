@@ -2,7 +2,7 @@
 # Build the wave-mcp-viewer-assets package (Surfer WASM + surver binary).
 #
 # The viewer assets are EUPL-1.2 (Surfer project); they are distributed as
-# a SEPARATE package so the MIT core stays license-clean. This script
+# a SEPARATE package; this alone does not determine license impact. This script
 # packs an sdist/wheel from a prepared asset directory and embeds the
 # EUPL-1.2 license text plus a provenance NOTICE (see docs/licenses/).
 #
@@ -13,10 +13,10 @@
 #   --slim    drops the upstream source archives (sources/, about 136 MB of
 #             the 146 MB wheel) and is what gets uploaded to PyPI, whose
 #             per-file limit is 100 MB. The version stays plain, e.g.
-#             0.25.6.post1.
+#             1.0.0 (always the wave-mcp version, see viewer-pin.sh).
 #   (default) keeps every material file and is attached to the GitHub
 #             release next to the slim wheel. Pass a local version such as
-#             0.25.6.post1+materials so the two filenames never collide.
+#             1.0.0+materials so the two filenames never collide.
 # Both variants keep the dependency notices, inventories and manifest; the
 # slim one points at the release for the source archives.
 #
@@ -36,7 +36,7 @@ OUT="$HERE/viewer-assets-build"
 
 # Pinned Surfer provenance comes from deploy/viewer-pin.sh (single source of
 # truth) so this script, build_surver_static.sh and docker_build_all.sh can
-# never disagree about which commit the pair was built from.
+# agree on the intended source pin. The pin alone is not build evidence.
 # shellcheck source=deploy/viewer-pin.sh
 source "$HERE/viewer-pin.sh"
 VERSION=""
@@ -62,7 +62,8 @@ python3 "$HERE/redistribution_materials.py" check --component viewer \
 # "Version incompatibility!", which surfaces to the user as a waveform
 # that silently never loads. Both artifacts embed the wellen version as a
 # plain "wellen-X.Y.Z" string, so compare them here and refuse to ship a
-# broken pair (the rule the header already promised, now enforced).
+# broken pair. Matching versions do not prove a shared source commit;
+# source/build correspondence must be reviewed separately.
 extract_wellen() {                       # $1 = binary, echoes "X.Y.Z"
   local v
   v=$(grep -ao 'wellen-0\.[0-9][0-9.]*' "$1" 2>/dev/null |
@@ -115,12 +116,20 @@ rm -f "$PKG/data/wasm/sw.js" "$PKG/data/wasm/sw_new.js" \
       "$PKG/data/wasm/sw.js.orig" "$PKG/data/wasm/view.html" \
       "$PKG/data/wasm"/*.vcd "$PKG/data/wasm"/*.fst 2>/dev/null || true
 
-cat > "$PKG/__init__.py" <<'EOF'
+cat > "$PKG/__init__.py" <<EOF
 """Viewer assets for wave-mcp (Surfer WASM + surver). EUPL-1.2.
 
-Data files live in the ``data/`` subdirectory; wave_mcp.viewer discovers
+Data files live in the \`\`data/\`\` subdirectory; wave_mcp.viewer discovers
 them via this package. See THIRD_PARTY notes in the wave-mcp repository.
+
+The package version follows wave-mcp; the upstream Surfer provenance is
+recorded here and in NOTICE so the version number itself need not carry it.
 """
+__version__ = "${VERSION}"
+#: Intended upstream Surfer source pin; see redistribution build evidence.
+UPSTREAM_SURFER_COMMIT = "${SURFER_REF}"
+#: Upstream Surfer / wellen release the artifacts report at connect time.
+UPSTREAM_SURFER_VERSION = "${VIEWER_WELLEN_VERSION}"
 EOF
 
 # EUPL-1.2 requires every copy to carry the license text. Vendor the official
@@ -159,10 +168,13 @@ This package redistributes build artifacts of the Surfer
 project (https://gitlab.com/surfer-project/surfer), licensed under the
 European Union Public Licence v1.2 (EUPL-1.2):
 
-  - surver binary: built from Surfer main commit ${SURFER_REF}
-    (deploy/build_surver_static.sh records the build recipe)
-  - wasm/ bundle: unmodified Surfer CI pages_build snapshot built from
-    the same commit (sha256 of surfer_bg.wasm:
+  - upstream release: Surfer / wellen ${VIEWER_WELLEN_VERSION}
+  - intended Surfer source commit: ${SURFER_REF}
+  - surver binary: locally built with deploy/build_surver_static.sh;
+    source/build correspondence must be established from build records
+  - wasm/ bundle: supplied build artifact; CI job/source correspondence
+    must be established independently of its wellen version
+    (sha256 of surfer_bg.wasm:
     $(sha256sum "$ASSET_DIR/wasm/surfer_bg.wasm" | cut -d' ' -f1))
 
 ${MATERIALS_LINE}
@@ -172,13 +184,27 @@ The upstream source for the pinned ref is:
   https://gitlab.com/surfer-project/surfer/-/tree/${SURFER_REF}
 
 The full EUPL-1.2 text ships in this package as LICENSE-EUPL-1.2.txt.
-wave-mcp itself (the consuming project) is MIT licensed and does not
-link against these components; surver runs as a separate subprocess
-and the WASM bundle is served as static files to the user's browser.
+wave-mcp itself (the consuming project) is Apache-2.0 licensed. surver runs as a
+separate subprocess; the WASM runs in the browser inside an iframe. The
+core shell communicates with the viewer only through page-load URL
+parameters and standard window.postMessage; it does not import viewer
+modules or call viewer functions.
+These technical facts alone do not determine the effect on the core license.
+
+Viewer font materials from the epaint_default_fonts crate; native surver
+inclusion and font subsetting/conversion have not been established. No
+unmodified-distribution assertion is made. Texts under licenses/fonts/:
+
+  - Ubuntu Font Family (Ubuntu-Light): Copyright 2011 Canonical Ltd.
+    Licensed under the Ubuntu Font Licence 1.0.
+  - Noto Emoji: Copyright 2013 Google Inc. SIL Open Font License 1.1.
+  - Hack: Copyright 2018 Source Foundry Authors (MIT); derived from
+    Bitstream Vera Sans Mono, Copyright 2003 Bitstream, Inc.
+  - emoji-icon-font: Copyright (c) 2014 John Slegers (MIT).
 EOF
 cp "$OUT/NOTICE" "$PKG/NOTICE"
 
-# The surver binary embeds fonts from the epaint_default_fonts crate. Its
+# The viewer material inventory includes epaint_default_fonts fonts. Its
 # declared license is a conjunction that includes OFL-1.1 and Ubuntu-font-1.0,
 # both of which require the license text to travel with the fonts. Earlier
 # asset builds shipped only the per-crate report, which recorded this component
@@ -210,8 +236,8 @@ for f in epaint-default-fonts.OFL-1.1.txt \
     fi
     cp "$REPO_ROOT/docs/licenses/$f" "$PKG/licenses/fonts/$f"
   else
-    echo "ERROR: docs/licenses/$f not found; the surver binary embeds these"
-    echo "       fonts and their license texts must ship with it."
+    echo "ERROR: docs/licenses/$f not found; viewer font material coverage"
+    echo "       requires these texts even where native inclusion is unverified."
     FONT_MISSING=1
   fi
 done
@@ -267,7 +293,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "wave-mcp-viewer-assets"
 version = "$VERSION"
-description = "Waveform viewer assets (Surfer WASM + surver) for wave-mcp"
+description = "Waveform viewer assets (Surfer WASM + surver) for wave-mcp; version follows wave-mcp, upstream Surfer ${VIEWER_WELLEN_VERSION} (${SURFER_REF:0:12})"
 readme = "README.md"
 license = { text = "EUPL-1.2" }
 requires-python = ">=3.10"
@@ -304,15 +330,17 @@ cat > "$OUT/README.md" <<'EOF'
 
 Prebuilt Surfer WASM bundle + surver binary consumed by `wave-mcp`'s
 viewer (`wave-view`, `open_wave_view`). Licensed EUPL-1.2 (Surfer
-project); distributed separately from the MIT-licensed wave-mcp core.
+project); distributed separately from the Apache-2.0-licensed wave-mcp core.
 
 The full EUPL-1.2 license text and a provenance NOTICE ship with this
-package (`LICENSE-EUPL-1.2.txt`, `NOTICE`). The Surfer sources are
-unmodified; see the NOTICE for the exact upstream ref and repository.
+package (`LICENSE-EUPL-1.2.txt`, `NOTICE`). See NOTICE for the intended
+source pin, required build evidence and packaging changes. The packaging
+removes upstream service workers and sample waveforms.
 
-Install together with the core:
-
-    pip install wave-mcp[viewer]
+Not distributed by the wave-mcp project: build these assets yourself
+following docs/SELF_BUILD.md in the wave-mcp repository, then install
+this locally-built wheel or point WAVE_MCP_VIEWER_ASSETS at the asset
+directory.
 EOF
 
 ( cd "$OUT" && python3 -m pip wheel --no-deps -w dist . >/dev/null )

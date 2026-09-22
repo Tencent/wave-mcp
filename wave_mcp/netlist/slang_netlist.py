@@ -217,6 +217,7 @@ def _named_values(node) -> List[str]:
             _extract(getattr(n, "right", None))
             return
         # Fallback: try visit for unknown statement/expression types
+
         def cb(inner):
             if type(inner).__name__ == "NamedValueExpression":
                 try:
@@ -394,6 +395,93 @@ class _ModuleBuilder:
                 "skipped_members": self.skipped_members}
 
 
+def _walk_timed(stmt, control: List[str], guard: List[dict], mb: _ModuleBuilder):
+    ctl = control + _named_values(getattr(stmt, "timing", None))
+    _walk_statement(getattr(stmt, "stmt", None), ctl, guard, mb)
+
+
+def _walk_block(stmt, control: List[str], guard: List[dict], mb: _ModuleBuilder):
+    body = getattr(stmt, "body", None)
+    items = []
+    if body is not None:
+        # pyslang wraps the statement list in a StatementList object
+        # that is not directly iterable (list() raises TypeError).  Use
+        # its ``.list`` attribute to get the real Python list of statements
+        # so that ConditionalStatement / CaseStatement inside the block are
+        # properly recursed with updated control/guard context.
+        if hasattr(body, "list"):
+            items = body.list
+        else:
+            try:
+                items = list(body)
+            except TypeError:
+                items = [body]
+    for s in items:
+        _walk_statement(s, control, guard, mb)
+
+
+def _walk_conditional(stmt, control: List[str], guard: List[dict],
+                      mb: _ModuleBuilder):
+    cond_sigs: List[str] = []
+    cond_nodes: List[dict] = []
+    for c in getattr(stmt, "conditions", []) or []:
+        ce = getattr(c, "expr", c)
+        cond_sigs += _named_values(ce)
+        cond_nodes.append(serialize_expr(ce))
+    ctl = control + cond_sigs
+    cond = _and_all(cond_nodes)
+    _walk_statement(getattr(stmt, "ifTrue", None), ctl,
+                    guard + [{"cond": cond, "expect": 1}], mb)
+    _walk_statement(getattr(stmt, "ifFalse", None), ctl,
+                    guard + [{"cond": cond, "expect": 0}], mb)
+
+
+def _walk_case(stmt, control: List[str], guard: List[dict], mb: _ModuleBuilder):
+    case_expr = getattr(stmt, "expr", None)
+    cond_sigs = _named_values(case_expr)
+    # For ``unique case (1'b1)`` patterns (common in reggen output), the
+    # case expression is a constant and the real condition signals are in
+    # the item labels (e.g. ``racl_addr_hit_read[0]``).  Collect those too
+    # so the control list is not empty for the branch assignments.
+    for item in getattr(stmt, "items", []) or []:
+        for lab in (getattr(item, "expressions", None) or []):
+            cond_sigs += _named_values(lab)
+    ctl = control + cond_sigs
+    case_node = serialize_expr(case_expr) if case_expr is not None else {"k": "unknown"}
+    for item in getattr(stmt, "items", []) or []:
+        labels = getattr(item, "expressions", None) or []
+        eqs = []
+        for lab in labels:
+            eqs.append({"k": "bin", "op": "Equality", "l": case_node,
+                        "r": serialize_expr(lab)})
+        gitem = guard + ([{"cond": _or_all(eqs), "expect": 1}] if eqs else [])
+        _walk_statement(getattr(item, "stmt", item), ctl, gitem, mb)
+    _walk_statement(getattr(stmt, "defaultCase", None), ctl, guard, mb)
+
+
+def _walk_expr_stmt(stmt, control: List[str], guard: List[dict],
+                    mb: _ModuleBuilder):
+    e = getattr(stmt, "expr", None)
+    if e is not None and type(e).__name__ == "AssignmentExpression":
+        _record_assignment(e, control, guard, mb)
+
+
+def _walk_fallback(stmt, control: List[str], guard: List[dict],
+                   mb: _ModuleBuilder):
+    # flat-collect assignments under unknown statement, with given control
+    def cb(n):
+        if type(n).__name__ == "AssignmentExpression":
+            _record_assignment(n, control, guard, mb)
+    try:
+        stmt.visit(cb)
+    except Exception:  # pylint: disable=broad-except
+        pass
+
+
+_LOOP_STMT_TYPES = ("ForLoopStatement", "ForeverStatement", "WhileLoopStatement",
+                    "RepeatLoopStatement")
+
+
 def _walk_statement(stmt, control: List[str], guard: List[dict], mb: _ModuleBuilder):
     """Recursively walk a procedural statement tree tracking control signals and
     the branch-guard conditions that must hold to reach each assignment."""
@@ -401,82 +489,19 @@ def _walk_statement(stmt, control: List[str], guard: List[dict], mb: _ModuleBuil
         return
     t = type(stmt).__name__
     if t == "TimedStatement":
-        ctl = control + _named_values(getattr(stmt, "timing", None))
-        _walk_statement(getattr(stmt, "stmt", None), ctl, guard, mb)
-        return
-    if t == "BlockStatement":
-        body = getattr(stmt, "body", None)
-        items = []
-        if body is not None:
-            # pyslang wraps the statement list in a StatementList object
-            # that is not directly iterable (list() raises TypeError).  Use
-            # its ``.list`` attribute to get the real Python list of statements
-            # so that ConditionalStatement / CaseStatement inside the block are
-            # properly recursed with updated control/guard context.
-            if hasattr(body, "list"):
-                items = body.list
-            else:
-                try:
-                    items = list(body)
-                except TypeError:
-                    items = [body]
-        for s in items:
-            _walk_statement(s, control, guard, mb)
-        return
-    if t == "ConditionalStatement":
-        cond_sigs: List[str] = []
-        cond_nodes: List[dict] = []
-        for c in getattr(stmt, "conditions", []) or []:
-            ce = getattr(c, "expr", c)
-            cond_sigs += _named_values(ce)
-            cond_nodes.append(serialize_expr(ce))
-        ctl = control + cond_sigs
-        cond = _and_all(cond_nodes)
-        _walk_statement(getattr(stmt, "ifTrue", None), ctl,
-                        guard + [{"cond": cond, "expect": 1}], mb)
-        _walk_statement(getattr(stmt, "ifFalse", None), ctl,
-                        guard + [{"cond": cond, "expect": 0}], mb)
-        return
-    if t == "CaseStatement":
-        case_expr = getattr(stmt, "expr", None)
-        cond_sigs = _named_values(case_expr)
-        # For ``unique case (1'b1)`` patterns (common in reggen output), the
-        # case expression is a constant and the real condition signals are in
-        # the item labels (e.g. ``racl_addr_hit_read[0]``).  Collect those too
-        # so the control list is not empty for the branch assignments.
-        for item in getattr(stmt, "items", []) or []:
-            for lab in (getattr(item, "expressions", None) or []):
-                cond_sigs += _named_values(lab)
-        ctl = control + cond_sigs
-        case_node = serialize_expr(case_expr) if case_expr is not None else {"k": "unknown"}
-        for item in getattr(stmt, "items", []) or []:
-            labels = getattr(item, "expressions", None) or []
-            eqs = []
-            for lab in labels:
-                eqs.append({"k": "bin", "op": "Equality", "l": case_node,
-                            "r": serialize_expr(lab)})
-            gitem = guard + ([{"cond": _or_all(eqs), "expect": 1}] if eqs else [])
-            _walk_statement(getattr(item, "stmt", item), ctl, gitem, mb)
-        _walk_statement(getattr(stmt, "defaultCase", None), ctl, guard, mb)
-        return
-    if t == "ExpressionStatement":
-        e = getattr(stmt, "expr", None)
-        if e is not None and type(e).__name__ == "AssignmentExpression":
-            _record_assignment(e, control, guard, mb)
-        return
-    if t in ("ForLoopStatement", "ForeverStatement", "WhileLoopStatement",
-             "RepeatLoopStatement"):
+        _walk_timed(stmt, control, guard, mb)
+    elif t == "BlockStatement":
+        _walk_block(stmt, control, guard, mb)
+    elif t == "ConditionalStatement":
+        _walk_conditional(stmt, control, guard, mb)
+    elif t == "CaseStatement":
+        _walk_case(stmt, control, guard, mb)
+    elif t == "ExpressionStatement":
+        _walk_expr_stmt(stmt, control, guard, mb)
+    elif t in _LOOP_STMT_TYPES:
         _walk_statement(getattr(stmt, "body", None), control, guard, mb)
-        return
-
-    # fallback: flat-collect assignments under unknown statement, with given control
-    def cb(n):
-        if type(n).__name__ == "AssignmentExpression":
-            _record_assignment(n, control, guard, mb)
-    try:
-        stmt.visit(cb)
-    except Exception:
-        pass
+    else:
+        _walk_fallback(stmt, control, guard, mb)
 
 
 def _or_all(nodes: List[dict]) -> dict:
@@ -738,7 +763,7 @@ def _summarize_diagnostics(diags, sm, max_items: int = 40) -> dict:
     # real build blockers. Matched as substrings of the code string, e.g.
     # "DiagCode(Error, EmptyBody)". Keep this list to codes verified on real
     # designs; unknown codes keep their native severity.
-    _LINT_CODES = ("EmptyBody", "SignCompare", "WidthCompare",
+    _lint_codes = ("EmptyBody", "SignCompare", "WidthCompare",
                    "IntBoolConv", "ImplicitConv")
     by_code: Dict[str, int] = {}
     samples: List[dict] = []
@@ -749,7 +774,7 @@ def _summarize_diagnostics(diags, sm, max_items: int = 40) -> dict:
         code = str(getattr(dg, "code", "")).replace("DiagCode(", "").rstrip(")")
         by_code[code] = by_code.get(code, 0) + 1
         is_err = bool(getattr(dg, "isError", False))
-        if is_err and any(c in code for c in _LINT_CODES):
+        if is_err and any(c in code for c in _lint_codes):
             # reclassified: stylistic slang lint, not a build blocker
             n_lint += 1
             lint_by_code[code] = lint_by_code.get(code, 0) + 1

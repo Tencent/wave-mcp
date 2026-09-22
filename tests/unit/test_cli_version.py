@@ -21,9 +21,12 @@ import sys
 import pytest
 
 import wave_mcp
-from wave_mcp import server
 
 REPO = os.path.normpath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
+#: True only in a source checkout. The offline bundle ships the installed
+#: layout (src/ + wheels/), not the repo dev files, so assertions that read
+#: deploy/build_offline_bundle.sh must skip there instead of failing.
+_IS_CHECKOUT = os.path.isfile(os.path.join(REPO, "deploy", "build_offline_bundle.sh"))
 
 
 def _run_cli(*args: str) -> subprocess.CompletedProcess:
@@ -63,6 +66,8 @@ class TestCLIVersionFlag:
         assert "--version" in r.stdout
 
 
+@pytest.mark.skipif(not _IS_CHECKOUT,
+                    reason="source-repo dev files not shipped in the offline bundle")
 class TestBuildInfoFile:
     """The bundle must not ship a bare timestamp under the name VERSION."""
 

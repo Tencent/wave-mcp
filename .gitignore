@@ -7,10 +7,10 @@ dist/
 .eggs/
 *.so
 
-# venv / runtime
-.venv/
-venv/
-runtime/
+# venv / runtime (root-level only: wave_mcp/runtime/ is a source package)
+/.venv/
+/venv/
+/runtime/
 
 # IDE / tooling
 .codebuddy/
@@ -20,6 +20,12 @@ runtime/
 
 # stray local artifacts (keep examples/sample/*.fst|*.vcd as quickstart data)
 /test.fst.hier
+
+# derived caches written by wave-mcp < 1.0 next to their inputs; since
+# 1.0 all derived caches live under $XDG_CACHE_HOME/wave-mcp (see
+# wave_mcp/runtime/storage.py). Kept so old checkouts stay clean.
+*.json.msgpack
+*.wave-mcp-cache.json
 
 # fsdb2fst local build artifacts + Verdi FsdbReader runtime (NEVER redistribute)
 third_party/verdi_runtime/

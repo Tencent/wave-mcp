@@ -7,6 +7,12 @@ include docs/PACKAGING_MATERIALS.md
 include docs/FSDB_GUIDE.md
 include docs/WAVE_VIEWER.md
 include docs/WAVE_VIEWER.en.md
+include docs/XCELIUM_FST_GUIDE.md
+include docs/SIMULATOR_COMPATIBILITY.md
+include docs/DEPLOY_AIRGAP.md
+include docs/VIEWER_SCREENSHOTS.md
+recursive-include docs/images *
+recursive-include examples *
 recursive-include wave_mcp/viewer/web *.html *.js
 recursive-include docs/licenses *
 # fsdb2fst is built on demand on the user's machine (the Verdi FsdbReader
@@ -14,6 +20,7 @@ recursive-include docs/licenses *
 # script have to ship with the package. Without them the auto-build silently
 # had nothing to compile and FSDB support was unreachable for pip users.
 include deploy/build_fsdb2fst.sh
+include third_party/fsdb2fst/selftest.sh
 recursive-include third_party/fsdb2fst *.cpp *.h *.c
 recursive-exclude tests *
 recursive-exclude dev-docs *

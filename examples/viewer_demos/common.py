@@ -53,7 +53,7 @@ class DemoDriver:
             try:
                 self.proc.terminate()
                 self.proc.wait(timeout=5)
-            except Exception:
+            except Exception:  # pylint: disable=broad-except
                 self.proc.kill()
 
     def hold(self) -> None:
@@ -141,6 +141,33 @@ class DemoDriver:
     def last_structured(self) -> dict:
         sc = self.last_result.get("structuredContent")
         return sc if isinstance(sc, dict) else {}
+
+    def value_rows(self, path: str | None = None) -> list:
+        """Value-change rows from the last ``signal_values`` reply.
+
+        Since 1.0 ``signal_values`` answers for a batch of paths, so the rows
+        live under ``signals[i].values`` rather than at the top level. Demos ask
+        for one signal at a time, so default to the first entry; pass ``path`` to
+        pick a specific one out of a batched reply.
+        """
+        sc = self.last_structured()
+        entries = sc.get("signals")
+        if not isinstance(entries, list):
+            return sc.get("values", []) or []      # point reads / older shape
+        for e in entries:
+            if path is None or e.get("path") == path:
+                return e.get("values", []) or []
+        return []
+
+    def point_value(self, path: str | None = None) -> str:
+        """The value from the last ``signal_values(time=...)`` reply."""
+        sc = self.last_structured()
+        entries = sc.get("signals")
+        if isinstance(entries, list):
+            for e in entries:
+                if path is None or e.get("path") == path:
+                    return e.get("value", "?")
+        return sc.get("value", "?")
 
 
 def as_time(t) -> str:

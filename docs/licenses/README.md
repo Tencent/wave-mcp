@@ -41,6 +41,11 @@ from GTKWave 3.3.121. `vcd2fst.SOURCES.json` records the archive and source
 hashes. These text files alone do not replace binary-specific source and
 relink materials. See [packaging materials](../PACKAGING_MATERIALS.md).
 
+`fstdumper-patches.NOTICE` records patch attribution, modification dates,
+change summaries and the GPL-3.0 choice for the two fstdumper patch files.
+`fstdumper.SOURCES.json` records the upstream commit and hashes of the
+shipped fstdumper notices.
+
 Optional Python, viewer and converter inputs require a corresponding verified
 material directory. The packaging gate checks identity and completeness, not
 legal suitability of every license or of the overall distribution.

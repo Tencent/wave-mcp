@@ -9,7 +9,7 @@ End to end, with NO commercial simulator (xrun) and NO vcd2fst:
     4. run a few structural / value queries and print the results
 
 Run:
-    python examples/verilator_quickstart/run.py
+    python examples/verilator_quickstart/run_demo.py
 
 Requires:
     * verilator >= 5.006 (for `--binary`; any 5.x works)

@@ -8,7 +8,7 @@ stays high. The agent:
 
 1. notices the flatline in signal_values(rd_count)
 2. checks the handshake pair: req stuck 1, ack never came for tx #4
-3. inspects the FSM state at the stuck time (signal_value_at + drivers)
+3. inspects the FSM state at the stuck time (signal_values(time=) + drivers)
 4. presents it in the viewer: cursor at the deadlock, markers at the last
    completed tx and the req-rise of the stuck one, annotation concluding
    "WAIT_ACK has no timeout escape"
@@ -33,29 +33,29 @@ def main() -> int:
     print(d.call("open_session", {"session_path": str(SESSION)}))
 
     # ---- 1. flatline detection -----------------------------------------
-    d.call("signal_values", {"full_path": "fsm_stuck_tb.rd_count"})
-    rows = d.last_structured().get("values", [])
+    d.call("signal_values", {"paths": "fsm_stuck_tb.rd_count"})
+    rows = d.value_rows()
     last_change = rows[-1]
     last_t = as_time(last_change["time"])
     print(f"[demo2] rd_count stops advancing after {last_t} "
           f"(value {last_change['value']})")
 
     # ---- 2. handshake pair at the stuck point --------------------------
-    d.call("signal_values", {"full_path": "fsm_stuck_tb.req"})
-    req_rows = d.last_structured().get("values", [])
+    d.call("signal_values", {"paths": "fsm_stuck_tb.req"})
+    req_rows = d.value_rows()
     stuck_req = [r for r in req_rows if r["time_units"] >= last_change["time_units"]
                  and r["value"] == "1"]
     stuck_t = as_time(stuck_req[-1]["time"]) if stuck_req else "145s"
-    d.call("signal_value_at", {"full_path": "fsm_stuck_tb.ack",
-                               "time_as_string": stuck_t})
-    ack_val = d.last_structured().get("value", "?")
+    d.call("signal_values", {"paths": "fsm_stuck_tb.ack",
+                               "time": stuck_t})
+    ack_val = d.point_value()
     print(f"[demo2] at {stuck_t}: req=1, ack={ack_val} -> handshake stalled")
 
     # ---- 3. FSM state + drivers at the stuck point ---------------------
-    d.call("signal_value_at", {"full_path": "fsm_stuck_tb.dut.state",
-                               "time_as_string": stuck_t})
-    state_val = d.last_structured()
-    d.call("signal_drivers", {"full_path": "fsm_stuck_tb.dut.state"})
+    d.call("signal_values", {"paths": "fsm_stuck_tb.dut.state",
+                               "time": stuck_t})
+    state_val = d.point_value()
+    d.call("signal_drivers", {"path": "fsm_stuck_tb.dut.state"})
     print(f"[demo2] FSM at {stuck_t}: {state_val}")
 
     # ---- 4. viewer presentation ----------------------------------------

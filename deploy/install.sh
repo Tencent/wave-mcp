@@ -84,7 +84,18 @@ if [[ -n "${PY_OVERRIDE:-}" ]]; then
     exit 1
   fi
 elif [[ -x "$HERE/python/bin/python3" ]]; then
-  BASE_PY="$HERE/python/bin/python3"
+  # The standalone python is relocatable, and the venv created below keeps
+  # symlinks INTO it. If the bundle was unpacked somewhere volatile (/tmp, a
+  # scratch dir), those links die with the cleanup, so persist the interpreter
+  # in the install prefix first and anchor the venv on that copy.
+  if [[ "$HERE" != "$PREFIX" ]]; then
+    echo "[*] copying bundled python into $PREFIX/python ..."
+    rm -rf "$PREFIX/python"
+    cp -r "$HERE/python" "$PREFIX/python"
+    BASE_PY="$PREFIX/python/bin/python3"
+  else
+    BASE_PY="$HERE/python/bin/python3"
+  fi
   BASE_PY_WHY="bundled standalone python"
 fi
 
@@ -115,7 +126,18 @@ echo "[*] using python: $BASE_PY ($("$BASE_PY" -V 2>&1)) [$BASE_PY_WHY]"
 # 2) create venv + offline install -----------------------------------------
 RUNTIME="$PREFIX/runtime"
 echo "[*] creating venv at $RUNTIME"
-"$BASE_PY" -m venv "$RUNTIME"
+# A reinstall over an existing runtime must also refresh bin/python*: venv
+# skips existing interpreter symlinks (even with --upgrade), silently pinning
+# the old (possibly deleted) base python while pyvenv.cfg already names the
+# new one. Field-verified on a test box: 3.11.10 links + 3.11.16 cfg. Remove
+# the interpreter links first so --upgrade recreates them against $BASE_PY;
+# site-packages is untouched and the wheel install below refreshes packages.
+if [[ -x "$RUNTIME/bin/python3" || -f "$RUNTIME/pyvenv.cfg" ]]; then
+  rm -f "$RUNTIME/bin/python" "$RUNTIME/bin/python3" "$RUNTIME"/bin/python3.*
+  "$BASE_PY" -m venv --upgrade "$RUNTIME"
+else
+  "$BASE_PY" -m venv "$RUNTIME"
+fi
 "$RUNTIME/bin/python" -m pip install --no-index --find-links "$HERE/wheels" --upgrade pip >/dev/null 2>&1 || true
 echo "[*] installing wave-mcp + deps from offline wheelhouse ..."
 # Install every wheel in the offline wheelhouse with --no-deps. The wheelhouse
@@ -123,12 +145,32 @@ echo "[*] installing wave-mcp + deps from offline wheelhouse ..."
 # glibc-2.28-compatible cryptography build required by mcp SDK v2), so we do
 # NOT let pip re-resolve. See build_offline_bundle.sh step 1.
 "$RUNTIME/bin/python" -m pip install --no-index --no-deps "$HERE"/wheels/*.whl
+# Same-version reinstalls are skipped by pip ("already satisfied"), which
+# silently leaves stale files when a test bundle carries the same version as
+# an existing install. Force the project wheel so its files always land on
+# disk exactly as shipped; the dependency wheels above are untouched.
+"$RUNTIME/bin/python" -m pip install --no-index --no-deps --force-reinstall \
+    "$HERE"/wheels/wave_mcp-*.whl
 
-# 3) generate launcher ------------------------------------------------------
-sed -e "s#@RUNTIME@#$RUNTIME#g" -e "s#@BUNDLE@#$HERE#g" "$HERE/wave-mcp.template" > "$PREFIX/bin/wave-mcp"
+# 3) copy the native converter out of the (possibly volatile) bundle dir ----
+# The unpack directory is often /tmp or a scratch area; the launcher must not
+# depend on it after install. Copy vcd2fst + its private libs into the
+# persistent prefix so the converter survives a bundle cleanup.
+if [[ -x "$HERE/bin/vcd2fst" && "$HERE" != "$PREFIX" ]]; then
+  echo "[*] copying vcd2fst into $PREFIX/bin ..."
+  cp -f "$HERE/bin/vcd2fst" "$PREFIX/bin/vcd2fst"
+  chmod +x "$PREFIX/bin/vcd2fst"
+  if [[ -d "$HERE/bin/lib" ]]; then
+    rm -rf "$PREFIX/bin/lib"
+    cp -r "$HERE/bin/lib" "$PREFIX/bin/lib"
+  fi
+fi
+
+# 4) generate launcher ------------------------------------------------------
+sed -e "s#@RUNTIME@#$RUNTIME#g" -e "s#@BUNDLE@#$HERE#g" -e "s#@PREFIX@#$PREFIX#g" "$HERE/wave-mcp.template" > "$PREFIX/bin/wave-mcp"
 chmod +x "$PREFIX/bin/wave-mcp"
 
-# 4) sanity check -----------------------------------------------------------
+# 5) sanity check -----------------------------------------------------------
 # Check the import surface first, then the launcher itself. The launcher check
 # runs from a DIFFERENT cwd on purpose: an MCP client starts it from the user's
 # project dir, so any path in it that depends on cwd must fail here, at install

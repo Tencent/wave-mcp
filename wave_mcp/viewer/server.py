@@ -49,6 +49,11 @@ class ViewerServer:
                 ("127.0.0.1", 0), handler, bind_and_activate=False)
             self.httpd.socket = self._reserved
             self.httpd.server_address = self._reserved.getsockname()
+            # bind_and_activate=False skips server_activate(), so the reserved
+            # socket keeps the tiny backlog it was probed with. Re-listen with
+            # the server's queue size: on Linux listen() on a listening socket
+            # just updates the backlog.
+            self._reserved.listen(self.httpd.request_queue_size)
         else:
             self._reserved = None
             self.httpd = _ThreadingHTTPServer(("127.0.0.1", port), handler)
@@ -86,6 +91,12 @@ class _ThreadingHTTPServer(socketserver.ThreadingMixIn,
                            socketserver.TCPServer):
     daemon_threads = True
     allow_reuse_address = True
+    # The stdlib default backlog is 5. A page that polls state while an agent
+    # pushes several updates opens more connections than that in one burst, and
+    # the kernel answers the overflow with a reset rather than a queue: the
+    # client sees "Connection reset by peer" and the update is simply lost.
+    # 128 is the usual server default and well within any Linux somaxconn.
+    request_queue_size = 128
 
 
 def _make_handler(owner: ViewerServer):
@@ -197,14 +208,16 @@ def _make_handler(owner: ViewerServer):
             self._send(404, b"not found", "text/plain")
 
         # -- verbs ------------------------------------------------------
+        # do_* names are BaseHTTPRequestHandler's dispatch contract; pylint
+        # flags them as invalid-name but renaming would break HTTP handling.
 
-        def do_HEAD(self) -> None:
+        def do_HEAD(self) -> None:  # pylint: disable=invalid-name
             if self.path.startswith("/surver/"):
                 self._proxy(send_body=False)
             else:
                 self._static()
 
-        def do_GET(self) -> None:
+        def do_GET(self) -> None:  # pylint: disable=invalid-name
             parsed = urlparse(self.path)
             if self.path.startswith("/surver/"):
                 self._proxy(send_body=True)
@@ -222,7 +235,7 @@ def _make_handler(owner: ViewerServer):
             else:
                 self._static()
 
-        def do_PUT(self) -> None:
+        def do_PUT(self) -> None:  # pylint: disable=invalid-name
             if urlparse(self.path).path != "/api/view-state":
                 self._send(404, b"")
                 return
@@ -240,7 +253,7 @@ def _make_handler(owner: ViewerServer):
             except (ViewStateError, ValueError) as e:
                 self._json(400, {"ok": False, "error": str(e)})
 
-        def do_POST(self) -> None:
+        def do_POST(self) -> None:  # pylint: disable=invalid-name
             # browser shell writes back actual state
             if urlparse(self.path).path != "/api/view-state/actual":
                 self._send(404, b"")

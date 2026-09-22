@@ -4,14 +4,14 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/wave-mcp)](https://pypi.org/project/wave-mcp/)
 [![Python versions](https://img.shields.io/pypi/pyversions/wave-mcp)](https://pypi.org/project/wave-mcp/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
 English | [简体中文](README.md)
 
 **wave-mcp is an open-source RTL waveform debug MCP server from the Penglai Lab verification team
 at Tencent**, a debugging toolkit for LLMs: it reads **FST waveforms + an RTL netlist** and
-provides **34 MCP tools** for hierarchy exploration, signal queries, driver analysis, waveform diff, a browser wave viewer, and
-value/X tracing. **MIT licensed, no commercial license required, unlimited concurrency.**
+provides **37 MCP tools** for hierarchy exploration, signal queries, driver analysis, waveform diff, a browser wave viewer, and
+value/X tracing. **Apache-2.0 licensed, no commercial license required, unlimited concurrency.**
 
 > **Direct FST reads; VCD / FSDB convert automatically.** Verilator `--trace-fst` and Icarus
 > emit FST, which wave-mcp reads directly. If all you have is VCD or FSDB, `prepare_session`
@@ -45,7 +45,7 @@ XiangShan added to the test set:
 | Tool calls | 3.1 million+ calls all passed |
 | Driver analysis | drivers / fan-in / connectivity / tracing fully validated on production projects |
 | Huge modules | **million-scale scopes analyzed stably** |
-| Tool coverage | all 34 tools validated, including unit and browser e2e coverage for viewer / diff |
+| Tool coverage | all 37 tools validated, including unit and browser e2e coverage for viewer / diff |
 
 ![Tool call distribution](docs/images/tool-calls-distribution.png)
 
@@ -63,12 +63,14 @@ XiangShan added to the test set:
   recompiles; degrades gracefully without affecting other tools.
 - **Consistency checks**: warns when the source or waveform changed but the netlist is stale;
   never silently returns wrong results.
-- **Waveform diff**: `diff_waveforms` pinpoints the first divergence between a pass and a fail
+- **Waveform diff**: `diff_waveforms` pinpoints the first divergence across two or more runs
   run, ranks diverging signals by time, and filters glitches with clock-aligned sampling.
 - **Wave viewer**: `open_wave_view` lets the agent pop a browser waveform right after its
   analysis: suspect signals, cursor pinned at the failure time, and an analysis popup;
-  dual-waveform lockstep compare; `get_view_state` tells the agent what you are looking at.
-- **Deployment-friendly**: stdio (one process per user, zero ops) / HTTP multi-session /
+  dual-waveform compare with agent-set navigation injected into both panes;
+  `get_view_state` confirms the page is connected and up to date.
+- **Multi-session and reproducible**: one design may back several independent sessions sharing one loaded dataset; every query reply carries `_query` (effective parameters) and `_fp` (dataset identity/version + question digest), so two answers can be shown to come from the same inputs and the same question.
+- **Deployment-friendly**: stdio (one process per user, zero ops) / HTTP (no config on this machine, one `WAVE_MCP_TOKEN` across machines) /
   self-contained offline bundle (air-gapped networks).
 
 Parts of the FSDB converter (`third_party/fsdb2fst`) were written with TraceWeave (MIT) as a
@@ -116,20 +118,20 @@ pip install wave-mcp
 
 ```bash
 # Example A: Verilator quickstart (counter design, real FST, no commercial simulator)
-python examples/verilator_quickstart/run.py      # needs verilator>=5
+python examples/verilator_quickstart/run_demo.py      # needs verilator>=5
 
 # Example B: static analysis (UART design, no waveform, no simulator needed)
-python examples/static_analysis/run.py
+python examples/static_analysis/run_demo.py
 
 # Example C: tiny built-in sample (hand-written VCD → vcd2fst → FST, zero deps)
-python examples/make_sample.py
+python examples/sample/make_sample.py
 ```
 
 ### 3. Open your waveform
 
 ```bash
 # One command: waveform (.fst/.vcd) + filelist → session (auto-convert + netlist)
-wave-session --fst sim/dump.fst --top top_tb --filelist rtl.f --out sessions/my_module
+wave-session --fst sim/dump.fst --top top_tb --filelist rtl.f      # --out optional
 
 # Start the MCP server (stdio, recommended: one process per user)
 python -m wave_mcp.server --session sessions/my_module
@@ -139,16 +141,16 @@ Or call the `prepare_session` MCP tool directly from your Code Agent (see below)
 
 ## CLI queries (`wave-mcp query`)
 
-All 34 tools are also callable from the terminal, without an agent:
+All 37 tools are also callable from the terminal, without an agent:
 
 ```bash
 wave-mcp query --list                            # list every tool
 
 wave-mcp query signal_values --session sessions/my_module \
-    --full_path top.u_tx.tx_serial              # query signal value changes
+    --paths top.u_tx.tx_serial                  # query signal value changes
 
 wave-mcp query signal_drivers --session sessions/my_module \
-    --json-args '{"full_path": "top.u_tx.tx_serial"}'   # JSON args
+    --json-args '{"paths": "top.u_tx.tx_serial"}'       # JSON args
 ```
 
 - Flags are generated from each tool's signature; `wave-mcp query <tool> --help`
@@ -164,13 +166,12 @@ does "(convert →) build netlist → build session → open":
 
 ```jsonc
 prepare_session({
-  "out_dir":      "sessions/my_module",
   "wave_path":    "sim/dump.fst",          // .fst read directly / .vcd auto-converted
   "top":          "top_tb",
   "filelist_path":"rtl.f",                 // same filelist as the sim
-  "mode":         "speed"                  // VCD->FST: speed/balanced/size
-})
-// once it returns "ready", call signal_values / list_child_instances / signal_drivers ...
+  "pack":         "fastlz"                 // conversion compressor: fastlz/lz4/zlib, optional
+})                                         // out_dir optional: defaults to the session root, named by the inputs
+// once it returns "ready", call signal_values / find_instances / signal_drivers ...
 ```
 
 **Client configuration** (stdio):
@@ -221,7 +222,6 @@ exploration, hierarchy browsing, code review.
 
 ```jsonc
 open_static_session({
-  "out_dir":      "sessions/my_module",
   "top":          "uart",
   "filelist_path":"rtl.f"
 })
@@ -229,15 +229,15 @@ open_static_session({
 // value & trace tools return a clear "needs waveform" message
 ```
 
-When the simulation later produces a waveform, call `prepare_session` with the **same out_dir**
-to upgrade to a full session; the built netlist is reused.
+When the simulation later produces a waveform, call `prepare_session` with the same RTL sources
+to upgrade to a full session; the built netlist is reused without remembering any directory.
 
 Every driver record carries full context: driver kind, source location, statement snippet, RHS
 source, and **every gating condition stacked on that statement** (as a 4-state-evaluable
 expression tree). From the UART design in example B:
 
 ```yaml
-# wave-mcp query signal_drivers --session ... --full_path uart_top.u_tx.tx_serial
+# wave-mcp query signal_drivers --session ... --path uart_top.u_tx.tx_serial
 drivers:
   - kind: nonblocking
     file: examples/static_analysis/uart_top.sv
@@ -294,15 +294,15 @@ brew install gtkwave
 Three conversion entry points:
 
 ```bash
-# 1) Standalone conversion (post-process): mode=speed(fastlz, fastest) / balanced(lz4) / size(zlib, smallest)
-wave-vcd2fst --vcd sim/dump.vcd --fst sim/dump.fst --mode speed
+# 1) Standalone conversion (post-process): pack=fastlz (fastest, default) / lz4 / zlib (smallest)
+wave-vcd2fst --vcd sim/dump.vcd --fst sim/dump.fst --pack fastlz
 
 # 2) Streaming conversion: hides conversion time inside sim time; FST is ready almost when the sim ends
 wave-vcd2fst --stream --vcd sim/dump.vcd --fst sim/dump.fst
 #   creates a FIFO + starts vcd2fst in the background; point $dumpfile("sim/dump.vcd") at the FIFO
 
 # 3) One-step session build (auto-convert + package)
-wave-session --vcd sim/dump.vcd --top top_tb --filelist rtl.f --out sessions/mod
+wave-session --vcd sim/dump.vcd --top top_tb --filelist rtl.f
 ```
 
 > No manual conversion needed when using the MCP tools: `prepare_session` auto-converts when
@@ -310,26 +310,30 @@ wave-session --vcd sim/dump.vcd --top top_tb --filelist rtl.f --out sessions/mod
 
 ---
 
-## Tools (34, in 10 categories)
+## Tools (37, in 12 categories)
 
 | Category | Tools | Notes |
 | --- | --- | --- |
 | Waveform prep | `prepare_session` / `open_static_session` / `convert_vcd_to_fst` / `convert_fsdb_to_fst` | waveform → session in one shot (`.fst` / `.fsdb` / `.vcd` auto-detected, conversions cached); static analysis needs no waveform; never runs a simulator |
 | Session mgmt | `open_session` / `close_session` / `session_info` | `session_info` includes netlist_health + definition_coverage |
-| Hierarchy | `list_child_instances` / `list_modules` / `instances_of_module`(`_matching`) / `scope_info` | three-layer module-def resolution: netlist → name inference → scope_map |
+| Query defaults | `query_defaults_set` / `query_defaults_get` / `query_defaults_clear` | per-session default signals + time window; an explicit argument always wins, a reply that drew a default lists the inherited fields in `_query.from_defaults`; pin a `defaults_revision` and a moved default answers `defaults_conflict` |
+| Hierarchy | `find_instances` / `list_modules` / `scope_info` | three-layer module-def resolution: netlist → name inference → scope_map |
 | Signals | `list_signals` / `signal_info` | width/direction/type from FST (with bus aggregation); declaration from the netlist |
-| Values | `signal_values` / `signal_values_in_range` / `signal_value_at` | FST's strength, random access |
-| Driver analysis | `signal_connectivity` / `signal_drivers` / `signal_loads` / `signal_fanin` / `active_drivers` / `driver_contributors` | pyslang netlist (statically precise) + 4-value branch evaluation |
+| Values | `signal_values` (whole dump / window / one instant, batched) / `signal_activity` / `find_time_windows` / `sample_at_clock` | FST's strength, random access; `sample_at_clock` gives an edge-aligned per-cycle table |
+| Timing & transactions | `fold_transactions` / `fsm_transitions` | you define the transaction (no protocol library is built in); FSM reports observed transitions and branches only, never coverage |
+| Driver analysis | `signal_connectivity` / `signal_drivers` / `signal_loads` / `signal_fanin` / `signal_downstream` / `active_drivers` / `driver_contributors` | pyslang netlist (statically precise) + 4-value branch evaluation; `signal_downstream` mirrors `signal_fanin` forward and, given `time`, reports each downstream signal's next change (correlation, not causation) |
 | Value / X tracing | `trace_value` / `trace_x` | netlist × FST back-traversal, cross-module drill-down |
-| Waveform diff | `diff_waveforms` | first-divergence localization between a pass and a fail run: exact divergence time, ranked diverging signals, clock-aligned sampling to filter glitches; divergers feed straight into `signal_fanin`/`active_drivers` for causal backtracking |
-| Wave viewer | `open_wave_view` / `update_wave_view` / `get_view_state` / `list_wave_views` / `close_wave_view` | agent-driven browser waveform: suspect signals + cursor pinned at the failure time + an analysis-log popup; dual-waveform compare view with lockstep sync; `get_view_state` tells the agent what the user is looking at (conversational two-way debug); `list_wave_views` / `close_wave_view` manage view lifecycle so batch runs can clean up |
-| Files | `list_files` / `find_files` / `modules_in_file` | filelist + pyslang netlist |
+| Waveform diff | `diff_waveforms` | first-divergence localization across N runs: exact divergence time, ranked diverging signals, clock-aligned sampling to filter glitches, and with more than two runs a `groups` split of run indices by value; divergers feed straight into `signal_fanin`/`active_drivers` for causal backtracking |
+| Wave viewer | `open_wave_view` / `update_wave_view` / `get_view_state` / `list_wave_views` / `close_wave_view` | agent-driven browser waveform: suspect signals + cursor pinned at the failure time + an analysis-log popup; dual-waveform compare view with agent-set zoom/cursor/markers injected into both panes; `get_view_state` reports page connectivity and the applied revision (delivery confirmation); `list_wave_views` / `close_wave_view` manage view lifecycle so batch runs can clean up |
+| Files | `files` (list all / find by name / modules of a file) | filelist + pyslang netlist |
 
 > The driver-analysis and tracing categories require the pyslang netlist (pass the right
 > filelist/incdirs/defines to `prepare_session`).
-> The viewer category needs the optional assets package: `pip install wave-mcp[viewer]`
-> (Surfer WASM + surver, distributed separately under EUPL-1.2; the core stays MIT).
-> Without it the viewer tools degrade gracefully with a hint; analysis tools are unaffected.
+> The viewer category needs separate assets (Surfer WASM + surver, EUPL-1.2).
+> wave-mcp does not distribute them; build them yourself following
+> [SELF_BUILD.en.md](docs/SELF_BUILD.en.md) (build once, use long-term, shareable
+> within a team). Without them the viewer tools degrade gracefully with a hint;
+> analysis tools are unaffected.
 
 ### Wave viewer (wave-view)
 
@@ -338,7 +342,7 @@ wave-session --vcd sim/dump.vcd --top top_tb --filelist rtl.f --out sessions/mod
 # server-side, the browser fetches only what's on screen)
 wave-view dump.fst --signals top.u_dma.req_valid --cursor 1523400ps
 
-# dual-waveform compare view (two panes, lockstep zoom/cursor sync)
+# dual-waveform compare view (two panes, agent-set zoom/cursor injected into both)
 wave-view pass.fst fail.fst --labels pass fail
 
 # pass a VCD / FSDB directly: converted to FST, then opened
@@ -352,13 +356,13 @@ wave-view sim.vcd
   `prepare_session`, so the same waveform is converted once whether you analyse
   it first or view it first. Other formats are rejected at the entry point with
   the list of supported extensions.
-- Typical agent loop: a case fails → `diff_waveforms(pass, fail)` pinpoints the
+- Typical agent loop: a case fails → `diff_waveforms([pass, fail])` pinpoints the
   first divergence → `signal_fanin` backtracks the cause → `open_wave_view`
   presents both waveforms, a divergence marker and the analysis popup at once.
 - The analysis log is a collapsible popup; time references inside it (e.g.
   `[85000ps](#t=85000ps)`) jump the cursor on click, and cursor/viewport/marker
   updates are flicker-free.
-- Full guide (MCP tool parameters, two-way debug workflow, architecture,
+- Full guide (MCP tool parameters, debug workflow, architecture,
   deployment and troubleshooting): [`docs/WAVE_VIEWER.en.md`](docs/WAVE_VIEWER.en.md).
 - Want to see it first? [`docs/VIEWER_SCREENSHOTS.md`](docs/VIEWER_SCREENSHOTS.md)
   shows the UI across four real debug scenarios, with steps to reproduce them.
@@ -371,16 +375,39 @@ wave-view sim.vcd
 | --- | --- | --- | --- |
 | Verilator quickstart | `examples/verilator_quickstart/` | Verilator 5+ | counter design → real FST → prepare_session end-to-end |
 | Static analysis | `examples/static_analysis/` | none (pure Python) | UART waveform-free analysis: hierarchy/drivers/fan-in/declarations |
-| Tiny sample | `examples/make_sample.py` | optional vcd2fst | hand-written VCD → FST → session smoke test |
+| Tiny sample | `examples/sample/make_sample.py` | optional vcd2fst | hand-written VCD → FST → session smoke test |
 
 ---
 
 ## Deployment modes
 
 - **stdio (recommended)**: each user starts a local server subprocess that loads only their own
-  module's FST + netlist. Zero ops.
-- **HTTP + multi-session**: one long-running service, per-user isolated sessions via `session_id`.
-  `python -m wave_mcp.server --transport http --host 0.0.0.0 --port 8000`
+  module's FST + netlist. Zero ops, nothing to configure.
+- **HTTP on this machine**: one long-running service; several clients each open their own
+  session and name it by `session_id`. Bound to loopback, nothing to configure either:
+  `python -m wave_mcp.server --transport http --port 8000`
+- **HTTP from other machines**: binding a non-loopback address (e.g. `--host 0.0.0.0`) requires
+  `WAVE_MCP_TOKEN`; without it the server refuses to start and the message names the variable.
+  Once set, every HTTP request must carry the same token; a missing or wrong one gets 401 and no
+  tool runs. The token is a random string you generate and put on both sides; it is not an
+  account:
+
+  ```bash
+  # server
+  WAVE_MCP_TOKEN=$(openssl rand -hex 32) python -m wave_mcp.server --transport http --host 0.0.0.0 --port 8000
+  ```
+
+  ```json
+  // client mcp.json
+  {"mcpServers": {"wave-mcp": {
+    "url": "http://server:8000/mcp",
+    "headers": {"Authorization": "Bearer <the same token>"}
+  }}}
+  ```
+
+  The process runs as the OS account that started it and the operating system decides what it
+  may read or write; wave-mcp has no tenant model. To serve several people from one machine,
+  run one process per person. Terminate TLS at a trusted reverse proxy.
 - **Air-gapped / offline bundle**: one command on a docker-equipped machine produces both
   glibc tiers; copy to the air-gapped side and install offline, with standalone Python +
   all wheels + optional vcd2fst and viewer assets:
@@ -403,7 +430,7 @@ wave-view sim.vcd
 
 **Most people set none of these.** A fresh install reads FST/VCD, does static analysis and
 runs the wave viewer out of the box. Two cases need configuration: reading `.fsdb` (set
-`VERDI_HOME`), and several people sharing one host (set `WAVE_MCP_SESSION_ROOT`). The rest
+`VERDI_HOME`), and an HTTP server that other machines connect to (set `WAVE_MCP_TOKEN`). The rest
 are tuning knobs for unusual environments, look them up when you hit one.
 
 When you do set them, put them in the `env` block of your MCP client config rather than
@@ -416,8 +443,7 @@ inherit your interactive shell's environment.
     "wave-mcp": {
       "command": "wave-mcp",
       "env": {
-        "VERDI_HOME": "/tools/synopsys/verdi/T-2022.06-SP1",
-        "WAVE_MCP_SESSION_ROOT": "~/wave-sessions"
+        "VERDI_HOME": "/tools/synopsys/verdi/T-2022.06-SP1"
       }
     }
   }
@@ -427,21 +453,31 @@ inherit your interactive shell's environment.
 | Variable | Configure? | Purpose | Default |
 | --- | --- | --- | --- |
 | `VERDI_HOME` | required for `.fsdb` | Verdi **installation root** (not the `bin/` directory holding the executable). `share/FsdbReader/linux64` is resolved under it; see the [FSDB guide](docs/FSDB_GUIDE.md) for usage and troubleshooting | empty. FSDB input unavailable, everything else works |
-| `WAVE_MCP_SESSION_ROOT` | recommended on a shared host | Root for session directories. Once set, every `out_dir` lands inside it, so the deployment decides the location instead of the agent | empty. `out_dir` is used as given |
+| `WAVE_MCP_SESSION_ROOT` | no | Where sessions land when `out_dir` is omitted; the directory is named by the inputs' identity digest, so the same RTL asked for from anywhere resolves to one place and reuses one netlist. An explicit `out_dir` is used as given, never rewritten | `~/.wave-mcp/sessions` |
+| `WAVE_MCP_CACHE_ROOT` | no | Root for derived caches: converted `.fst` files, netlist msgpack caches, `fsdb2fst` build output, viewer assets. Caches are never written next to the source waveform; deleting them only costs time | `~/.wave-mcp/cache` |
 | `WAVE_MCP_VIEWER_PORT_BASE` | recommended on a shared host | Confines view ports to `[base, base+64)` so one `ssh -L` rule keeps working; give each user a non-overlapping window | empty. A random high port per view |
 | `NOVAS_HOME` | no | Same meaning as `VERDI_HOME`, kept for older Verdi installs; `VERDI_HOME` wins when both are set | empty |
 | `FSDB2FST_FREADER` | no | Points straight at a copied `share/FsdbReader` directory, for machines with the runtime but no full Verdi install | empty. Read from `VERDI_HOME` / `NOVAS_HOME` |
 | `FSDB2FST_BIN` | no | Use a prebuilt `fsdb2fst` binary | empty. Auto-detected, built on demand at first conversion |
 | `WAVE_MCP_FSDB2FST_AUTOBUILD` | no | Set to `0` to disable the first-run auto build | `1` (enabled) |
 | `VCD2FST_BIN` | no | Path to the GTKWave `vcd2fst` executable | `vcd2fst` (found via `PATH`) |
-| `WAVE_MCP_VIEWER_ASSETS` | no | Viewer asset directory (must contain `surver` and `wasm/index.html`); the offline bundle sets this for you | empty. Falls back to the pip assets package, then `~/.cache/wave-mcp/viewer/` |
+| `WAVE_MCP_VIEWER_ASSETS` | no | Viewer asset directory (must contain `surver` and `wasm/index.html`); the offline bundle sets this for you | empty. Falls back to the pip assets package, then `~/.wave-mcp/cache/viewer/` |
 | `WAVE_MCP_MAX_VIEWS` | no | Cap on concurrent views, closing the oldest past the cap; `0` removes the cap | `8` |
-| `XDG_CACHE_HOME` | no | Cache root (`fsdb2fst` build output, viewer assets) | `~/.cache` |
+| `WAVE_MCP_WORKERS` | no | Tool calls executing at once; the rest wait in a queue | `4` |
+| `WAVE_MCP_QUEUE_CAPACITY` | no | Queue length; a full queue answers `server_busy` instead of piling up | `32` |
+| `WAVE_MCP_PER_OWNER_RUNNING` | no | Concurrent calls per user, so one client cannot hold every slot | `2` |
+| `WAVE_MCP_PER_OWNER_SESSIONS` | no | Open sessions per user; beyond it `resource_limit` | `16` |
+| `WAVE_MCP_SESSION_TTL` | no | Seconds of idleness before a session with nothing in flight is closed; `0` disables | `1800` |
+| `WAVE_MCP_QUEUE_TIMEOUT` | no | Longest wait in the queue before `queue_timeout` | `30` |
+| `WAVE_MCP_SHUTDOWN_GRACE` | no | Seconds granted to in-flight calls after SIGTERM/SIGINT before forced exit | `30` |
+| `WAVE_MCP_AUDIT_LOG` | no | Audit log: one JSON line per tool call (timestamp, request id, tool, status, error type, elapsed, dataset identity/version; never arguments or paths). A file path (appended, 0600) or `stderr` | empty, off |
+| `WAVE_MCP_TOKEN` | required for a non-loopback HTTP host | Shared secret for the HTTP transport (16+ characters; `openssl rand -hex 32`). Once set every request must carry `Authorization: Bearer <same value>` or gets 401; unset, only `--host 127.0.0.1` is allowed. Unused by stdio | empty |
 
-**Session directory convention**: keep sessions under `~/wave-sessions/<project>_<module>/` and
-reuse one `out_dir` per module so the static and waveform sessions share a netlist. Avoid `/tmp`
-(lost on reboot, forcing re-elaboration) and shared drives (users collide on one directory).
-Setting `WAVE_MCP_SESSION_ROOT` enforces this without relying on the agent's prompt.
+**Session directory**: `out_dir` on `prepare_session` / `open_static_session` is normally
+omitted; the session lands under `WAVE_MCP_SESSION_ROOT` in a directory named by the inputs'
+identity, and the static and waveform sessions of one RTL source set share a netlist without
+the agent remembering any convention. Pass `out_dir` only when the directory has to live at a
+specific place (e.g. checked in next to a testbench); it is then used as given.
 
 ## FAQ
 
@@ -459,7 +495,7 @@ straight from the simulator instead (the fstdumper VPI plugin, license-free, zer
 see the [Xcelium FST guide](docs/XCELIUM_FST_GUIDE.md).
 
 **Q2: Do I need a commercial license?**
-No. MIT licensed, unlimited concurrency, unlimited machines. This is the core difference from
+No. Apache-2.0 licensed, unlimited concurrency, unlimited machines. This is the core difference from
 commercial debug MCPs.
 
 Going open source is not only about saving license fees. Closed formats like FSDB and SHM cannot
@@ -479,7 +515,7 @@ validation status.
 
 **Q4: Is the data accurate?**
 Yes. Fully validated on a real production chip project with 2.25M signals at 100% value
-correctness; hierarchy and file tools (`scope_info` / `find_files` / `modules_in_file`) pass
+correctness; hierarchy and file tools (`scope_info` / `files`) pass
 on all 32/32 modules.
 
 **Q5: Can I use it without a waveform?**
@@ -581,26 +617,29 @@ A **session** = one isolated debug context, tied together by a `session.json` ma
   script can read. Loaded at startup, never rebuilt per query; unchanged sources skip
   re-elaboration, and upgrading a static session to a waveform session reuses the same netlist
   (freshness is checked against source file mtimes).
-- **All generated artifacts live in the session directory**: `prepare_session` writes only to
-  the `out_dir` you choose: `session.json` (manifest + fingerprints), `netlist/maps.json`
-  (the netlist), plus a converted `.fst` only when the input is a VCD. Queries run entirely
-  in memory with no on-disk index or cache, and nothing is written into your RTL sources or
-  the original waveform directory; deleting the session directory is a complete cleanup.
+- **Generated artifacts live in two places**: the session directory (default
+  `~/.wave-mcp/sessions/<inputs identity>/`, or the `out_dir` you pass) holds only
+  `session.json` (manifest + fingerprints) and `netlist/maps.json` (the netlist); converted
+  `.fst` files and netlist side caches live under `~/.wave-mcp/cache/`. Queries run entirely in
+  memory, and nothing is written into your RTL sources or the original waveform directory;
+  deleting those two places is a complete cleanup.
 - **MCP responses**: `structuredContent` (machine-readable) + `content[].text` human-readable text.
 
 ## License
 
-This project is released under the **MIT** license (see [`LICENSE`](LICENSE)). All dependencies
-are permissively licensed (MIT/BSD) with no copyleft contamination; the `vcd2fst` converter
-shipped in the offline bundle is built from GTKWave's MIT sources.
+This project is released under the **Apache-2.0** license (see [`LICENSE`](LICENSE), which
+includes all third-party attribution notices). Core dependencies are permissively licensed
+(MIT/BSD/Apache) with no copyleft contamination; the `vcd2fst` converter shipped in the
+offline bundle is built from GTKWave's MIT sources.
 See [`docs/THIRD_PARTY.md`](docs/THIRD_PARTY.md).
 
 ## Directory layout
 
 ```
 wave_mcp/
-  server.py              # MCP server, registers all 34 tools
-  session.py             # Session / session.json / fingerprint check / definition_name
+  server.py              # MCP server, registers all 37 tools
+  runtime/               # identity (the only hashing), storage (the only write locations), executor, auth, audit, request
+  session.py             # WorkSession / shared dataset resources / session.json / definition_name
   pipeline.py            # prepare_session / prepare_static_session orchestration
   diff.py                # diff_waveforms first-divergence localization (clock-aligned sampling)
   sources/               # fst_source + rtl_source

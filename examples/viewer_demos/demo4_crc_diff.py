@@ -34,8 +34,8 @@ def main() -> int:
 
     # ---- 1. locate the first divergence --------------------------------
     d.call("diff_waveforms", {
-        "fst_a": str(PASS_FST),          # convention: pass first
-        "fst_b": str(FAIL_FST),
+        "fst_paths": [str(PASS_FST),     # convention: pass first
+                      str(FAIL_FST)],
         "clock": "crc_diff_tb.clk",      # clock-aligned sampling
         "after": "15ns",                 # skip reset
     })
@@ -50,13 +50,13 @@ def main() -> int:
           f"coverage: {r.get('coverage')}")
 
     # ---- 2. causal backtracking on the earliest diverger ---------------
-    d.call("signal_fanin", {"signal_path": "crc_diff_tb.dut.crc"})
+    d.call("signal_fanin", {"path": "crc_diff_tb.dut.crc"})
     fanin = d.last_structured()
     print(f"[demo4] crc fan-in: {json.dumps(fanin)[:200]}")
 
     # residue mismatch time (crc_err asserted only in the fail run)
-    d.call("signal_values", {"full_path": "crc_diff_tb.crc_err"})
-    err_rows = [v for v in d.last_structured().get("values", [])
+    d.call("signal_values", {"paths": "crc_diff_tb.crc_err"})
+    err_rows = [v for v in d.value_rows()
                 if v["value"] == "1"]
     err_t = as_time(err_rows[0]["time"]) if err_rows else "845s"
 

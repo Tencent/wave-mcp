@@ -163,13 +163,13 @@ def main(argv: list[str]) -> int:
             # that iframe's canvas to actually paint before capturing.
             try:
                 page.wait_for_url("**/shell.html*", timeout=30000)
-            except Exception:
+            except Exception:  # pylint: disable=broad-except
                 pass
             try:
                 page.wait_for_selector("#surfer", timeout=30000)
                 frame = page.frame_locator("#surfer")
                 frame.locator("canvas").first.wait_for(timeout=45000)
-            except Exception as exc:
+            except Exception as exc:  # pylint: disable=broad-except
                 print(f"     [WARN] {name}: canvas wait failed: {str(exc)[:120]}")
             # let surfer stream values and settle the layout
             page.wait_for_timeout(12000)

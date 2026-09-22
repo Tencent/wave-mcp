@@ -215,11 +215,16 @@ echo "[*] adding fieldkit + regression entry + sample session ..."
 mkdir -p "$OUT/tests"
 cp -r "$REPO_ROOT/tests/fieldkit" "$OUT/tests/fieldkit"
 cp -r "$REPO_ROOT/tests/unit"     "$OUT/tests/unit"
+cp -r "$REPO_ROOT/tests/protocol" "$OUT/tests/protocol"
 cp    "$REPO_ROOT/tests/run_regression.py" "$OUT/tests/"
+cp    "$REPO_ROOT/tests/functional_verify.py" "$OUT/tests/"
+cp    "$REPO_ROOT/tests/viewer_e2e.py" "$OUT/tests/" 2>/dev/null || true
 cp    "$REPO_ROOT/tests/README.md"         "$OUT/tests/" 2>/dev/null || true
 mkdir -p "$OUT/tests/fourstate"
 cp -r "$REPO_ROOT/tests/fourstate/rtl" "$REPO_ROOT/tests/fourstate/tb" \
       "$REPO_ROOT/tests/fourstate"/run_fourstate*.py "$OUT/tests/fourstate/" 2>/dev/null || true
+# never ship the workspace's bytecode caches alongside the sources
+find "$OUT/tests" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 mkdir -p "$OUT/examples"
 cp -r "$REPO_ROOT/examples/sample" "$OUT/examples/sample"
 
@@ -238,6 +243,23 @@ if [[ -n "$PYTHON_SRC" ]]; then
     cp -r "$PYTHON_SRC"/. "$OUT/python/"
   fi
   [[ -x "$OUT/python/bin/python3" ]] || { echo "ERROR: python/bin/python3 not found" >&2; exit 1; }
+  # Remove optional extensions the material manifest declares as stripped.
+  # Today that is _dbm: it statically links Berkeley DB 6.0.19 (Sleepycat, a
+  # copyleft licence), nothing else in the runtime links it, and wave-mcp never
+  # imports dbm/shelve. The identity check below then requires these files to
+  # be absent and their licence texts not to ship.
+  python3 - "$PYTHON_MATERIALS/manifest.json" "$OUT/python" <<'PYEOF'
+import json, sys
+from pathlib import Path
+manifest = json.loads(Path(sys.argv[1]).read_text())
+root = Path(sys.argv[2])
+for name, info in (manifest.get('stripped_extensions') or {}).items():
+    for rel in info.get('files', []):
+        target = root / rel
+        if target.is_file():
+            target.unlink()
+            print(f"    stripped {name}: {rel} ({info.get('reason', '')})")
+PYEOF
   python3 "$MATERIAL_CHECK" check --component python --materials "$PYTHON_MATERIALS" --artifact "$OUT/python"
   echo "    standalone python identity OK"
 else
@@ -282,16 +304,34 @@ cp -R "$LIC_SRC" "$OUT/licenses"
 mkdir -p "$OUT/src/docs"
 cp "$REPO_ROOT/LICENSE" "$REPO_ROOT/README.md" "$REPO_ROOT/README.en.md" \
    "$REPO_ROOT/CHANGELOG.md" "$REPO_ROOT/MANIFEST.in" "$OUT/src/"
-cp "$REPO_ROOT/docs/THIRD_PARTY.md" "$REPO_ROOT/docs/PACKAGING_MATERIALS.md" "$OUT/src/docs/"
+cp "$REPO_ROOT/docs/THIRD_PARTY.md" "$REPO_ROOT/docs/PACKAGING_MATERIALS.md" \
+   "$REPO_ROOT/docs/DEPLOY_AIRGAP.md" "$REPO_ROOT/docs/VIEWER_SCREENSHOTS.md" \
+   "$OUT/src/docs/"
+cp -R "$REPO_ROOT/docs/images" "$OUT/src/docs/images"
 cp -R "$LIC_SRC" "$OUT/src/docs/licenses"
 
 # 5b-2) user guides the runtime errors point at. An air-gapped user cannot open
 # a repository link, so the guides referenced from error messages have to be in
 # the bundle or the guidance is a dead end.
 mkdir -p "$OUT/docs"
-for guide in FSDB_GUIDE.md WAVE_VIEWER.md WAVE_VIEWER.en.md DEPLOY_AIRGAP.md; do
+for guide in FSDB_GUIDE.md WAVE_VIEWER.md WAVE_VIEWER.en.md DEPLOY_AIRGAP.md \
+             XCELIUM_FST_GUIDE.md SIMULATOR_COMPATIBILITY.md VIEWER_SCREENSHOTS.md; do
   [[ -f "$REPO_ROOT/docs/$guide" ]] && cp "$REPO_ROOT/docs/$guide" "$OUT/docs/$guide"
 done
+# the bundle root READMEs plus the images they link to, so the docs read
+# correctly on the air-gapped host instead of showing broken image links
+cp "$REPO_ROOT/README.md" "$REPO_ROOT/README.en.md" "$OUT/"
+cp -R "$REPO_ROOT/docs/images" "$OUT/docs/images"
+# the public examples the READMEs and VIEWER_SCREENSHOTS link to; strip the
+# gitignored local artifacts (runs/report/build/session dirs, pycache) that a
+# plain directory copy would drag in
+for ex in viewer_demos regression_demo static_analysis verilator_quickstart; do
+  cp -r "$REPO_ROOT/examples/$ex" "$OUT/examples/$ex"
+done
+rm -rf "$OUT/examples/regression_demo/runs" "$OUT/examples/regression_demo/report" \
+       "$OUT/examples/verilator_quickstart/build" "$OUT/examples/verilator_quickstart/session" \
+       "$OUT/examples/static_analysis/session"
+find "$OUT/examples" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 
 # 5b-3) fsdb2fst build inputs. The Verdi FsdbReader runtime is proprietary and
 # stays on the user's machine, but the converter sources are ours to ship and
@@ -299,10 +339,23 @@ done
 mkdir -p "$OUT/fsdb2fst-src/fst" "$OUT/fsdb2fst-src/deploy"
 cp "$REPO_ROOT/third_party/fsdb2fst/fsdb2fst.cpp" \
    "$REPO_ROOT/third_party/fsdb2fst/ffrAPI_stub.h" \
-   "$REPO_ROOT/third_party/fsdb2fst/ffrAPI_stub_impl.cpp" "$OUT/fsdb2fst-src/"
+   "$REPO_ROOT/third_party/fsdb2fst/ffrAPI_stub_impl.cpp" \
+   "$REPO_ROOT/third_party/fsdb2fst/selftest.sh" "$OUT/fsdb2fst-src/"
 cp "$REPO_ROOT"/third_party/fsdb2fst/fst/*.c "$REPO_ROOT"/third_party/fsdb2fst/fst/*.h \
    "$OUT/fsdb2fst-src/fst/"
 cp "$REPO_ROOT/deploy/build_fsdb2fst.sh" "$OUT/fsdb2fst-src/deploy/"
+
+# 5b-4) fstdumper build inputs. The upstream plugin is GPL-3.0 and must NOT be
+# bundled; the user brings a checkout. The patch set, the one-shot build script
+# and the dump control module are all shipable, and without them an air-gapped
+# host has no way to apply the Xcelium fixes or drive the plugin. Keep the
+# deploy/ + third_party/fstdumper/ + examples/xcelium_fst/ layout so
+# build_fstdumper.sh resolves its PATCH_DIR relative to the bundle root.
+mkdir -p "$OUT/deploy" "$OUT/third_party/fstdumper" "$OUT/examples/xcelium_fst"
+cp "$REPO_ROOT"/third_party/fstdumper/*.patch "$OUT/third_party/fstdumper/"
+cp "$REPO_ROOT/deploy/build_fstdumper.sh" "$OUT/deploy/"
+cp "$REPO_ROOT/deploy/VCD2FST_BUILD.md" "$OUT/deploy/"
+cp "$REPO_ROOT/examples/xcelium_fst/fst_dump_cfg.sv" "$OUT/examples/xcelium_fst/"
 
 # 5c) retain ALL wheel notices, including declared License-File entries.
 # Preserve both wheel identity and original member path to avoid collisions.
@@ -380,6 +433,28 @@ if [[ -n "$VIEWER_SRC" ]]; then
   python3 "$MATERIAL_CHECK" copy --component viewer --materials "$VIEWER_MATERIALS" --output "$OUT/materials/viewer"
 fi
 cp "$MATERIAL_CHECK" "$OUT/materials/check.py"
+
+# test-build provenance + integrity manifest --------------------------------
+# TEST-BUILD-NOTES records what this bundle is (test build, commit, contents)
+# so a box under test can always answer "which build is this?"; SHA256SUMS
+# lets the receiving side verify the copy before wasting a test round on a
+# truncated transfer. Both are generated last so they cover every file.
+{
+  echo "wave-mcp offline bundle (TEST BUILD, not for release or distribution)"
+  echo "built:   $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+  echo "host:    $(hostname 2>/dev/null || echo unknown)"
+  echo "commit:  $(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)$(git -C "$REPO_ROOT" diff --quiet 2>/dev/null || echo ' (dirty worktree)')"
+  echo "wheel:   $(basename "$(ls "$OUT"/wheels/wave_mcp-*.whl 2>/dev/null | head -1)" 2>/dev/null || echo none)"
+  echo "python:  $([[ -n "$PYTHON_SRC" ]] && echo bundled || echo host)"
+  echo "viewer:  $([[ -n "$VIEWER_SRC" ]] && echo bundled || echo none)"
+  echo "vcd2fst: $([[ -n "$VCD2FST_SRC" ]] && echo bundled || echo none)"
+  echo
+  echo "contents:"
+  (cd "$OUT" && find . -maxdepth 1 -mindepth 1 | sort | sed 's|^\./|  |')
+} > "$OUT/TEST-BUILD-NOTES"
+(cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z \
+  | xargs -0 sha256sum > SHA256SUMS)
+echo "    TEST-BUILD-NOTES + SHA256SUMS ($(wc -l < "$OUT/SHA256SUMS") files)"
 
 echo "[*] bundle assembled at $OUT"
 if [[ "$DO_TAR" == "1" ]]; then

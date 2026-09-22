@@ -70,6 +70,38 @@
     box-shadow: 0 4px 16px rgba(0,0,0,.4);
   }
   #wv-error.visible { display: block; }
+
+  /* ---- boot overlay: a blank screen must never be silent ---- */
+  #wv-boot {
+    position: absolute; inset: 0; z-index: 30;
+    display: flex; align-items: center; justify-content: center;
+    background: #22242a; transition: opacity .4s;
+  }
+  #wv-boot.done { opacity: 0; pointer-events: none; }
+  .boot-card { text-align: center; color: #cfd3da; max-width: 560px;
+               padding: 0 24px;
+               font-family: -apple-system, "Segoe UI", sans-serif; }
+  .boot-spinner { width: 26px; height: 26px; margin: 0 auto 14px;
+    border: 3px solid #4a4d55; border-top-color: #7aa2f7;
+    border-radius: 50%; animation: wv-spin 1s linear infinite; }
+  @keyframes wv-spin { to { transform: rotate(360deg); } }
+  #wv-boot-text { font-size: 13px; line-height: 1.65; margin: 0;
+                  white-space: pre-wrap; }
+  #wv-boot-text.error { color: #ffb4b4; }
+  #wv-boot-text.muted { color: #8b93a1; }
+
+  /* ---- toast: non-blocking notices (empty signals, advisories) ---- */
+  #wv-toast {
+    position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+    z-index: 25; display: none; max-width: 82%;
+    background: rgba(38, 48, 66, 0.96); color: #dbe8ff;
+    border: 1px solid #4a6a9a; border-radius: 8px;
+    padding: 7px 14px; font-size: 12px; line-height: 1.5;
+    box-shadow: 0 4px 16px rgba(0,0,0,.4); white-space: pre-wrap;
+  }
+  #wv-toast.visible { display: block; }
+  #wv-toast.warn { background: rgba(90, 66, 20, 0.96); color: #ffe9c2;
+                   border-color: #a08a4a; }
 </style>
 </head>
 <body>
@@ -93,6 +125,15 @@
 </div>
 <div id="wv-error"></div>
 <div id="log-capsule"><span class="dot"></span>Analysis Log</div>
+
+<div id="wv-boot">
+  <div class="boot-card">
+    <div class="boot-spinner"></div>
+    <div id="wv-boot-text">Loading waveform viewer...
+(large waveforms take a few seconds to appear)</div>
+  </div>
+</div>
+<div id="wv-toast"></div>
 
 <script src="shell.js"></script>
 </body>

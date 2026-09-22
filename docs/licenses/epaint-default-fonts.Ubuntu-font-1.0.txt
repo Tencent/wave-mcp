@@ -1,3 +1,13 @@
+Ubuntu Font Family (Ubuntu-Light.ttf), supplied by
+the epaint_default_fonts 0.35.0 crate for viewer font materials.
+
+Copyright 2011 Canonical Ltd.  Licensed under the Ubuntu Font Licence 1.0
+(copyright notice as recorded in the font's own name table, nameID 0).
+Ubuntu/Canonical markers were identified in the inspected WASM. Native
+surver inclusion and any font subsetting or conversion have not been
+established. No unmodified-distribution assertion is made here.
+The full licence text follows.
+
 -------------------------------
 UBUNTU FONT LICENCE Version 1.0
 -------------------------------

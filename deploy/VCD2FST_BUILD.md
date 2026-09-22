@@ -3,7 +3,7 @@
 The offline bundle ships a small native `vcd2fst` converter (VCD → FST). It is
 built from **permissively-licensed** sources only; it is NOT the GPL GTKWave
 GUI application. wave-mcp invokes it as a separate subprocess (aggregation), so
-it does not affect wave-mcp's MIT license.
+it does not affect wave-mcp's Apache-2.0 license.
 
 ## Components compiled into `vcd2fst`
 

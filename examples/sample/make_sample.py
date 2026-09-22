@@ -1,6 +1,6 @@
-"""Generate a tiny sample session (VCD->FST + log + filelist) for smoke testing.
+"""Generate the tiny sample session (VCD->FST + log + filelist) for smoke testing.
 
-Run:  python examples/make_sample.py
+Run:  python examples/sample/make_sample.py
 Produces examples/sample/{dump.vcd,dump.fst,xrun.log,rtl.f,counter.sv}
 """
 from __future__ import annotations
@@ -10,7 +10,7 @@ import shutil
 import subprocess
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-OUT = os.path.join(HERE, "sample")
+OUT = HERE
 
 VCD = r"""$date Mon Jan 1 2026 $end
 $version wave-mcp sample $end

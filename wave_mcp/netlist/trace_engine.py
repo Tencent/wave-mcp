@@ -19,6 +19,136 @@ from .. import timeutil
 from . import expr_eval
 
 
+class _TraceWalk:
+    """One trace_value / trace_x walk: shared state for the recursive builder.
+
+    Extracted from the former ``node`` closure inside ``trace_value`` so the
+    three recursive paths (driver conflict, cross-module port, contributors)
+    live in small methods instead of one deep nesting.
+    """
+
+    def __init__(self, engine: "TraceEngine", units: int, max_depth: int,
+                 x_only: bool):
+        self.engine = engine
+        self.units = units
+        self.max_depth = max_depth
+        self.x_only = x_only
+        self.visited: set = set()
+
+    def _value_at(self, full_path: str):
+        fst = self.engine.fst
+        return fst.value_at(full_path, self.units) \
+            if full_path in fst.signals else None
+
+    def _conflict(self, entry: dict, inst: str, recs: List[dict],
+                  actives: List[int], depth: int) -> None:
+        """Expose all simultaneously-active drivers as parallel branches."""
+        entry["driver_conflict"] = {
+            "reason": "multiple drivers active at this time "
+                      "(bus contention -> X)",
+            "active_driver_count": len(actives),
+            "total_driver_count": len(recs)}
+        conflict_nodes = []
+        for i in actives:
+            r = recs[i]
+            dnode = {"driver": {
+                "kind": r["kind"], "file": r["file"],
+                "line": r["line"], "snippet": r["snippet"],
+                "selection_method": "conflict"}}
+            contribs = []
+            for s2 in dict.fromkeys(r["rhs"] + r["control"]):
+                child_full = f"{inst}.{s2}" if inst else s2
+                contribs.append(self.node(child_full, depth + 1))
+            if contribs:
+                dnode["contributors"] = contribs
+            conflict_nodes.append(dnode)
+        entry["conflicting_drivers"] = conflict_nodes
+
+    def _cross_port(self, entry: dict, rec: dict, inst: str, depth: int) -> None:
+        """Descend into the sub-instance the active port driver maps to."""
+        pr = rec["port_ref"]
+        child_inst = f"{inst}.{pr['instance']}" if inst else pr["instance"]
+        child_full = f"{child_inst}.{pr['port']}"
+        entry["crosses_into"] = {"instance": pr["instance"],
+                                 "def": pr.get("def"),
+                                 "port": pr["port"],
+                                 "direction": pr.get("direction")}
+        if not (self.x_only and not self.engine._is_x(self._value_at(child_full))):
+            entry["contributors"] = [self.node(child_full, depth + 1)]
+
+    def _contributors(self, entry: dict, rec: dict, inst: str,
+                      depth: int) -> None:
+        contributors = []
+        for s in dict.fromkeys(rec["rhs"] + rec["control"]):
+            child_full = f"{inst}.{s}" if inst else s
+            if self.x_only:
+                if not self.engine._is_x(self._value_at(child_full)):
+                    continue
+            contributors.append(self.node(child_full, depth + 1))
+        if contributors:
+            entry["contributors"] = contributors
+
+    def node(self, full_path: str, depth: int) -> dict:
+        engine = self.engine
+        val = self._value_at(full_path)
+        entry = {
+            "signal": full_path,
+            "value": (val or {}).get("value"),
+            "hex": (val or {}).get("hex"),
+        }
+        key = full_path
+        if key in self.visited or depth >= self.max_depth:
+            entry["truncated"] = True
+            return entry
+        self.visited.add(key)
+
+        # resolve_path gives the TRUE instance path (without struct-field
+        # suffix), so child signal paths are built against the instance, not
+        # against a mis-split "inst.field" prefix.
+        mod, inst, _leaf, recs = engine.resolve_path(full_path)
+        if mod is None:
+            entry["boundary"] = "unresolved-module"
+            return entry
+        if not recs:
+            entry["boundary"] = "primary-input/port/constant"
+            if self.x_only and engine._is_x(val):
+                entry["note"] = ("X root cause candidate: no driver in this "
+                                 "module — undriven primary input / port "
+                                 "(driven above this scope or not at all)")
+            return entry
+
+        # multi-driver net: if branch-guard evaluation says 2+ drivers are
+        # simultaneously active (tri-state contention -> X), expose ALL of
+        # them as parallel branches instead of heuristically picking one.
+        if len(recs) > 1:
+            vf = engine._value_fn(inst, self.units)
+            actives = [i for i, r in enumerate(recs)
+                       if engine._guard_holds(r.get("guard", []), vf)]
+            if len(actives) >= 2:
+                self._conflict(entry, inst, recs, actives, depth)
+                return entry
+
+        # choose driver: precise branch-guard evaluation, heuristic fallback
+        ai, method = engine._active_by_guard(inst, recs, self.units)
+        rec = recs[ai if ai is not None else 0]
+        entry["driver"] = {"kind": rec["kind"], "file": rec["file"],
+                           "line": rec["line"], "snippet": rec["snippet"],
+                           "selection_method": method}
+        if rec["kind"] == "nonblocking":
+            entry["note"] = "sequential (registered) — value latched from a previous cycle"
+
+        # Plan-1: cross-module trace. The active driver is a sub-instance output
+        # port -> descend into that instance and continue from the internal net
+        # that the port maps to (instance.<port>), so the chain crosses hierarchy.
+        if rec["kind"] == "instance_port" and rec.get("port_ref"):
+            self._cross_port(entry, rec, inst, depth)
+            return entry
+
+        self._contributors(entry, rec, inst, depth)
+        # sequential boundary: do not chase past a register's own data more than noted
+        return entry
+
+
 class TraceEngine:
     def __init__(self, maps: dict, fst):
         self.modules: Dict[str, dict] = maps.get("modules", {})
@@ -393,11 +523,21 @@ class TraceEngine:
         return (self._likely_active(inst, recs, units),
                 "heuristic(guard-x)" if undecidable else "heuristic")
 
+    #: how far back _last_change scans when ranking fan-ins. Only the relative
+    #: recency of a change matters to this heuristic, so a bounded window is
+    #: enough: a signal whose last change is older than the window reads as
+    #: "long stable" (-1), ranking exactly like one that never changed.
+    _LAST_CHANGE_LOOKBACK = 100_000   # in FST time units (timescale-scaled)
+
     def _last_change(self, inst: str, sig: str, units: int) -> int:
         full = f"{inst}.{sig}" if inst else sig
         if full not in self.fst.signals:
             return -1
-        rows = self.fst.values_between(full, self.fst.start_time, units, 5000)
+        # Scan a bounded recent window instead of [start_time, units]: the
+        # full-range scan made every trace node walk the whole file once per
+        # fan-in signal, which dominated the cost of trace_value / trace_x.
+        lookback = max(units - self._LAST_CHANGE_LOOKBACK, self.fst.start_time)
+        rows = self.fst.values_between(full, lookback, units, 100)
         return rows[-1]["time_units"] if rows else -1
 
     def _likely_active(self, inst: str, recs: List[dict], units: int) -> Optional[int]:
@@ -444,106 +584,8 @@ class TraceEngine:
     def trace_value(self, signal_path: str, time_point: str, max_depth: int = 12,
                     x_only: bool = False) -> dict:
         units = self._units(time_point)
-        visited = set()
-
-        def node(full_path: str, depth: int) -> dict:
-            val = self.fst.value_at(full_path, units) if full_path in self.fst.signals else None
-            entry = {
-                "signal": full_path,
-                "value": (val or {}).get("value"),
-                "hex": (val or {}).get("hex"),
-            }
-            key = full_path
-            if key in visited or depth >= max_depth:
-                entry["truncated"] = True
-                return entry
-            visited.add(key)
-
-            # resolve_path gives the TRUE instance path (without struct-field
-            # suffix), so child signal paths are built against the instance, not
-            # against a mis-split "inst.field" prefix.
-            mod, inst, _leaf, recs = self.resolve_path(full_path)
-            if mod is None:
-                entry["boundary"] = "unresolved-module"
-                return entry
-            if not recs:
-                entry["boundary"] = "primary-input/port/constant"
-                if x_only and self._is_x(val):
-                    entry["note"] = ("X root cause candidate: no driver in this "
-                                     "module — undriven primary input / port "
-                                     "(driven above this scope or not at all)")
-                return entry
-
-            # multi-driver net: if branch-guard evaluation says 2+ drivers are
-            # simultaneously active (tri-state contention -> X), expose ALL of
-            # them as parallel branches instead of heuristically picking one.
-            if len(recs) > 1:
-                vf = self._value_fn(inst, units)
-                actives = [i for i, r in enumerate(recs)
-                           if self._guard_holds(r.get("guard", []), vf)]
-                if len(actives) >= 2:
-                    entry["driver_conflict"] = {
-                        "reason": "multiple drivers active at this time "
-                                  "(bus contention -> X)",
-                        "active_driver_count": len(actives),
-                        "total_driver_count": len(recs)}
-                    conflict_nodes = []
-                    for i in actives:
-                        r = recs[i]
-                        dnode = {"driver": {
-                            "kind": r["kind"], "file": r["file"],
-                            "line": r["line"], "snippet": r["snippet"],
-                            "selection_method": "conflict"}}
-                        contribs = []
-                        for s2 in dict.fromkeys(r["rhs"] + r["control"]):
-                            child_full = f"{inst}.{s2}" if inst else s2
-                            contribs.append(node(child_full, depth + 1))
-                        if contribs:
-                            dnode["contributors"] = contribs
-                        conflict_nodes.append(dnode)
-                    entry["conflicting_drivers"] = conflict_nodes
-                    return entry
-
-            # choose driver: precise branch-guard evaluation, heuristic fallback
-            ai, method = self._active_by_guard(inst, recs, units)
-            rec = recs[ai if ai is not None else 0]
-            entry["driver"] = {"kind": rec["kind"], "file": rec["file"],
-                               "line": rec["line"], "snippet": rec["snippet"],
-                               "selection_method": method}
-            if rec["kind"] == "nonblocking":
-                entry["note"] = "sequential (registered) — value latched from a previous cycle"
-
-            # Plan-1: cross-module trace. The active driver is a sub-instance output
-            # port -> descend into that instance and continue from the internal net
-            # that the port maps to (instance.<port>), so the chain crosses hierarchy.
-            if rec["kind"] == "instance_port" and rec.get("port_ref"):
-                pr = rec["port_ref"]
-                child_inst = f"{inst}.{pr['instance']}" if inst else pr["instance"]
-                child_full = f"{child_inst}.{pr['port']}"
-                entry["crosses_into"] = {"instance": pr["instance"],
-                                         "def": pr.get("def"),
-                                         "port": pr["port"],
-                                         "direction": pr.get("direction")}
-                if not (x_only and not self._is_x(
-                        self.fst.value_at(child_full, units)
-                        if child_full in self.fst.signals else None)):
-                    entry["contributors"] = [node(child_full, depth + 1)]
-                return entry
-
-            contributors = []
-            for s in dict.fromkeys(rec["rhs"] + rec["control"]):
-                child_full = f"{inst}.{s}" if inst else s
-                if x_only:
-                    cv = self.fst.value_at(child_full, units) if child_full in self.fst.signals else None
-                    if not self._is_x(cv):
-                        continue
-                contributors.append(node(child_full, depth + 1))
-            if contributors:
-                entry["contributors"] = contributors
-            # sequential boundary: do not chase past a register's own data more than noted
-            return entry
-
-        root = node(signal_path, 0)
+        walk = _TraceWalk(self, units, max_depth, x_only)
+        root = walk.node(signal_path, 0)
 
         # Build tree summary for the user (depth / truncation reporting)
         tree_summary = {"max_depth": 0, "total_nodes": 0,

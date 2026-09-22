@@ -13,7 +13,9 @@ VPI 插件 [fstdumper](https://github.com/semify-eda/fstdumper) 让 xrun 在仿�
 
 ```bash
 # ① 编插件（一次就够，产物可拷给全组用）
-bash deploy/build_fstdumper.sh          # 自动 clone 上游 + 打 Xcelium 补丁 + make
+#   先自行取一份上游源码（GPL-3.0，wave-mcp 不随包、不代下载）：
+#   git clone --depth 1 https://github.com/semify-eda/fstdumper.git /path/to/fstdumper
+bash deploy/build_fstdumper.sh /path/to/fstdumper   # 打 Xcelium 补丁 + make
 #   脚本末尾会打印产物的绝对路径，下一步直接用它
 
 # ② 在原有 xrun 命令上追加这几项，其余选项一律不动
@@ -61,54 +63,58 @@ fstdumper 是一个 C 语言编写的 VPI 插件（改编自 Icarus Verilog 的 
 | `$fstDumplimit(n)` | 限制文件大小 | `$dumplimit` |
 
 VPI 是 IEEE 1800 标准接口，插件与 wave-mcp 无任何代码关联，互不影响各自的
-许可义务（fstdumper 为 GPL-3.0，wave-mcp 为 MIT，见下文许可说明）。
+许可义务（fstdumper 为 GPL-3.0，wave-mcp 为 Apache-2.0，见下文许可说明）。
 
 ## 许可说明（重要）
 
-fstdumper 采用 **GPL-3.0** 许可，与 wave-mcp（MIT）许可不同，因此**不随
+fstdumper 采用 **GPL-3.0** 许可，与 wave-mcp（Apache-2.0）许可不同，因此**不随
 wave-mcp 分发**，需要你自行从上游获取并编译。这不构成使用障碍：fstdumper
 只在仿真时被 xrun 加载，与 wave-mcp 进程零链接，正常使用没有 GPL 义务问题。
 
 wave-mcp 仓库 `third_party/fstdumper/` 提供一套针对 Xcelium 的修复补丁，
 补丁是 GPL-3.0 代码的衍生作品，同样按 GPL-3.0 分发，**不适用** wave-mcp
-的 MIT 许可（详见 [THIRD_PARTY.md](THIRD_PARTY.md)）。
+的 Apache-2.0 许可（详见 [THIRD_PARTY.md](THIRD_PARTY.md)）。
 
 ## 第一步：获取源码，应用补丁并编译
 
 依赖仅有 zlib（`-lz`）和 gcc，一般环境都齐备。
 
-**推荐用一键脚本**，它把下面的 clone、打补丁、make 三步收成一条命令，
-并且补丁已应用时会自动跳过（可重复执行）：
+fstdumper 的源码托管在 GitHub（GPL-3.0），wave-mcp 不随包分发，脚本也不会
+代你下载。你先自己取一份源码，再把目录交给脚本：
 
 ```bash
-bash deploy/build_fstdumper.sh              # 产出 third_party/fstdumper/build/fstdumper.so
-bash deploy/build_fstdumper.sh --perf-opt   # 额外应用可选的性能补丁
+# ① 自行获取源码（任何有网的机器，只需一次，几秒钟）
+git clone --depth 1 https://github.com/semify-eda/fstdumper.git /path/to/fstdumper
+
+# ② 打补丁 + make，一条命令收完（补丁已应用时自动跳过，可重复执行）
+bash deploy/build_fstdumper.sh /path/to/fstdumper              # 产出 /path/to/fstdumper/fstdumper.so
+bash deploy/build_fstdumper.sh /path/to/fstdumper --perf-opt   # 额外应用可选的性能补丁
 ```
+
+目录也可以用环境变量 `FSTDUMPER_SRC_DIR` 传入（旧名 `FSTDUMPER_BUILD_DIR`
+仍兼容）。编译仅需 gcc、make、patch 和 zlib（`-lz`），不需要网络。
 
 ### 离线 / 隔离网构建
 
-fstdumper 的源码托管在 GitHub（GPL-3.0），不随 wave-mcp 分发，因此脚本默认
-会联网 clone。隔离网环境没有外网，需要提前在有网络的机器上准备好源码目录，
-再拷到目标机。
+隔离网环境没有外网，把上面第 ① 步放到有网络的机器上做，源码目录整体拷到
+目标机即可，其余不变。
 
 ```bash
-# ① 在有网的机器上 clone（只需一次，几秒钟）
+# ① 在有网的机器上 clone
 git clone --depth 1 https://github.com/semify-eda/fstdumper.git /tmp/fstdumper
 
 # ② 把 /tmp/fstdumper 目录整体拷到隔离网机器（U 盘 / scp / 共享目录均可）
-#    同时需要 wave-mcp 仓库中的补丁文件：third_party/fstdumper/*.patch
-#    离线 bundle 中对应路径为 fsdb2fst-src/ 同级没有 fstdumper 补丁，
-#    需从仓库或 sdist 中取 third_party/fstdumper/ 目录一并带过去
+#    离线 bundle 已自带构建脚本、Xcelium 补丁和 dump 控制模块：
+#      deploy/build_fstdumper.sh
+#      third_party/fstdumper/*.patch
+#      examples/xcelium_fst/fst_dump_cfg.sv
+#    无需再从仓库取任何文件
 
-# ③ 在隔离网机器上构建（指定 checkout 路径，脚本会跳过 clone）
-FSTDUMPER_BUILD_DIR=/path/to/fstdumper bash deploy/build_fstdumper.sh
+# ③ 在隔离网机器上构建
+bash deploy/build_fstdumper.sh /path/to/fstdumper
 ```
 
-脚本检测到 `$FSTDUMPER_BUILD_DIR` 下已有 `.git` 目录时会直接跳过 clone，
-只执行打补丁和编译。编译仅需 gcc、make 和 zlib（`-lz`），不需要网络。
-
-如果目标机上连 `deploy/build_fstdumper.sh` 也没有（纯离线 bundle 安装），
-可以手工执行等价操作：
+如果脚本因故不可用，手工执行等价操作：
 
 ```bash
 cd /path/to/fstdumper
@@ -120,8 +126,7 @@ make fstdumper.so
 
 ### 手工流程
 
-没有外网时先自行 clone，再用 `FSTDUMPER_BUILD_DIR=<你的 checkout>` 指向它。
-手工流程如下，与脚本等价：
+与脚本等价的手工流程：
 
 ```bash
 git clone https://github.com/semify-eda/fstdumper.git

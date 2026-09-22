@@ -80,8 +80,9 @@ X 经 `data_out[7:5]` 一路传到输出。右下角的分析说明弹窗里是 
 本页内容都能从一份干净的 clone 复现出来。先构建 demo 波形，然后要么重新抓图，
 要么直接交互式打开任一场景。
 
-前置依赖：PATH 上有 `iverilog` 与 `vcd2fst`，以及查看器可选资产包
-（`pip install -e ".[viewer]"`，或设 `WAVE_MCP_VIEWER_ASSETS`）。
+前置依赖：PATH 上有 `iverilog` 与 `vcd2fst`，以及查看器资产
+（按 [SELF_BUILD.md](SELF_BUILD.md) 自建后放入 `~/.wave-mcp/cache/viewer/`，
+或设 `WAVE_MCP_VIEWER_ASSETS` 指向资产目录；`[viewer]` extra 已移除）。
 
 ```bash
 cd examples/viewer_demos

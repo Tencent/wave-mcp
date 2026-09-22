@@ -118,9 +118,9 @@ The read FSM's `WAIT_ACK` state has no timeout. The fourth transaction's
 Agent flow:
 
 1. `signal_values(rd_count)` spots the flatline
-2. `signal_values(req)` plus `signal_value_at(ack, stuck time)` shows
+2. `signal_values(req)` plus `signal_values(ack, time=stuck)` shows
    req=1 with no ack: the handshake stalled
-3. `signal_value_at(state)` + `signal_drivers(state)` pinpoints the FSM
+3. `signal_values(state, time=...)` + `signal_drivers(state)` pinpoints the FSM
    sitting in WAIT_ACK
 4. `open_wave_view` with a handshake signal group, green marker on the
    last completed transaction, red marker where req rises forever,
@@ -157,7 +157,7 @@ triage debug.
 
 Agent flow:
 
-1. `diff_waveforms(pass.fst, fail.fst, clock-aligned, after reset)`:
+1. `diff_waveforms([pass.fst, fail.fst], clock-aligned, after reset)`:
    first divergence at 35s on `dut.crc` (0110 vs 0111), 22 signals
    compared, 3 diverging
 2. `signal_fanin(crc)` shows the combinational cone: data + feedback
@@ -171,7 +171,7 @@ Agent flow:
 
 ## Tool coverage across the demos
 
-Analysis tools: `open_session`, `signal_values`, `signal_value_at`,
+Analysis tools: `open_session`, `signal_values`,
 `signal_connectivity`, `signal_drivers`, `signal_fanin`, `trace_x`,
 `diff_waveforms`. Viewer tools: `open_wave_view`, `update_wave_view`,
 `get_view_state`. That is every major workflow an agent needs for

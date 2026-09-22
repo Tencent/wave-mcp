@@ -36,18 +36,46 @@ the full cost again.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import shutil
 import sys
 import signal
 import subprocess
+import tempfile
 import time
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Any, List, Optional
 
-VCD2FST_BIN = os.environ.get("VCD2FST_BIN", "vcd2fst")
+from .runtime import storage
+from .runtime.identity import cache_key, file_version
+from .runtime.storage import StoragePolicy
+
+def _resolve_vcd2fst() -> str:
+    """Locate vcd2fst: ``$VCD2FST_BIN`` | PATH | ``<prefix>/bin/vcd2fst``.
+
+    The offline bundle's launcher puts ``$PREFIX/bin`` on PATH, but in-process
+    API use (import wave_mcp directly, no launcher) has no such PATH edit; the
+    binary installed next to the interpreter must still be found without the
+    caller setting ``$VCD2FST_BIN`` by hand.
+    """
+    explicit = os.environ.get("VCD2FST_BIN")
+    if explicit:
+        return explicit
+    if shutil.which("vcd2fst"):
+        return "vcd2fst"
+    prefixes = [sys.prefix, getattr(sys, "base_prefix", sys.prefix)]
+    # The offline bundle installs the binary at <prefix>/bin while the venv
+    # lives at <prefix>/runtime; the venv's parent directory is that prefix.
+    prefixes += [os.path.dirname(p) for p in list(prefixes)]
+    for prefix in dict.fromkeys(prefixes):
+        cand = os.path.join(prefix, "bin", "vcd2fst")
+        if os.path.isfile(cand) and os.access(cand, os.X_OK):
+            return cand
+    return "vcd2fst"
+
+
+VCD2FST_BIN = _resolve_vcd2fst()
 FSDB2FST_BIN_ENV = os.environ.get("FSDB2FST_BIN")
 
 # repo-local build output of deploy/build_fsdb2fst.sh, used when $FSDB2FST_BIN
@@ -97,12 +125,14 @@ _FSDB2FST_SRC_DIR, _FSDB2FST_BUILD_SH = _resolve_build_inputs()
 _AUTOBUILD_ENABLED = os.environ.get(
     "WAVE_MCP_FSDB2FST_AUTOBUILD", "1").strip().lower() not in ("0", "false", "no")
 
-# mode -> packing flag
-_MODE_FLAG = {
-    "speed": "-F",      # fastlz, fastest
-    "balanced": "-4",   # lz4, default
-    "size": "-Z",       # zlib, smallest
+# pack (compressor) -> vcd2fst flag. Same vocabulary as fsdb2fst's ``-p``.
+_PACK_FLAG = {
+    "fastlz": "-F",     # fastest, slightly larger (vcd2fst default here)
+    "lz4": "-4",        # good speed/size balance (fsdb2fst default)
+    "zlib": "-Z",       # smallest, slowest
 }
+#: Compressors accepted by ``pack`` on both converters.
+PACKS = tuple(_PACK_FLAG)
 
 
 class ConversionError(RuntimeError):
@@ -113,7 +143,7 @@ class ConversionError(RuntimeError):
 class ConversionResult:
     vcd_path: str
     fst_path: str
-    mode: str
+    pack: str
     parallel: bool
     elapsed_sec: float
     vcd_bytes: Optional[int] = None
@@ -132,7 +162,7 @@ class ConversionResult:
         return {
             "vcd_path": self.vcd_path,
             "fst_path": self.fst_path,
-            "mode": self.mode,
+            "pack": self.pack,
             "parallel": self.parallel,
             "streaming": self.streaming,
             "pid": self.pid,
@@ -204,11 +234,11 @@ def _parallel_supported() -> bool:
     return _PARALLEL_SUPPORTED
 
 
-def _build_cmd(vcd: str, fst: str, mode: str, parallel: bool,
+def _build_cmd(vcd: str, fst: str, pack: str, parallel: bool,
                compress: bool) -> List[str]:
-    flag = _MODE_FLAG.get(mode)
+    flag = _PACK_FLAG.get(pack)
     if flag is None:
-        raise ConversionError(f"unknown mode {mode!r}; expected one of {list(_MODE_FLAG)}")
+        raise ConversionError(f"unknown pack {pack!r}; expected one of {list(_PACK_FLAG)}")
     cmd = [VCD2FST_BIN, flag]
     # only add -p if the binary actually supports the parallel path; otherwise
     # it would abort with rc=255 and break every first-time conversion.
@@ -220,48 +250,237 @@ def _build_cmd(vcd: str, fst: str, mode: str, parallel: bool,
     return cmd
 
 
-def convert(vcd_path: str, fst_path: Optional[str] = None, mode: str = "speed",
+# ---- conversion liveness guard --------------------------------------------
+# subprocess.run(timeout=...) only bounds total wall-clock: a converter wedged
+# on I/O would sit silently until the cap (the 53 GB VCD scenario burned hours
+# with zero output). These helpers add a size-based default timeout plus an
+# output-growth heartbeat, and surface a progress line so a long conversion is
+# not a black box.
+
+_HEARTBEAT_INTERVAL = 30.0   # emit a progress line at most this often
+_STALL_LIMIT = 600.0         # no output growth for this long -> stuck
+
+# throughputs (MB per minute) for the auto-timeout estimate. Small inputs are
+# usually served from page cache / local SSD and run far faster, so they use a
+# loftier number than multi-GB files (where disk backpressure dominates).
+_THROUGHPUT_MB_PER_MIN = {"vcd": 200.0, "fsdb": 100.0}
+_SMALL_WAVE_THROUGHPUT_MB_PER_MIN = {"vcd": 600.0, "fsdb": 300.0}
+_SMALL_WAVE_MB = 2048.0      # below this, the fast throughput applies
+_MIN_TIMEOUT = 300.0         # 5 minutes floor
+_MAX_TIMEOUT = 4 * 3600.0    # 4 hours cap
+_ESTIMATE_LOG_MIN_BYTES = 100 * 1024 * 1024   # log an estimate only past 100 MB
+
+
+def _estimate_timeout(source_bytes: int, kind: str) -> float:
+    """Size-based default timeout for a conversion.
+
+    Conservative throughputs times a 3x safety margin, floored at 5 minutes
+    and capped at 4 hours: a genuinely huge file still gets its time, but one
+    stuck conversion cannot hold a session forever. Throughput is picked by
+    size because conversion speed depends far more on disk backpressure than
+    on the format (a 100 MB file and a 50 GB file differ by two orders of
+    magnitude in achievable MB/min).
+    """
+    mb = max(source_bytes, 0) / (1024 * 1024)
+    if mb < _SMALL_WAVE_MB:
+        per_min = _SMALL_WAVE_THROUGHPUT_MB_PER_MIN.get(kind, 600.0)
+    else:
+        per_min = _THROUGHPUT_MB_PER_MIN.get(kind, 200.0)
+    return max(_MIN_TIMEOUT, min(mb / per_min * 3 * 60.0, _MAX_TIMEOUT))
+
+
+def _log_estimate(source_path: str, source_bytes: int, timeout: float,
+                  kind: str) -> None:
+    """One stderr line announcing a sizeable conversion before it starts.
+
+    Only for conversions big enough to matter (>100 MB source): a shorter one
+    finishes before the line could be read, and skipping it keeps the common
+    case quiet. The client (or user) sees the expected time up front instead
+    of discovering it by waiting.
+    """
+    if source_bytes < _ESTIMATE_LOG_MIN_BYTES:
+        return
+    est_min = timeout / 3.0 / 60.0   # strip the safety margin back out
+    sys.stderr.write(
+        f"[wave-mcp] converting {os.path.basename(source_path)} "
+        f"({source_bytes / (1024 ** 3):.2f} GB {kind.upper()}): est "
+        f"{est_min:.0f}-{est_min * 2:.0f} min, timeout {timeout / 60:.0f} min. "
+        f"Narrow the scope (scopes / signals_file) or dump FST directly "
+        f"from the simulator for faster results.\n")
+    sys.stderr.flush()
+
+
+def _run_with_heartbeat(cmd: List[str], fst_path: str, timeout: float,
+                        kind: str) -> tuple:
+    """Run one conversion command with liveness monitoring.
+
+    Returns ``(returncode, combined_output)``. Raises ``ConversionError`` when
+    the wall-clock cap is exceeded or the output file stops growing after it
+    started (a wedged converter), so a stuck job fails fast with a precise
+    message instead of silently burning its timeout.
+    """
+    def _bytes_of(path: str) -> int:
+        try:
+            return os.path.getsize(path)
+        except OSError:
+            return 0
+
+    def _emit(msg: str) -> None:
+        sys.stderr.write(msg + "\n")
+        sys.stderr.flush()
+
+    # Pipe the child's output to a temporary file rather than a pipe: with a
+    # pipe, a chatty converter could fill the buffer and deadlock while we
+    # poll (nobody is draining it), turning a healthy run into a false stall.
+    with tempfile.TemporaryFile(mode="w+") as buf:
+        # Own process group: a timeout or stall must take down the converter
+        # *and anything it forked*, and only those. Killing by group id never
+        # reaches other converters or viewers on the host.
+        proc = subprocess.Popen(cmd, stdout=buf, stderr=subprocess.STDOUT,
+                                stdin=subprocess.DEVNULL, start_new_session=True)
+        start = time.time()
+        last_size = _bytes_of(fst_path)
+        last_growth = start
+        last_emit = start
+        started_growing = False
+        interval = 0.5   # poll fast at first so short conversions exit promptly
+        try:
+            while proc.poll() is None:
+                now = time.time()
+                if timeout and now - start > timeout:
+                    raise ConversionError(
+                        f"{kind} conversion exceeded its {timeout:.0f}s timeout "
+                        f"after writing {last_size / 1e6:.1f} MB. Pass a larger "
+                        f"timeout=, narrow the scope (scopes / "
+                        f"signals_file), or split the waveform.")
+                size = _bytes_of(fst_path)
+                if size != last_size:
+                    last_size = size
+                    last_growth = now
+                    if size > 0:
+                        started_growing = True
+                    if now - last_emit >= _HEARTBEAT_INTERVAL:
+                        _emit(f"[wave-mcp] {kind} conversion: "
+                              f"{size / 1e6:.1f} MB written "
+                              f"({now - start:.0f}s elapsed)")
+                        last_emit = now
+                elif started_growing and now - last_growth > _STALL_LIMIT:
+                    # Only meaningful once the converter has produced output:
+                    # some converters build state in memory before the first
+                    # write, which must not read as a stall (the total timeout
+                    # still bounds that phase).
+                    raise ConversionError(
+                        f"{kind} conversion stalled: no output growth for "
+                        f"{_STALL_LIMIT:.0f}s (stuck at "
+                        f"{last_size / 1e6:.1f} MB). The converter may have "
+                        f"hit an internal error or unresponsive I/O; re-run it "
+                        f"by hand to see its own diagnostics.")
+                time.sleep(interval)
+                interval = min(interval * 1.5, 5.0)
+        finally:
+            if proc.poll() is None:
+                _kill_own_tree(proc)
+        buf.seek(0)
+        return proc.returncode, (buf.read() or "")
+
+
+def _kill_own_tree(proc: "subprocess.Popen[Any]", grace: float = 2.0) -> None:
+    """Terminate a child started with ``start_new_session=True`` and its group.
+
+    SIGTERM first so the converter can drop partial output, SIGKILL after
+    ``grace`` seconds. Scoped to the child's own process group; nothing else on
+    the host is touched.
+    """
+    try:
+        pgid = os.getpgid(proc.pid)
+    except OSError:
+        pgid = None
+
+    def _signal(sig: int) -> None:
+        try:
+            if pgid is not None and pgid != os.getpgid(0):
+                os.killpg(pgid, sig)
+            else:
+                proc.send_signal(sig)
+        except OSError:
+            pass
+
+    _signal(signal.SIGTERM)
+    try:
+        proc.wait(timeout=grace)
+    except subprocess.TimeoutExpired:
+        _signal(signal.SIGKILL)
+        try:
+            proc.wait(timeout=grace)
+        except subprocess.TimeoutExpired:
+            pass
+
+
+def _default_out_path(source: str) -> str:
+    """Default conversion target for the on-request convert tools.
+
+    Always the derived-cache layer (same place the automatic ``cached_fst``
+    conversions live), never next to the input: the CHANGELOG promises that
+    derived artefacts are not written into input directories, and regression
+    areas are often shared or read-only anyway. Pass an explicit ``fst_path``
+    to place the output anywhere else.
+    """
+    cache_dir = storage.policy().cache_dir("fst", source, "on-request")
+    return os.path.join(
+        cache_dir, os.path.splitext(os.path.basename(source))[0] + ".fst")
+
+
+def convert(vcd_path: str, fst_path: Optional[str] = None, pack: str = "fastlz",
             parallel: bool = True, compress: bool = False,
             timeout: Optional[float] = None) -> ConversionResult:
-    """Convert an existing VCD file to FST. Returns timing + size stats."""
+    """Convert an existing VCD file to FST. Returns timing + size stats.
+
+    ``timeout=None`` (default) auto-estimates a size-based cap — see
+    ``_estimate_timeout`` — and announce it on stderr for large inputs; pass
+    an explicit value to override. The run is monitored: a converter that
+    stops writing output for 10 minutes fails fast with a precise message
+    instead of hanging until the cap.
+    """
     _check_bin()
     vcd_path = os.path.abspath(vcd_path)
     if not os.path.exists(vcd_path):
         raise ConversionError(f"VCD not found: {vcd_path}")
     if fst_path is None:
-        fst_path = os.path.splitext(vcd_path)[0] + ".fst"
+        fst_path = _default_out_path(vcd_path)
     fst_path = os.path.abspath(fst_path)
     os.makedirs(os.path.dirname(fst_path) or ".", exist_ok=True)
 
-    cmd = _build_cmd(vcd_path, fst_path, mode, parallel, compress)
-    used_parallel = "-p" in cmd
     vcd_bytes = os.path.getsize(vcd_path)
+    if timeout is None:
+        timeout = _estimate_timeout(vcd_bytes, "vcd")
+        _log_estimate(vcd_path, vcd_bytes, timeout, "vcd")
+    cmd = _build_cmd(vcd_path, fst_path, pack, parallel, compress)
+    used_parallel = "-p" in cmd
     t0 = time.time()
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    rc, out = _run_with_heartbeat(cmd, fst_path, timeout, "vcd")
     elapsed = time.time() - t0
-    out = (proc.stderr or "") + (proc.stdout or "")
     # hard fallback: if -p slipped through (probe false-positive / stale cache)
     # and the binary lacks the parallel path, retry once without -p.
-    if used_parallel and (proc.returncode != 0 or not os.path.exists(fst_path)) \
+    if used_parallel and (rc != 0 or not os.path.exists(fst_path)) \
             and _PARALLEL_DISABLED_MARK in out:
         global _PARALLEL_SUPPORTED
         _PARALLEL_SUPPORTED = False  # remember for the rest of the process
-        cmd = _build_cmd(vcd_path, fst_path, mode, False, compress)
+        cmd = _build_cmd(vcd_path, fst_path, pack, False, compress)
         used_parallel = False
         t0 = time.time()
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        rc, out = _run_with_heartbeat(cmd, fst_path, timeout, "vcd")
         elapsed = time.time() - t0
-    if proc.returncode != 0 or not os.path.exists(fst_path):
+    if rc != 0 or not os.path.exists(fst_path):
         raise ConversionError(
-            f"vcd2fst failed (rc={proc.returncode}): {proc.stderr.strip() or proc.stdout.strip()}")
+            f"vcd2fst failed (rc={rc}): {out.strip() or '(no output)'}")
     return ConversionResult(
-        vcd_path=vcd_path, fst_path=fst_path, mode=mode, parallel=used_parallel,
+        vcd_path=vcd_path, fst_path=fst_path, pack=pack, parallel=used_parallel,
         elapsed_sec=elapsed, vcd_bytes=vcd_bytes,
         fst_bytes=os.path.getsize(fst_path), command=cmd)
 
 
 def start_streaming(fifo_path: str, fst_path: Optional[str] = None,
-                    mode: str = "speed", parallel: bool = True,
+                    pack: str = "fastlz", parallel: bool = True,
                     log_path: Optional[str] = None) -> ConversionResult:
     """Set up a streaming conversion: create a FIFO and launch vcd2fst in the
     background to consume it.
@@ -289,12 +508,12 @@ def start_streaming(fifo_path: str, fst_path: Optional[str] = None,
     if not os.path.exists(fifo_path):
         os.mkfifo(fifo_path)
 
-    cmd = _build_cmd(fifo_path, fst_path, mode, parallel, compress=False)
+    cmd = _build_cmd(fifo_path, fst_path, pack, parallel, compress=False)
     logf = open(log_path, "w") if log_path else subprocess.DEVNULL
     # vcd2fst will block opening the FIFO until the writer (xrun) connects.
     proc = subprocess.Popen(cmd, stdout=logf, stderr=logf, start_new_session=True)
     return ConversionResult(
-        vcd_path=fifo_path, fst_path=fst_path, mode=mode, parallel=parallel,
+        vcd_path=fifo_path, fst_path=fst_path, pack=pack, parallel=parallel,
         elapsed_sec=0.0, command=cmd, streaming=True, pid=proc.pid)
 
 
@@ -310,15 +529,14 @@ def _is_fifo(path: str) -> bool:
 # FSDB -> FST (bundled fsdb2fst; see docs/FSDB_GUIDE.md)
 # =============================================================================
 
-def _cache_root() -> str:
-    """User-level cache dir for locally built helper binaries.
+def _fsdb2fst_cache_root() -> str:
+    """Root of the locally built fsdb2fst binaries (derived-cache layer)."""
+    return storage.policy().cache_dir("fsdb2fst", create=False)
 
-    Honours $XDG_CACHE_HOME; never writes inside site-packages, so a pip
-    install stays read-only and several users on one host stay independent.
-    """
-    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(
-        os.path.expanduser("~"), ".cache")
-    return os.path.join(base, "wave-mcp", "fsdb2fst")
+
+def _fsdb2fst_cache_dir(key: str) -> str:
+    """Per-key directory for one locally built fsdb2fst."""
+    return os.path.join(_fsdb2fst_cache_root(), key)
 
 
 # Formats wave-mcp can open. An unknown extension is rejected BY NAME instead
@@ -329,21 +547,6 @@ WAVEFORM_EXTENSIONS = (".fst", ".vcd", ".fsdb")
 
 class UnsupportedWaveformError(ValueError):
     """Raised when a waveform path is not a format wave-mcp can open."""
-
-
-def _artifact_fallback_root() -> str:
-    """Shared, deterministic dir for converted FSTs when the source dir is not writable.
-
-    Both the analysis path (``prepare_session``) and the viewer path
-    (``open_wave_view``) resolve waveforms through ``resolve_waveform``, so they
-    must agree on where a converted FST lands when it cannot go next to its
-    source. Keying this on a stable user-level dir (not a per-session out_dir)
-    is what makes "convert during analysis, then open in the viewer" and the
-    reverse order share one artifact instead of converting twice.
-    """
-    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(
-        os.path.expanduser("~"), ".cache")
-    return os.path.join(base, "wave-mcp", "fst-cache")
 
 
 def waveform_kind(path: str) -> str:
@@ -393,20 +596,17 @@ def resolve_fsdb_reader() -> Optional[str]:
 
 
 def _autobuild_cache_key(reader_dir: str) -> str:
-    """Cache key over the FsdbReader location and the converter sources.
+    """Cache key over the FsdbReader location, converter sources and build flag.
 
-    Changing Verdi version or editing fsdb2fst.cpp yields a new key, so a
+    Changing Verdi version, editing fsdb2fst.cpp / fstapi.c, or changing the
+    build script (e.g. enabling the parallel writer) yields a new key, so a
     stale binary is never reused.
     """
     parts = [reader_dir]
     for name in ("fsdb2fst.cpp", "fst/fstapi.c"):
-        path = os.path.join(_FSDB2FST_SRC_DIR, name)
-        try:
-            st = os.stat(path)
-            parts.append(f"{name}:{int(st.st_mtime)}:{st.st_size}")
-        except OSError:
-            parts.append(f"{name}:missing")
-    return hashlib.sha1("|".join(parts).encode()).hexdigest()[:16]
+        parts.append(f"{name}:{file_version(os.path.join(_FSDB2FST_SRC_DIR, name)) or 'missing'}")
+    parts.append(f"build:{file_version(_FSDB2FST_BUILD_SH) or 'missing'}")
+    return cache_key(*parts)
 
 
 def _autobuild_fsdb2fst() -> Optional[str]:
@@ -427,7 +627,7 @@ def _autobuild_fsdb2fst() -> Optional[str]:
     if not shutil.which("g++"):
         return None
 
-    cache_dir = os.path.join(_cache_root(), _autobuild_cache_key(reader_dir))
+    cache_dir = _fsdb2fst_cache_dir(_autobuild_cache_key(reader_dir))
     cached_bin = os.path.join(cache_dir, "fsdb2fst")
     if os.path.isfile(cached_bin) and os.access(cached_bin, os.X_OK):
         return cached_bin
@@ -478,7 +678,7 @@ def _record_autobuild_failure(cache_dir: str, detail: str) -> None:
 
 def _last_autobuild_failure() -> Optional[str]:
     """Return the tail of the most recent auto-build failure, if any."""
-    root = _cache_root()
+    root = _fsdb2fst_cache_root()
     newest: Optional[tuple] = None
     try:
         for entry in os.listdir(root):
@@ -518,7 +718,7 @@ def resolve_fsdb2fst() -> Optional[str]:
     reader_dir = resolve_fsdb_reader()
     if reader_dir:
         cached_bin = os.path.join(
-            _cache_root(), _autobuild_cache_key(reader_dir), "fsdb2fst")
+            _fsdb2fst_cache_dir(_autobuild_cache_key(reader_dir)), "fsdb2fst")
         if os.path.isfile(cached_bin) and os.access(cached_bin, os.X_OK):
             return cached_bin
     found = shutil.which("fsdb2fst")
@@ -530,7 +730,7 @@ def resolve_fsdb2fst() -> Optional[str]:
 def _fsdb2fst_missing_error() -> ConversionError:
     where = f"$FSDB2FST_BIN={FSDB2FST_BIN_ENV!r}" if FSDB2FST_BIN_ENV \
         else ("$FSDB2FST_BIN (unset), repo-local third_party/fsdb2fst/fsdb2fst, "
-              f"user cache {_cache_root()}, PATH")
+              f"user cache {_fsdb2fst_cache_root()}, PATH")
     # Explain why the on-demand build did not save the day, so the user gets
     # one concrete next step instead of a menu.
     if not _AUTOBUILD_ENABLED:
@@ -661,7 +861,7 @@ def _fsdb_failure(binary: str, returncode: int, out: str, *,
                "all (rebuild fsdb2fst from current source to get a precise "
                "error instead of this crash), and a libc mismatch at load time "
                "when LD_LIBRARY_PATH injects a different glibc. Size alone does "
-               "not cause this; -l/-L and fsdb_scopes cannot work around it.\n")
+               "not cause this; -l/-L and scopes cannot work around it.\n")
             + f"Run fsdb2fst --info in the same environment and share sanitized "
             f"counts and the FsdbReader version, not the confidential FSDB. "
             f"See docs/FSDB_GUIDE.md.")
@@ -690,6 +890,10 @@ def convert_fsdb(fsdb_path: str, fst_path: Optional[str] = None,
     fsdb2fst writes the hierarchy as a ``<fst>.hier`` sidecar, and pylibfst
     cannot open the FST without it, so the sidecar is validated here rather
     than surfacing later as a confusing "FST not found".
+
+    ``timeout=None`` (default) auto-estimates a size-based cap and logs it for
+    large inputs; the run is heartbeat-monitored so a wedged converter fails
+    fast with a precise message instead of hanging until the cap.
     """
     binary = resolve_fsdb2fst()
     if binary is None:
@@ -699,12 +903,14 @@ def convert_fsdb(fsdb_path: str, fst_path: Optional[str] = None,
     if not os.path.exists(fsdb_path):
         raise ConversionError(f"FSDB not found: {fsdb_path}")
     if fst_path is None:
-        fst_path = os.path.splitext(fsdb_path)[0] + ".fst"
+        fst_path = _default_out_path(fsdb_path)
     fst_path = os.path.abspath(fst_path)
     os.makedirs(os.path.dirname(fst_path) or ".", exist_ok=True)
 
+    if pack not in _PACK_FLAG:
+        raise ConversionError(f"unknown pack {pack!r}; expected one of {list(_PACK_FLAG)}")
     cmd = [binary, "-v"]
-    if pack and pack != "lz4":
+    if pack != "lz4":
         cmd += ["-p", pack]
     if scopes:
         cmd += ["-l", ",".join(scopes)]
@@ -716,20 +922,21 @@ def convert_fsdb(fsdb_path: str, fst_path: Optional[str] = None,
     cmd += [fsdb_path, fst_path]
 
     fsdb_bytes = os.path.getsize(fsdb_path)
+    if timeout is None:
+        timeout = _estimate_timeout(fsdb_bytes, "fsdb")
+        _log_estimate(fsdb_path, fsdb_bytes, timeout, "fsdb")
     t0 = time.time()
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True,
-                              timeout=timeout)
+        rc, out = _run_with_heartbeat(cmd, fst_path, timeout, "fsdb")
     except OSError as exc:
         raise ConversionError(
             f"cannot execute fsdb2fst at {binary}: {exc}\n"
             f"If it was built on another machine, copy libnffr.so and "
             f"libnsys.so next to the binary (the RPATH looks in $ORIGIN).") from exc
     elapsed = time.time() - t0
-    out = (proc.stderr or "") + (proc.stdout or "")
 
-    if proc.returncode != 0 or not os.path.exists(fst_path):
-        raise _fsdb_failure(binary, proc.returncode, out)
+    if rc != 0 or not os.path.exists(fst_path):
+        raise _fsdb_failure(binary, rc, out)
 
     hier = fst_path + ".hier"
     if not os.path.exists(hier):
@@ -785,18 +992,16 @@ def fsdb_info(fsdb_path: str, timeout: Optional[float] = 600) -> dict:
 # would reuse a partial FST when the slice changes and hand back a session with
 # missing signals and no warning.
 
-_CACHE_SUFFIX = ".wave-mcp-cache.json"
+#: Conversion record stored beside a cached FST.
+_CACHE_RECORD = "conversion.json"
+#: Bump when the converted output changes for the same input and options.
+_CONVERT_TOOL_VERSION = 2
 
 
-def _source_fingerprint(src: str, opts: dict) -> dict:
-    st = os.stat(src)
-    return {
-        "source": os.path.abspath(src),
-        "mtime_ns": st.st_mtime_ns,
-        "size": st.st_size,
-        "options": opts,
-        "tool_version": 1,
-    }
+def _conversion_record(src: str, opts: dict) -> dict:
+    """What a cached FST was produced from: source version plus options."""
+    return {"source": os.path.abspath(src), "source_version": file_version(src),
+            "options": opts, "tool_version": _CONVERT_TOOL_VERSION}
 
 
 def _artifact_ok(fst_path: str, need_hier: bool) -> bool:
@@ -807,96 +1012,107 @@ def _artifact_ok(fst_path: str, need_hier: bool) -> bool:
     return True
 
 
-def _dir_writable(d: str) -> bool:
-    """Probe writability by actually creating a file.
-
-    ``os.access(W_OK)`` is not enough: it returns True for root even on a
-    read-only-by-permission directory, so a shared read-only regression dir
-    would look writable and the conversion would fail late instead of falling
-    back to the session dir.
-    """
-    if not os.path.isdir(d):
-        return False
-    probe = os.path.join(d, ".wave-mcp-write-probe")
+def _cache_hit(fst_path: str, record_path: str, want: dict,
+               need_hier: bool) -> Optional[dict]:
+    """The stored conversion detail when the cached FST matches ``want``."""
+    if not (_artifact_ok(fst_path, need_hier) and os.path.exists(record_path)):
+        return None
     try:
-        with open(probe, "w"):
-            pass
-        os.remove(probe)
-        return True
-    except OSError:
-        return False
+        with open(record_path) as fh:
+            have = json.load(fh)
+    except (OSError, ValueError):
+        return None  # unreadable/corrupt record: reconvert
+    # compare only the identity fields: the record also carries a "detail"
+    # blob, so comparing whole dicts would never match.
+    if all(have.get(k) == v for k, v in want.items()):
+        return have.get("detail", {})
+    return None
 
 
-def cached_fst(source: str, *, kind: str, fallback_dir: str,
+def cached_fst(source: str, *, kind: str,
                scopes: Optional[List[str]] = None,
                signals_file: Optional[str] = None,
-               mode: str = "speed", pack: str = "lz4",
+               pack: Optional[str] = None,
                timeout: Optional[float] = None) -> dict:
     """Convert ``source`` to FST, reusing a previous artifact when still valid.
 
-    ``kind`` is ``"fsdb"`` or ``"vcd"``. The artifact is written next to the
-    source waveform so every session on that waveform shares it; when that
-    directory is not writable (read-only scratch, shared regression dirs) it
-    falls back to ``fallback_dir`` (normally the session dir).
+    ``kind`` is ``"fsdb"`` or ``"vcd"``. The artifact lives in the derived-cache
+    layer under ``fst/<digest of source path + options>/``, never next to the
+    source: regression areas are shared and often read-only, and a converted
+    file beside somebody's dump is a surprise. Every session on that waveform
+    finds the same directory, and a lock inside it makes two concurrent
+    callers build once and wait once.
 
-    Returns a dict with ``fst_path``, ``cached`` (bool) and the underlying
-    conversion detail, ready to drop into a pipeline step.
+    The cache key is the *path* plus options; the record inside carries the
+    source ``file_version``, so a re-dump of the same path invalidates the
+    cache while a rename of the source yields a fresh conversion.
+
+    Returns a dict with ``fst_path``, ``cached`` (bool), ``cache_dir`` and the
+    underlying conversion detail, ready to drop into a pipeline step.
     """
     source = os.path.abspath(source)
     if not os.path.exists(source):
         raise ConversionError(f"{kind.upper()} not found: {source}")
 
-    opts = {"kind": kind}
+    pack = pack or default_pack(kind)
+    opts = {"kind": kind, "pack": pack}
     if kind == "fsdb":
         opts.update(scopes=sorted(scopes or []),
-                    signals_file=os.path.abspath(signals_file) if signals_file else None,
-                    pack=pack)
-    else:
-        opts.update(mode=mode)
+                    signals_file=os.path.abspath(signals_file) if signals_file else None)
 
+    pol = storage.policy()
+    cache_dir = pol.cache_dir("fst", source, json.dumps(opts, sort_keys=True))
     base = os.path.splitext(os.path.basename(source))[0]
-    src_dir = os.path.dirname(source)
-    out_dir = src_dir if _dir_writable(src_dir) else fallback_dir
-    os.makedirs(out_dir, exist_ok=True)
-    fst_path = os.path.join(out_dir, base + ".fst")
-    cache_path = fst_path + _CACHE_SUFFIX
+    fst_path = os.path.join(cache_dir, base + ".fst")
+    record_path = os.path.join(cache_dir, _CACHE_RECORD)
     need_hier = (kind == "fsdb")
+    want = _conversion_record(source, opts)
 
-    want = _source_fingerprint(source, opts)
-    if _artifact_ok(fst_path, need_hier) and os.path.exists(cache_path):
+    detail = _cache_hit(fst_path, record_path, want, need_hier)
+    if detail is not None:
+        return {"fst_path": fst_path, "cached": True,
+                "cache_dir": cache_dir, "detail": detail}
+
+    with pol.locked(cache_dir):
+        # Somebody may have finished this exact conversion while we waited.
+        detail = _cache_hit(fst_path, record_path, want, need_hier)
+        if detail is not None:
+            return {"fst_path": fst_path, "cached": True,
+                    "cache_dir": cache_dir, "detail": detail}
+        # A stale or corrupt artifact is replaced, not reported.
+        for stale in (fst_path, fst_path + ".hier", record_path):
+            StoragePolicy.discard(stale)
+        if kind == "fsdb":
+            res = convert_fsdb(source, fst_path, scopes=scopes,
+                               signals_file=signals_file, pack=pack,
+                               timeout=timeout).to_dict()
+        else:
+            res = convert(source, fst_path, pack=pack, timeout=timeout).to_dict()
+        record = dict(want)
+        record["detail"] = res
         try:
-            with open(cache_path) as fh:
-                have = json.load(fh)
-            # compare only the fingerprint fields: the stored record also carries
-            # a "detail" blob, so comparing whole dicts would never match.
-            if all(have.get(k) == v for k, v in want.items()):
-                return {"fst_path": fst_path, "cached": True,
-                        "cache_dir": out_dir, "detail": have.get("detail", {})}
-        except (OSError, ValueError):
-            pass  # unreadable/corrupt cache: just reconvert
-
-    if kind == "fsdb":
-        res = convert_fsdb(source, fst_path, scopes=scopes,
-                           signals_file=signals_file, pack=pack,
-                           timeout=timeout).to_dict()
-    else:
-        res = convert(source, fst_path, mode=mode, timeout=timeout).to_dict()
-
-    record = dict(want)
-    record["detail"] = res
-    try:
-        with open(cache_path, "w") as fh:
-            json.dump(record, fh, indent=2)
-    except OSError:
-        pass  # cache is an optimisation, never fail the conversion over it
+            StoragePolicy.atomic_write_bytes(
+                record_path, json.dumps(record, indent=2).encode())
+        except OSError:
+            pass  # the record is an optimisation, never fail the conversion over it
     return {"fst_path": fst_path, "cached": False,
-            "cache_dir": out_dir, "detail": res}
+            "cache_dir": cache_dir, "detail": res}
 
 
-def resolve_waveform(path: str, *, mode: str = "speed",
+def default_pack(kind: str) -> str:
+    """Default compressor per converter: fastlz for vcd2fst, lz4 for fsdb2fst.
+
+    They differ because the converters differ: vcd2fst's fastlz path is the
+    fast one there, while fsdb2fst was tuned around lz4. ``pack=None`` on the
+    callers below means "that converter's default".
+    """
+    return "lz4" if kind == "fsdb" else "fastlz"
+
+
+def resolve_waveform(path: str, *,
                      scopes: Optional[List[str]] = None,
                      signals_file: Optional[str] = None,
-                     pack: str = "lz4",
+                     pack: Optional[str] = None,
                      timeout: Optional[float] = None) -> dict:
     """Resolve any supported waveform path to an openable FST.
 
@@ -909,7 +1125,7 @@ def resolve_waveform(path: str, *, mode: str = "speed",
         .fsdb -> cached_fst(kind="fsdb")
         other -> UnsupportedWaveformError
 
-    Defaults match ``prepare_session`` (mode="speed", no slicing, pack="lz4");
+    Defaults match ``prepare_session`` (no slicing, the converter's default pack);
     callers must not vary them, since the conversion options are part of the
     cache key and a mismatch silently forces a second conversion.
 
@@ -923,9 +1139,8 @@ def resolve_waveform(path: str, *, mode: str = "speed",
         return {"fst_path": source, "kind": kind, "converted": False,
                 "cached": False, "source": source}
     got = cached_fst(
-        source, kind=kind, fallback_dir=_artifact_fallback_root(),
-        scopes=scopes, signals_file=signals_file,
-        mode=mode, pack=pack, timeout=timeout)
+        source, kind=kind, scopes=scopes, signals_file=signals_file,
+        pack=pack, timeout=timeout)
     return {"fst_path": got["fst_path"], "kind": kind, "converted": True,
             "cached": bool(got.get("cached")), "source": source,
             "cache_dir": got.get("cache_dir"), "detail": got.get("detail", {})}

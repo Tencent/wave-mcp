@@ -374,7 +374,7 @@ class FstSource:
 
     # -- signals ------------------------------------------------------------
     # ordering for signal listings: logic signals first, parameters last, so a
-    # small max_signals still surfaces meaningful signals (not just parameters).
+    # small limit still surfaces meaningful signals (not just parameters).
     _CATEGORY_ORDER = {"Port": 0, "Internal-register": 1, "Internal-wire": 2,
                        "Parameter": 3}
 
@@ -383,9 +383,9 @@ class FstSource:
     width_hint = None  # type: Optional[callable]
 
     def signals_of_instance(self, instance_full_path: str,
-                            filter_by_name: Optional[str] = None,
-                            filter_by_type: Optional[str] = None,
-                            max_signals: int = 2000,
+                            name_contains: Optional[str] = None,
+                            signal_type: Optional[str] = None,
+                            limit: int = 2000,
                             aggregate_buses: bool = True,
                             underscore_style: bool = False) -> List[dict]:
         """List signals directly under an instance.
@@ -394,7 +394,7 @@ class FstSource:
         writer split apart (e.g. ``bus [31] ... bus [0]``) back into a single
         bus entry ``bus[N:0]``; the per-element signals remain individually
         queryable via their full paths. Results are ordered ports -> registers
-        -> wires -> parameters so a small ``max_signals`` stays useful.
+        -> wires -> parameters so a small ``limit`` stays useful.
 
         ``underscore_style`` (default False) additionally coalesces underscore
         bit-split names (``data_7 ... data_0``); off by default because a real
@@ -407,20 +407,20 @@ class FstSource:
         for sig in self.signals.values():
             if sig.scope != base:
                 continue
-            if not sig.matches_type(filter_by_type):
+            if not sig.matches_type(signal_type):
                 continue
             collected.append(sig)
 
         dicts = (self._aggregate_arrays(collected, underscore_style)
                  if aggregate_buses else [s.to_dict() for s in collected])
 
-        if filter_by_name:
-            fl = filter_by_name.lower()
+        if name_contains:
+            fl = name_contains.lower()
             dicts = [d for d in dicts if fl in d["name"].lower()]
 
         dicts.sort(key=lambda d: (self._CATEGORY_ORDER.get(d.get("type"), 2),
                                   d["name"]))
-        return dicts[:max_signals]
+        return dicts[:limit]
 
     def _rtl_width(self, scope: str, base_name: str) -> Optional[int]:
         """Best-effort declared bit width for ``scope.base_name`` from netlist."""
@@ -663,11 +663,14 @@ class FstSource:
         elems = self._element_signals(full_path)
         if not elems:
             return None
-        # collect per-element timelines
-        per_elem: List[Dict[int, str]] = []
-        for s in elems:
-            rows = self._iter_values(s, start_units, end_units, max_values)
-            per_elem.append({t: v for t, v in rows})
+        # collect every element's timeline in ONE file pass: the previous
+        # per-element loop ran a whole-file iteration for each bit, so a
+        # 32-bit bus scanned the file 32 times.
+        multi = self._iter_values_multi(elems, start_units, end_units,
+                                        max_values)
+        per_elem: List[Dict[int, str]] = [
+            {t: v for t, v in multi.get(s.handle, [])} for s in elems
+        ]
         # merge timestamps: union of all element timestamps, sorted
         all_ts = sorted(set().union(*[set(d.keys()) for d in per_elem]))
         if not all_ts:
@@ -716,6 +719,43 @@ class FstSource:
         with self._lock:
             lib.fstReaderClrFacProcessMaskAll(self._ctx)
             lib.fstReaderSetFacProcessMask(self._ctx, sig.handle)
+            lib.fstReaderSetLimitTimeRange(self._ctx, start, end)
+            pylibfst.fstReaderIterBlocks2(self._ctx, cb, cb, None, ffi.NULL)
+            # reset time range to full for subsequent queries
+            lib.fstReaderSetLimitTimeRange(self._ctx, self.start_time, self.end_time)
+            lib.fstReaderClrFacProcessMaskAll(self._ctx)
+        return collected
+
+    def _iter_values_multi(self, signals: List[Signal], start: int, end: int,
+                           max_values: int) -> Dict[int, List[Tuple[int, str]]]:
+        """Collect value timelines for several signals in ONE file pass.
+
+        ``_iter_values`` iterates the whole file per call, so an N-element bus
+        query paid N passes. Masking every handle up front and demultiplexing
+        in the callback collapses that to a single pass, which is what makes
+        aggregated-bus queries (and batched waveform diff) scale with width
+        instead of multiplying I/O.
+
+        Returns ``{handle: [(time_units, value), ...]}``; handles with no
+        changes in range map to an empty list. When two signals alias the same
+        handle they share one bucket, which is correct: it is one underlying
+        variable.
+        """
+        collected: Dict[int, List[Tuple[int, str]]] = {s.handle: []
+                                                       for s in signals}
+
+        def cb(_data, time, facidx, value):
+            t = int(time)
+            if t < start or t > end:
+                return  # precise filter (SetLimitTimeRange is only block-coarse)
+            bucket = collected.get(int(facidx))
+            if bucket is not None and len(bucket) < max_values:
+                bucket.append((t, self._decode(value)))
+
+        with self._lock:
+            lib.fstReaderClrFacProcessMaskAll(self._ctx)
+            for s in signals:
+                lib.fstReaderSetFacProcessMask(self._ctx, s.handle)
             lib.fstReaderSetLimitTimeRange(self._ctx, start, end)
             pylibfst.fstReaderIterBlocks2(self._ctx, cb, cb, None, ffi.NULL)
             # reset time range to full for subsequent queries

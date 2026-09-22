@@ -1,6 +1,7 @@
 # Third-party notices
 
-wave-mcp is released under the MIT License (see the top-level `LICENSE`).
+wave-mcp is released under the Apache-2.0 License (see the top-level `LICENSE`,
+which also carries the consolidated third-party attribution notices).
 It uses the following third-party components, each under its own license.
 Their notices are retained here as required.
 
@@ -10,18 +11,22 @@ Their notices are retained here as required.
 | --- | --- | --- |
 | mcp (Model Context Protocol SDK) | MIT | https://github.com/modelcontextprotocol/python-sdk |
 | pyslang | MIT | https://github.com/MikePopoloski/slang |
-| pylibfst | MIT + BSD-2-Clause | https://github.com/mschlaegl/pylibfst |
+| pylibfst | BSD-3-Clause (wrapper) + MIT (FST/FastLZ) + BSD-2-Clause (LZ4) | https://github.com/mschlaegl/pylibfst |
 
-`pylibfst` bundles the FST library and its compressors:
+`pylibfst` retains its BSD-3-Clause wrapper notice (Manfred SCHLAEGL, 2022).
+It loads its native library through CFFI in the Python process, links zlib,
+and bundles the FST library and its compressors:
 - libfst / fstapi: MIT (Tony Bybell), https://github.com/gtkwave/libfst
 - LZ4: BSD-2-Clause (Yann Collet)
 - FastLZ: MIT (Ariya Hidayat)
 
 ## Bundled binary (offline/self-contained release only)
 
-The offline bundle optionally ships a `vcd2fst` converter built from source. It is an
-aggregation: `vcd2fst` is a separate program invoked as a subprocess and does
-NOT link into or affect the MIT license of wave-mcp itself.
+The offline bundle optionally ships a `vcd2fst` converter built from source.
+It runs as a separate subprocess, communicating through command-line
+arguments, files or FIFOs; it does not link into the wave-mcp process.
+This describes the technical boundary, not a determination of the license
+consequences of the combined distribution.
 
 `vcd2fst` is built from the GTKWave sources and is composed of:
 
@@ -169,14 +174,23 @@ plugin that lets Xcelium (xrun) dump FST directly during simulation. See
 
 Licensing notes:
 
-- fstdumper is NOT bundled, built, or redistributed by wave-mcp. Users clone
-  the upstream repository, apply the patches with `patch -p1`, and build the
-  `.so` themselves. The plugin is loaded by the simulator at simulation time
-  and never links into wave-mcp, so this is a mere aggregation and does not
-  affect the MIT license of wave-mcp.
-- The patch files are derived work of GPL-3.0 code and are therefore
-  distributed under GPL-3.0 as well. They are NOT covered by wave-mcp's MIT
-  license.
+- The upstream fstdumper plugin source and binary are excluded from
+  wave-mcp distribution inputs. The inspected v0.2.6 core wheel, sdist and
+  both offline bundles contain neither; this is not an assertion about
+  every historical image. `deploy/build_fstdumper.sh` performs no clone/fetch:
+  users obtain the upstream source themselves, then the script applies the
+  patches with `patch -p1` and builds the `.so` in that directory. The plugin
+  is loaded by the simulator, not linked into the wave-mcp process. This
+  technical boundary does not determine the license consequences of using
+  the plugin with a simulator.
+- The patch files are derived work of the patched files and are NOT covered
+  by wave-mcp's MIT license. `src/sys_fst.c` carries a GPL-2.0-or-later
+  header, Copyright (c) 1999-2021 Stephen Williams (steve@icarus.com); its
+  later version option is exercised here, so the patches are distributed
+  under GPL-3.0, consistent with the upstream top level license. The
+  patches were modified 2026-08-31 by the wave-mcp project contributors
+  (Tencent). Attribution, modification dates and change summaries are
+  recorded in [licenses/fstdumper-patches.NOTICE](licenses/fstdumper-patches.NOTICE).
 - Compiled `.so` artifacts must never be committed or shipped with wave-mcp,
   its PyPI package, or its release assets.
 - The fixes were also contributed upstream (semify-eda/fstdumper#6, fork
@@ -194,39 +208,95 @@ cover every bundled library (such as OpenSSL, Tcl/Tk, bzip2 or libffi).
 The material manifest binds the runtime to the exact upstream build and
 payload hashes; unresolved or mismatched inputs stop packaging.
 
-## Wave viewer assets (optional `wave-mcp-viewer-assets` package only)
+The current offline build strips the optional `_dbm` extension module
+from its CPython 3.11.16+20260901 runtime. The inspected local candidate
+could not import `_dbm` and contained no libdb files or Berkeley DB markers
+in the scanned ELF files. This candidate change has not updated the
+published v0.2.6 bundles, whose CPython 3.11.10+20241016 runtime still
+contains Berkeley DB 6.0.19. The older bundles remain unchanged.
+
+The build provider describes its 6.0.19 copy as Sleepycat-licensed and its
+retained notice says Sleepycat; Oracle also publishes a general statement
+that the 6.0 series uses AGPL. These different source statements are not
+resolved here into a definitive license classification for the older copy.
+
+For the current candidate, `materials/python/manifest.json` records the
+stripped file under `stripped_extensions`; the material check then requires
+the file to be absent from the shipped runtime and neither the Berkeley DB
+licence text nor its source archive to ship. `dbm.dumb` (pure Python) remains
+available.
+
+Runtime libraries and source-only materials are recorded separately. The
+inspected candidate uses XZ 5.8.3 liblzma under 0BSD, but its complete XZ
+source archive also includes GPL and LGPL files. It uses OpenSSL 3.5.8 at
+runtime, while the material superset also contains OpenSSL 1.1.1w source
+under the older OpenSSL/SSLeay terms. The python-build-standalone build
+project source is MPL-2.0; that does not make CPython itself MPL-2.0.
+Each original source notice must be retained rather than replaced by the
+runtime library license. Tcl and Tk also require their separate original
+notices. Candidate materials still require final package verification.
+
+## Wave viewer assets (user-built, NOT distributed)
 
 The optional viewer (`wave-view`, `open_wave_view`) consumes a SEPARATE
-assets package, `wave-mcp-viewer-assets`, containing:
+asset directory containing:
 
 | Component | License | Project |
 | --- | --- | --- |
 | Surfer (WASM waveform viewer) | EUPL-1.2 | https://gitlab.com/surfer-project/surfer |
 | surver (Surfer remote server) | EUPL-1.2 | https://gitlab.com/surfer-project/surfer |
 
-These EUPL-1.2 components are NOT bundled into the MIT-licensed `wave-mcp`
-core package or repository. They are an aggregation: `surver` runs as a
-separate subprocess and the WASM bundle is served as static files to the
-user's browser; neither links into wave-mcp. The assets package is built by
+Starting with the release after v0.2.6, wave-mcp does NOT distribute these
+EUPL-1.2 artifacts: no PyPI assets package, no GitHub release attachment,
+no offline-bundle inclusion on our side. Users build the assets locally
+from the pinned upstream source following `docs/SELF_BUILD.md`; the pin is
+`deploy/viewer-pin.sh`, and `deploy/build_surver_static.sh` /
+`deploy/build_viewer_assets.sh` are the build entry points (they never
+download upstream sources themselves). Previously published asset packages
+remain subject to their own recorded notices.
+
+These EUPL-1.2 binaries are not included in the Apache-2.0-licensed `wave-mcp`
+core package or repository. `surver` runs as a separate subprocess using
+command-line arguments, pipes and HTTP. The WASM bundle runs in the browser
+inside an iframe; the core shell communicates with it only through page-load
+URL parameters and standard window.postMessage, and does not import viewer
+modules or call viewer functions (an earlier shell revision polled the
+viewer's get_state through contentWindow eval; that direct call has been
+removed). Separate packaging alone does not determine license impact.
+The assets package is built by
 `deploy/build_viewer_assets.sh`, which records the Surfer version; a
 statically-linked `surver` for old-glibc hosts can be reproduced with
 `deploy/build_surver_static.sh`. wave-mcp's own shell assets
-(`wave_mcp/viewer/web/`) are original MIT-licensed code.
+(`wave_mcp/viewer/web/`) are original Apache-2.0-licensed code.
 
-### Fonts embedded in the surver binary
+### Viewer font materials
 
-The `surver` binary embeds fonts via the `epaint_default_fonts` crate. Its
+The `epaint_default_fonts` crate contains font files. Its
 license is `(MIT OR Apache-2.0) AND OFL-1.1 AND Ubuntu-font-1.0`, a
 conjunction: the font licenses apply in addition to the crate license.
 Earlier asset builds recorded this component as an unknown license, which
 left the font texts out of the distributed package. All three are now
 vendored under `docs/licenses/`:
 
-| Font | License | File |
-| --- | --- | --- |
-| Hack, NotoEmoji, Ubuntu-Light | OFL-1.1 | `epaint-default-fonts.OFL-1.1.txt` |
-| Ubuntu font family | Ubuntu-font-1.0 | `epaint-default-fonts.Ubuntu-font-1.0.txt` |
-| emoji-icon-font | MIT | `epaint-default-fonts.emoji-icon-font.MIT.txt` |
+| Font | License | Copyright | File |
+| --- | --- | --- | --- |
+| NotoEmoji | OFL-1.1 | Copyright 2013 Google Inc. | `epaint-default-fonts.OFL-1.1.txt` |
+| Hack | MIT + Bitstream Vera; DejaVu public-domain contributions | Source Foundry Authors; Bitstream, Inc. | `epaint-default-fonts.Hack.txt` |
+| Ubuntu-Light (Ubuntu font family) | Ubuntu-font-1.0 | Copyright 2011 Canonical Ltd. | `epaint-default-fonts.Ubuntu-font-1.0.txt` |
+| emoji-icon-font | MIT | John Slegers | `epaint-default-fonts.emoji-icon-font.MIT.txt` |
+
+The Ubuntu Font Licence 1.0 text and the font's own Canonical copyright
+notice are retained together. Ubuntu and Hack markers were found in the
+inspected WASM; native `surver` embedding has not been established. Neither
+these markers nor a Cargo.lock entry proves byte-identical redistribution
+or the absence of subsetting or conversion. The current notices do not
+claim that the fonts are unmodified. These notice corrections are local
+changes awaiting the next viewer package; published wheels are unchanged.
+
+The emoji-icon-font upstream README also identifies Icomoon, Wikimedia and
+OpenSans sources. Its retained MIT notice is not a completed per-icon
+source/license mapping; that mapping and target-specific inclusion remain
+to be established.
 
 Provenance for these texts is recorded in
 `epaint-default-fonts.SOURCES.txt`.

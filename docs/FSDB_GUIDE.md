@@ -43,7 +43,7 @@ prepare_session(wave_path="dump.fsdb", filelist_path="your_filelist.f")
 
 > 需要 `wave-mcp>=0.2.6`：更早的版本没把转换器源码打进包，自动编译这一步会跳过。
 
-`fsdb_scopes=["u_core"]` 收窄待加载信号；已选信号数超过默认 500 万内存阈值时会拒绝，
+`scopes=["u_core"]` 收窄待加载信号；已选信号数超过默认 500 万内存阈值时会拒绝，
 用它缩小范围即可。规模本身不再拒绝文件，详见下文规模说明。
 遇到问题看[排错速查](#排错速查)；想手工构建或用命令行看[手工构建](#手工构建备选)与
 [命令行用法](#命令行用法)。
@@ -54,14 +54,15 @@ prepare_session(wave_path="dump.fsdb", filelist_path="your_filelist.f")
 
 | 缓存的东西 | 位置 | 失效条件 |
 | --- | --- | --- |
-| **转换器二进制**（`fsdb2fst`） | `~/.cache/wave-mcp/fsdb2fst/<key>/` | 换 Verdi 路径或改转换器源码则重编 |
+| **转换器二进制**（`fsdb2fst`） | `~/.wave-mcp/cache/fsdb2fst/<key>/` | 换 Verdi 路径或改转换器源码则重编 |
 | **转换产物**（`.fst` + `.fst.hier`） | 默认落在 `.fsdb` 旁，目录不可写时回退 session 目录 | 源波形 mtime/size 变化，或切片参数变化则重转 |
 
 前者让你只编一次转换器，后者让同一份波形反复建 session 只转一次。
 
 ## 许可与合规边界
 
-`fsdb2fst.cpp` 是自研代码，**MIT**，随 wave-mcp 分发。它链接的 FsdbReader
+`fsdb2fst.cpp` 是自研代码，**Apache-2.0**（保留 TraceWeave 的 MIT 来源与署名，
+见 `docs/THIRD_PARTY.md`），随 wave-mcp 分发。它链接的 FsdbReader
 运行库受 Synopsys EULA 约束：
 
 - `libnffr.so` / `libnsys.so` 不随仓库和 PyPI 分发，只在运行时探测本机的
@@ -78,7 +79,7 @@ prepare_session(wave_path="dump.fsdb", filelist_path="your_filelist.f")
 | --- | --- | --- |
 | 1 | `$FSDB2FST_BIN` | 显式指定一个现成二进制。**指向的路径不可用时直接报错，不会静默回退** |
 | 2 | repo-local `third_party/fsdb2fst/fsdb2fst` | 手工构建的默认落点 |
-| 3 | 用户缓存 `~/.cache/wave-mcp/fsdb2fst/<key>/fsdb2fst` | 自动构建的落点 |
+| 3 | 用户缓存 `~/.wave-mcp/cache/fsdb2fst/<key>/fsdb2fst` | 自动构建的落点 |
 | 4 | `PATH` | 系统里已装的 `fsdb2fst` |
 | 5 | **按需构建** | 以上都没有且能探测到 FsdbReader 时，自动编一次到用户缓存 |
 
@@ -100,6 +101,11 @@ prepare_session(wave_path="dump.fsdb", filelist_path="your_filelist.f")
 > 六个版本都是这样。升级到 0.2.6 或更新版本即可。
 
 关掉自动构建用 `WAVE_MCP_FSDB2FST_AUTOBUILD=0`。
+
+**写端默认并行压缩**：FST 的压缩写盘走 fstapi 并行写（后台线程，多核）。如果怀疑并行
+写引发异常（产物打不开、进程异常退出），设 `FSDB2FST_PARALLEL=0` 回退串行，**不需要
+重新编译**；MCP 场景把该变量放进服务器配置的 `env` 块，下次转换生效。取值 `0`/`off`/
+`false`/`no` 均视为关闭，未设置或为其他值保持并行。
 
 **升级 wave-mcp 后二进制会自动重建**：缓存键包含 `fsdb2fst.cpp` 和 `fst/fstapi.c` 的
 修改时间与大小，所以升级带来的转换器改动会让缓存键改变，下次转 FSDB 时自动重编一次
@@ -154,8 +160,8 @@ VERDI_HOME=/path/to/verdi bash deploy/build_fsdb2fst.sh
 大设计传切片参数收窄范围，切片参数参与产物缓存键，换了范围不会误用旧产物：
 
 ```
-prepare_session(wave_path="dump.fsdb", fsdb_scopes=["u_core"], filelist_path="rtl.f")
-prepare_session(wave_path="dump.fsdb", fsdb_signals_file="siglist.txt", filelist_path="rtl.f")
+prepare_session(wave_path="dump.fsdb", scopes=["u_core"], filelist_path="rtl.f")
+prepare_session(wave_path="dump.fsdb", signals_file="siglist.txt", filelist_path="rtl.f")
 ```
 
 想先摸清文件规模再决定怎么转，用 `convert_fsdb_to_fst` 工具：
@@ -251,7 +257,7 @@ FST 里登记为 alias 共享同一句柄与值数据，不会重复存储。
   波形数据无关，属于环境问题，需另行排查。
 
 **规模本身不是拒绝转换的理由。** 因此原先按“原始 VAR 总数”拒绝文件的保护已移除：它的
-立论来自上述被推翻的判断，且属文件级硬拦，`-l` / `-L` / `fsdb_scopes` 都无法规避，会
+立论来自上述被推翻的判断，且属文件级硬拦，`-l` / `-L` / `scopes` 都无法规避，会
 拒绝实际可以正常转换的文件。
 
 **保留一个保护，防的是内存而非崩溃：**
@@ -321,7 +327,7 @@ out-of-memory kill"），而不是留下一个静默的 `rc=139` 让人怀疑是
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
 | 报 `fsdb2fst not found` 且提示 auto-build skipped | 没探测到 FsdbReader 运行库 | 在 MCP 配置的 `env` 里设 `VERDI_HOME`，或设 `FSDB2FST_FREADER` 指向拷来的 `share/FsdbReader` 目录 |
-| 提示 auto-build attempted but failed | 自动编译失败，报错已附原因 | 看 `~/.cache/wave-mcp/fsdb2fst/*/build-failed.log`；缺 `g++` 时装编译器，或手工构建后用 `FSDB2FST_BIN` 指定 |
+| 提示 auto-build attempted but failed | 自动编译失败，报错已附原因 | 看 `~/.wave-mcp/cache/fsdb2fst/*/build-failed.log`；缺 `g++` 时装编译器，或手工构建后用 `FSDB2FST_BIN` 指定 |
 | 提示 auto-build unavailable | 找不到转换器源码；0.2.6 之前的 pip 包不含源码 | 升级到 `wave-mcp>=0.2.6`，或用 git checkout，或在别处构建后用 `FSDB2FST_BIN` 指向二进制 |
 | 编译报 `ffrAPI.h: No such file` | `VERDI_HOME` 不对或缺 FsdbReader | `find / -name ffrAPI.h`，认准 `share/FsdbReader/` |
 | 运行报找不到 `libnffr.so` | 二进制旁没有 `.so`，RPATH 也没命中 | 把两个 `.so` 拷到二进制同目录 |
@@ -335,4 +341,5 @@ out-of-memory kill"），而不是留下一个静默的 `rc=139` 让人怀疑是
 | `contains no value change data at all` | 文件只有层次、无任何值变化 | 查 `$fsdbDumpvars` 参数与 dump 窗口；merge 产物需逐段查；应急可加 `--allow-empty` |
 | `SIGSEGV (rc=-11)` | 零值变化文件，或运行环境 libc 不匹配 | 先按上一条查是否零值变化；若崩在 `main` 之前、gdb 显示 `No stack`，查 `LD_LIBRARY_PATH` 注入的 glibc；不是缺库的充分证据 |
 | 某些信号在 FST 里没有值 | 常量 / 不翻转信号，或属跳过的类型 | 看转换日志的 strength / unsupported 计数 |
+| 怀疑并行写导致转换异常 | FST 压缩写盘默认走并行（后台线程） | 设 `FSDB2FST_PARALLEL=0` 后重转，排除并行写的嫌疑，无需重编译 |
 | 层次或 scope 路径可疑 | 需要看原始事件流 | `fsdb2fst --dump-tree x.fsdb \| head -50` |

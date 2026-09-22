@@ -4,15 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wave-mcp"
-version = "0.2.6"
+version = "1.0.0"
 description = "Open-source, license-free MCP server for RTL waveform debug (FST + SystemVerilog static analysis), an Indago/Verisium Debug MCP alternative."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = { text = "Apache-2.0" }
 authors = [{ name = "wukongxin", email = "xinxin000816@gmail.com" }]
 keywords = ["mcp", "waveform", "fst", "vcd", "verilog", "systemverilog", "rtl", "uvm", "debug", "eda"]
 classifiers = [
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
     "Intended Audience :: Developers",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
@@ -29,7 +29,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-viewer = ["wave-mcp-viewer-assets"]
+# The EUPL-1.2 viewer assets (Surfer WASM + surver) are NOT distributed by
+# wave-mcp anymore (no PyPI assets package, no release attachment). Users
+# build them locally: see docs/SELF_BUILD.md. The former `viewer` extra is
+# removed so `pip install wave-mcp[viewer]` no longer pulls EUPL artifacts.
+# Optional: C-accelerated msgpack cache for large netlist maps.json files.
+# Speeds up session loading on multi-hundred-MB netlists; without it the
+# loader falls back to plain JSON automatically.
+perf = ["msgpack>=1.0"]
 
 [project.urls]
 Homepage = "https://github.com/Tencent/wave-mcp"
@@ -53,11 +60,13 @@ include = ["wave_mcp*"]
 "wave_mcp.viewer" = ["web/*.html", "web/*.js"]
 
 [tool.setuptools.data-files]
-"share/doc/wave-mcp" = ["LICENSE", "docs/THIRD_PARTY.md", "docs/PACKAGING_MATERIALS.md", "docs/FSDB_GUIDE.md", "docs/WAVE_VIEWER.md", "docs/WAVE_VIEWER.en.md"]
+"share/doc/wave-mcp" = ["LICENSE", "docs/THIRD_PARTY.md", "docs/PACKAGING_MATERIALS.md", "docs/FSDB_GUIDE.md", "docs/WAVE_VIEWER.md", "docs/WAVE_VIEWER.en.md", "docs/XCELIUM_FST_GUIDE.md", "docs/SIMULATOR_COMPATIBILITY.md", "docs/DEPLOY_AIRGAP.md", "docs/VIEWER_SCREENSHOTS.md"]
+"share/doc/wave-mcp/images" = ["docs/images/*.png"]
+"share/doc/wave-mcp/images/viewer" = ["docs/images/viewer/*.png"]
 "share/doc/wave-mcp/licenses" = ["docs/licenses/*"]
 # On-demand fsdb2fst build inputs. The Verdi FsdbReader runtime stays on the
 # user's machine, but the converter sources must ship or there is nothing to
 # compile; convert.py resolves these paths after a pip install.
-"share/wave-mcp/fsdb2fst" = ["third_party/fsdb2fst/fsdb2fst.cpp", "third_party/fsdb2fst/ffrAPI_stub.h", "third_party/fsdb2fst/ffrAPI_stub_impl.cpp"]
+"share/wave-mcp/fsdb2fst" = ["third_party/fsdb2fst/fsdb2fst.cpp", "third_party/fsdb2fst/ffrAPI_stub.h", "third_party/fsdb2fst/ffrAPI_stub_impl.cpp", "third_party/fsdb2fst/selftest.sh"]
 "share/wave-mcp/fsdb2fst/fst" = ["third_party/fsdb2fst/fst/fstapi.c", "third_party/fsdb2fst/fst/fstapi.h", "third_party/fsdb2fst/fst/lz4.c", "third_party/fsdb2fst/fst/lz4.h", "third_party/fsdb2fst/fst/fastlz.c", "third_party/fsdb2fst/fst/fastlz.h", "third_party/fsdb2fst/fst/config.h"]
-"share/wave-mcp/deploy" = ["deploy/build_fsdb2fst.sh"]
+"share/wave-mcp/deploy" = ["deploy/build_fsdb2fst.sh", "deploy/VCD2FST_BUILD.md"]

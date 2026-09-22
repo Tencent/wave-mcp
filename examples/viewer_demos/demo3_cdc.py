@@ -18,7 +18,7 @@ Run:  python3 demo3_cdc.py
 import json
 import sys
 
-from common import DemoDriver, HERE, as_time
+from common import DemoDriver, HERE
 
 WAVES = HERE / "waves"
 SESSION = WAVES / "session_cdc" / "session.json"
@@ -40,19 +40,19 @@ def main() -> int:
     print(d.call("open_session", {"session_path": str(SESSION)}))
 
     # ---- 1. pulse accounting across domains ----------------------------
-    d.call("signal_values", {"full_path": "cdc_tb.dut.pulse_fast"})
-    sent = rising_edges(d.last_structured().get("values", []))
-    d.call("signal_values", {"full_path": "cdc_tb.pulse_seen"})
-    seen = rising_edges(d.last_structured().get("values", []))
-    d.call("signal_values", {"full_path": "cdc_tb.pulse_count"})
-    final_count = d.last_structured().get("values", [{}])[-1].get("value", "?")
+    d.call("signal_values", {"paths": "cdc_tb.dut.pulse_fast"})
+    sent = rising_edges(d.value_rows())
+    d.call("signal_values", {"paths": "cdc_tb.pulse_seen"})
+    seen = rising_edges(d.value_rows())
+    d.call("signal_values", {"paths": "cdc_tb.pulse_count"})
+    final_count = (d.value_rows() or [{}])[-1].get("value", "?")
     print(f"[demo3] pulses sent: {len(sent)}, captured: {len(seen)} "
           f"(count register says {int(final_count, 2)})")
     missed = [t for t in sent if not any(s >= t for s in seen[:sent.index(t) + 1])]
     print(f"[demo3] missed pulse times: {missed}")
 
     # ---- 2. connectivity proves the missing synchronizer ---------------
-    d.call("signal_connectivity", {"full_path": "cdc_tb.dut.pulse_seen"})
+    d.call("signal_connectivity", {"path": "cdc_tb.dut.pulse_seen"})
     conn = d.last_structured()
     print(f"[demo3] pulse_seen connectivity: "
           f"{json.dumps(conn)[:220]}")

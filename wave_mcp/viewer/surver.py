@@ -9,7 +9,6 @@ from __future__ import annotations
 import atexit
 import collections
 import secrets
-import socket
 import subprocess
 import threading
 import time
@@ -33,16 +32,17 @@ def _die_with_parent() -> None:
     try:
         import ctypes
 
-        PR_SET_PDEATHSIG = 1
+        pr_set_pdeathsig = 1
         libc = ctypes.CDLL("libc.so.6", use_errno=True)
-        libc.prctl(PR_SET_PDEATHSIG, 15, 0, 0, 0)
-    except Exception:
+        libc.prctl(pr_set_pdeathsig, 15, 0, 0, 0)
+    except Exception:  # pylint: disable=broad-except
         pass
 
 
 def _free_port(exclude: Optional[Sequence[int]] = None) -> int:
     from . import alloc_port
     return alloc_port(exclude=exclude)
+
 
 def _tail_suffix(tail: "collections.deque") -> str:
     """Format the last captured stderr lines for an error message.
@@ -86,9 +86,15 @@ class SurverInstance:
         keeps the last lines without ever blocking the child (a full pipe
         would stall it); the deque is bounded so a chatty child cannot grow
         it without limit."""
+        # --token=<value> is one attached argv item on purpose: token_urlsafe()
+        # may start with "-" (1 in 64), and as a separate item the token was
+        # parsed by clap as an option, so surver exited 2 before starting and
+        # every retry on a fresh port failed with the same token. That was the
+        # intermittent "surver exited early (code 2)" at roughly the 1/64
+        # rate. Attached, the value cannot be mistaken for an option.
         proc = subprocess.Popen(
             [binary, "--port", str(port), "--bind-address", "127.0.0.1",
-             "--token", self.token, *self.fst_paths],
+             f"--token={self.token}", *self.fst_paths],
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
             text=True, errors="replace",
             preexec_fn=_die_with_parent,
@@ -99,12 +105,12 @@ class SurverInstance:
             try:
                 for line in iter(proc.stderr.readline, ""):
                     tail.append(line.rstrip())
-            except Exception:
+            except Exception:  # pylint: disable=broad-except
                 pass
             finally:
                 try:
                     proc.stderr.close()
-                except Exception:
+                except Exception:  # pylint: disable=broad-except
                     pass
 
         threading.Thread(target=_drain, daemon=True).start()

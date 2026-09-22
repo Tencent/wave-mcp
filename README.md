@@ -4,13 +4,13 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/wave-mcp)](https://pypi.org/project/wave-mcp/)
 [![Python versions](https://img.shields.io/pypi/pyversions/wave-mcp)](https://pypi.org/project/wave-mcp/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
 [English](README.en.md) | 简体中文
 
 **wave-mcp 是腾讯蓬莱实验室验证团队开源的一款 RTL 波形调试 MCP Server**，为 LLM 提供波形调试工具集：
-读 **FST 波形 + RTL 网表**，提供层次探索、信号查询、驱动分析、值/X 态追踪、波形对比与浏览器波形查看器等 **34 个 MCP 工具**。
-**MIT 开源，无需任何商用 License，支持任意并发。**
+读 **FST 波形 + RTL 网表**，提供层次探索、信号查询、驱动分析、值/X 态追踪、波形对比与浏览器波形查看器等 **37 个 MCP 工具**。
+**Apache-2.0 开源，无需任何商用 License，支持任意并发。**
 
 > **FST 直读，VCD / FSDB 自动转 FST**：Verilator `--trace-fst`、Icarus 直接产 FST 就能读；
 > 手上只有 VCD 或 FSDB 也没关系，`prepare_session` 自动转换后再建 session（FSDB 转换不占 Verdi license）。
@@ -40,7 +40,7 @@ wave-mcp 用**纯开源技术栈**（pylibfst + pyslang）提供完整波形调�
 | 工具调用 | 310 万多次调用全部通过 |
 | 驱动分析 | 驱动 / 扇入 / 连通 / 追溯在生产级项目上全量验证 |
 | 超大模块 | **百万级 scope 稳定完成分析** |
-| 工具覆盖 | 34 个工具全部验证，含 viewer / diff 的单元与浏览器端到端覆盖 |
+| 工具覆盖 | 37 个工具全部验证，含 viewer / diff 的单元与浏览器端到端覆盖 |
 
 ![工具调用分布](docs/images/tool-calls-distribution.png)
 
@@ -53,8 +53,9 @@ wave-mcp 用**纯开源技术栈**（pylibfst + pyslang）提供完整波形调�
 - **网表自愈**：从 pyslang 诊断自动补 `+incdir+` / 包源并重编；失败时优雅降级，其余工具不受影响。
 - **一致性校验**：源码或波形变了但网表没更新会报警，绝不静默给错结果。
 - **波形对比**：`diff_waveforms` 对 pass/fail 两份波形定位首个分歧时刻，按分歧时间排序信号，时钟对齐采样过滤毛刺。
-- **波形查看器**：`open_wave_view` 让 agent 分析完直接弹浏览器波形，嫌疑信号 + 游标钉在出错时刻 + 分析说明弹窗；双波形 lockstep 对比；`get_view_state` 反向感知用户在看什么。
-- **部署友好**：stdio（一人一进程，零运维）/ HTTP 多会话 / 离线自包含包（隔离网）。
+- **波形查看器**：`open_wave_view` 让 agent 分析完直接弹浏览器波形，嫌疑信号 + 游标钉在出错时刻 + 分析说明弹窗；双波形对比两栏同步注入；`get_view_state` 确认页面连通与状态送达。
+- **多会话与可复现**：同一设计可开多个独立 session 共享一份已加载数据；每条查询回复带 `_query`（有效参数）和 `_fp`（数据集身份/版本 + 问题摘要），两次回答是否来自同一输入同一问题一眼可辨。
+- **部署友好**：stdio（一人一进程，零运维）/ HTTP（本机免配置，跨机器一个 `WAVE_MCP_TOKEN`）/ 离线自包含包（隔离网）。
 
 FSDB 转换器（`third_party/fsdb2fst`）中的部分实现参考了 TraceWeave（MIT），`diff_waveforms` 的功能优先级亦受其影响，详见 [`docs/THIRD_PARTY.md`](docs/THIRD_PARTY.md)。
 
@@ -97,20 +98,20 @@ pip install wave-mcp
 
 ```bash
 # 示例 A：Verilator 快启（counter 设计，产真实 FST，无需商用仿真器）
-python examples/verilator_quickstart/run.py      # 需 verilator>=5
+python examples/verilator_quickstart/run_demo.py      # 需 verilator>=5
 
 # 示例 B：静态分析（UART 设计，无需波形、无需仿真器，展示仿真前分析）
-python examples/static_analysis/run.py
+python examples/static_analysis/run_demo.py
 
 # 示例 C：极小内置样例（手写 VCD → vcd2fst → FST，零依赖）
-python examples/make_sample.py
+python examples/sample/make_sample.py
 ```
 
 ### 3. 打开你的波形
 
 ```bash
 # 一条命令：波形(.fst/.vcd) + filelist → session（自动转 FST + 建网表）
-wave-session --fst sim/dump.fst --top top_tb --filelist rtl.f --out sessions/my_module
+wave-session --fst sim/dump.fst --top top_tb --filelist rtl.f      # --out 可选
 
 # 启动 MCP Server（stdio，推荐：一人一进程）
 python -m wave_mcp.server --session sessions/my_module
@@ -120,16 +121,16 @@ python -m wave_mcp.server --session sessions/my_module
 
 ## CLI 模式
 
-不挂 Code Agent 时，也能在终端直接调用全部 34 个工具（与 MCP 同名同参数）：
+不挂 Code Agent 时，也能在终端直接调用全部 37 个工具（与 MCP 同名同参数）：
 
 ```bash
-wave-mcp query --list                            # 列出全部 34 个工具
+wave-mcp query --list                            # 列出全部 37 个工具
 
 wave-mcp query signal_values --session sessions/my_module \
-    --full_path top.u_tx.tx_serial              # 查询信号值变化
+    --paths top.u_tx.tx_serial                  # 查询信号值变化
 
 wave-mcp query signal_drivers --session sessions/my_module \
-    --json-args '{"full_path": "top.u_tx.tx_serial"}'   # JSON 传参
+    --json-args '{"paths": "top.u_tx.tx_serial"}'       # JSON 传参
 ```
 
 - 参数按工具签名自动生成，`wave-mcp query <工具名> --help` 查看
@@ -143,13 +144,12 @@ wave-mcp query signal_drivers --session sessions/my_module \
 
 ```jsonc
 prepare_session({
-  "out_dir":      "sessions/my_module",
   "wave_path":    "sim/dump.fst",          // .fst 直读 / .vcd 自动转
   "top":          "top_tb",
   "filelist_path":"rtl.f",                 // 与仿真同一份 filelist
-  "mode":         "speed"                  // VCD->FST：speed/balanced/size
-})
-// 返回 ready 后即可调 signal_values / list_child_instances / signal_drivers ...
+  "pack":         "fastlz"                 // 转换压缩：fastlz/lz4/zlib，可省
+})                                         // out_dir 可省：session 落到会话根下按输入身份命名的目录
+// 返回 ready 后即可调 signal_values / find_instances / signal_drivers ...
 ```
 
 **接入配置**（stdio，各家 Agent 的 MCP 配置）：
@@ -193,20 +193,19 @@ args = ["-m", "wave_mcp.server", "--session", "/abs/path/to/sessions/my_module"]
 
 ```jsonc
 open_static_session({
-  "out_dir":      "sessions/my_module",
   "top":          "uart",
   "filelist_path":"rtl.f"
 })
 // 连接/驱动/层次/文件/声明类工具全部可用；值/追踪类工具返回明确的 "needs waveform" 提示
 ```
 
-之后仿真产出波形时，用**同一个 out_dir** 调 `prepare_session` 升级为完整 session，已建好的网表直接复用。
+之后仿真产出波形时，用同一份 RTL 源码调 `prepare_session` 升级为完整 session，已建好的网表自动复用，不需要记住任何目录。
 
 每条驱动记录都带完整语境：驱动类型、源码位置、语句片段、右值来源、以及压在这条语句上的
 **全部门控条件**（可 4 值求值的表达式树）。以示例 B 的 UART 为例：
 
 ```yaml
-# wave-mcp query signal_drivers --session ... --full_path uart_top.u_tx.tx_serial
+# wave-mcp query signal_drivers --session ... --path uart_top.u_tx.tx_serial
 drivers:
   - kind: nonblocking
     file: examples/static_analysis/uart_top.sv
@@ -256,38 +255,40 @@ brew install gtkwave
 三个转换入口：
 
 ```bash
-# ① 独立转换（后处理）：mode=speed(fastlz,最快) / balanced(lz4) / size(zlib,最小)
-wave-vcd2fst --vcd sim/dump.vcd --fst sim/dump.fst --mode speed
+# ① 独立转换（后处理）：pack=fastlz(最快，默认) / lz4 / zlib(最小)
+wave-vcd2fst --vcd sim/dump.vcd --fst sim/dump.fst --pack fastlz
 
 # ② 流式转换：把转换时间藏进仿真时间，仿真结束 FST 几乎同时就绪
 wave-vcd2fst --stream --vcd sim/dump.vcd --fst sim/dump.fst
 #   建 FIFO + 后台起 vcd2fst，然后 TB 里 $dumpfile("sim/dump.vcd") 指向该 FIFO 正常跑仿真
 
 # ③ 建 session 一步到位（自动转 + 打包）
-wave-session --vcd sim/dump.vcd --top top_tb --filelist rtl.f --out sessions/mod
+wave-session --vcd sim/dump.vcd --top top_tb --filelist rtl.f
 ```
 
 > 通过 MCP 工具使用时无需手动转换：`prepare_session` 传入 `.vcd` 会自动走 ① 的转换路径。
 
 ---
 
-## 工具（34 个，10 大类）
+## 工具（37 个，12 大类）
 
 | 类别 | 工具 | 说明 |
 | --- | --- | --- |
 | 波形准备 | `prepare_session` / `open_static_session` / `convert_vcd_to_fst` / `convert_fsdb_to_fst` | 波形入口 → session 一条龙（`.fst` / `.fsdb` / `.vcd` 自动识别，转换带缓存）；静态分析无需波形；不跑仿真器 |
 | 会话管理 | `open_session` / `close_session` / `session_info` | `session_info` 含 netlist_health + definition_coverage |
-| 层次探索 | `list_child_instances` / `list_modules` / `instances_of_module`(`_matching`) / `scope_info` | 模块定义名三层解析：网表 → 命名推断 → 手工 scope_map |
+| 查询默认值 | `query_defaults_set` / `query_defaults_get` / `query_defaults_clear` | 按会话设定默认信号与时间窗；显式参数始终优先，用到默认值的回复在 `_query.from_defaults` 里列出继承项；带 `defaults_revision` 可钉住一版，被改动则报 `defaults_conflict` |
+| 层次探索 | `find_instances` / `list_modules` / `scope_info` | 模块定义名三层解析：网表 → 命名推断 → 手工 scope_map |
 | 信号查询 | `list_signals` / `signal_info` | 位宽/方向/类型来自 FST（含总线聚合）；声明位置来自网表 |
-| 值查询 | `signal_values` / `signal_values_in_range` / `signal_value_at` | FST 强项，随机访问 |
-| 驱动分析 | `signal_connectivity` / `signal_drivers` / `signal_loads` / `signal_fanin` / `active_drivers` / `driver_contributors` | pyslang 网表（静态精确）+ 分支条件 4 值求值选活跃驱动 |
+| 值查询 | `signal_values`（整段 / 窗口 / 单点，可批量多信号） / `signal_activity` / `find_time_windows` / `sample_at_clock` | FST 强项，随机访问；`sample_at_clock` 给按时钟边沿对齐的逐拍表 |
+| 时序与事务 | `fold_transactions` / `fsm_transitions` | 事务定义由调用方给（不内置任何协议库）；FSM 只报实际发生的转移与分支，不报覆盖率 |
+| 驱动分析 | `signal_connectivity` / `signal_drivers` / `signal_loads` / `signal_fanin` / `signal_downstream` / `active_drivers` / `driver_contributors` | pyslang 网表（静态精确）+ 分支条件 4 值求值选活跃驱动；`signal_downstream` 是 `signal_fanin` 的正向镜像，给 `time` 时联立波形给出下游首次变化时刻（相关性，非因果） |
 | 值/X 态追踪 | `trace_value` / `trace_x` | 网表 × FST 值反向遍历，跨模块下钻 |
-| 波形对比 | `diff_waveforms` | pass/fail 双波形首分歧定位：首分歧时刻 + 分歧信号排序 + 时钟对齐采样滤毛刺；分歧信号直接接 `signal_fanin`/`active_drivers` 做因果回溯 |
-| 波形查看器 | `open_wave_view` / `update_wave_view` / `get_view_state` / `list_wave_views` / `close_wave_view` | agent 分析完自动弹浏览器波形：嫌疑信号 + 游标钉出错时刻 + 分析说明弹窗；双波形对比视图 lockstep 联动；`get_view_state` 让 agent 感知用户当前看什么（对话式双向调试）；`list_wave_views` / `close_wave_view` 管理视图生命周期，批量场景可收尾释放 |
-| 文件 | `list_files` / `find_files` / `modules_in_file` | filelist + pyslang 网表 |
+| 波形对比 | `diff_waveforms` | N 份波形首分歧定位：首分歧时刻 + 分歧信号排序 + 时钟对齐采样滤毛刺；多于两份时给分歧簇（按值分组的 run 下标）；分歧信号直接接 `signal_fanin`/`active_drivers` 做因果回溯 |
+| 波形查看器 | `open_wave_view` / `update_wave_view` / `get_view_state` / `list_wave_views` / `close_wave_view` | agent 分析完自动弹浏览器波形：嫌疑信号 + 游标钉出错时刻 + 分析说明弹窗；双波形对比视图，agent 设置的缩放/游标/marker 同步注入两栏；`get_view_state` 报页面连通状态与已应用版本（送达确认）；`list_wave_views` / `close_wave_view` 管理视图生命周期，批量场景可收尾释放 |
+| 文件 | `files`（列全部 / 按名查找 / 读某文件的模块） | filelist + pyslang 网表 |
 
 > 驱动分析与追踪类需要 pyslang 网表建成（`prepare_session` 时给对 filelist/incdirs/defines）。
-> 查看器类需要安装可选资产包：`pip install wave-mcp[viewer]`（Surfer WASM + surver，EUPL-1.2 独立分发，核心包保持 MIT）；未安装时相关工具优雅降级返回提示，分析工具不受影响。
+> 查看器类需要单独的资产（Surfer WASM + surver，EUPL-1.2）。wave-mcp 不分发这些资产，需按 [SELF_BUILD.md](docs/SELF_BUILD.md) 自行构建（一次构建长期使用，团队可共享）；未配置时相关工具优雅降级返回提示，分析工具不受影响。
 
 ### 波形查看器（wave-view）
 
@@ -295,7 +296,7 @@ wave-session --vcd sim/dump.vcd --top top_tb --filelist rtl.f --out sessions/mod
 # 打开单个波形（几十 GB 的 FST 也是秒开：surver 服务端流式，浏览器按需取数据）
 wave-view dump.fst --signals top.u_dma.req_valid --cursor 1523400ps
 
-# 双波形对比视图（上下两个 pane，缩放/游标 lockstep 联动）
+# 双波形对比视图（上下两个 pane，agent 设置的缩放/游标同步注入两栏）
 wave-view pass.fst fail.fst --labels pass fail
 
 # VCD / FSDB 直接传，自动转 FST 后打开
@@ -304,9 +305,9 @@ wave-view sim.vcd
 
 - 命令行打印 URL；桌面环境自动开浏览器，SSH/code agent 场景 IDE 终端自动转发端口点开即看。
 - 波形格式：`.fst` 直接打开，`.vcd` / `.fsdb` 自动转成 FST，转换产物带缓存并与 `prepare_session` 共用，同一个波形先分析后看图还是先看图后分析都只转一次。其他格式在入口直接报错并列出支持的扩展名。
-- agent 典型闭环：case 挂了 → `diff_waveforms(pass, fail)` 定位首分歧 → `signal_fanin` 回溯根因 → `open_wave_view` 双波形 + 分歧 marker + 分析说明弹窗一次呈现。
+- agent 典型闭环：case 挂了 → `diff_waveforms([pass, fail])` 定位首分歧 → `signal_fanin` 回溯根因 → `open_wave_view` 双波形 + 分歧 marker + 分析说明弹窗一次呈现。
 - 分析说明是可收起的 log 弹窗，说明里的时刻引用（如 `[85000ps](#t=85000ps)`）点击即跳游标，游标/视口/marker 更新为无闪刷新。
-- 完整指南（MCP 工具参数、双向调试工作流、架构原理、部署与排障）见 [`docs/WAVE_VIEWER.md`](docs/WAVE_VIEWER.md)。
+- 完整指南（MCP 工具参数、调试工作流、架构原理、部署与排障）见 [`docs/WAVE_VIEWER.md`](docs/WAVE_VIEWER.md)。
 - 想先看效果，见 [`docs/VIEWER_SCREENSHOTS.md`](docs/VIEWER_SCREENSHOTS.md)：四个真实调试场景的界面截图，含一键复现步骤。
 
 ---
@@ -317,15 +318,31 @@ wave-view sim.vcd
 | --- | --- | --- | --- |
 | Verilator 快启 | `examples/verilator_quickstart/` | Verilator 5+ | counter 设计 → 真实 FST → prepare_session 全流程 |
 | 静态分析 | `examples/static_analysis/` | 无（纯 Python） | UART 设计无波形分析：层次/驱动/扇入/声明 |
-| 极小样例 | `examples/make_sample.py` | 可选 vcd2fst | 手写 VCD → FST → session 冒烟 |
+| 极小样例 | `examples/sample/make_sample.py` | 可选 vcd2fst | 手写 VCD → FST → session 冒烟 |
 
 ---
 
 ## 部署模式
 
-- **stdio（推荐）**：每人本地起一个 Server 子进程，只加载自己模块的 FST+网表，零运维。
-- **HTTP + 多 Session**：一个常驻服务，用 `session_id` 给每用户分隔离会话。
-  `python -m wave_mcp.server --transport http --host 0.0.0.0 --port 8000`
+- **stdio（推荐）**：每人本地起一个 Server 子进程，只加载自己模块的 FST+网表，零运维，不需要任何配置。
+- **HTTP（本机）**：一个常驻服务，多个客户端各开自己的 session，`session_id` 显式区分。只绑回环地址时同样不需要配置：
+  `python -m wave_mcp.server --transport http --port 8000`
+- **HTTP（从别的机器连过来）**：服务要绑非回环地址（如 `--host 0.0.0.0`）时必须设 `WAVE_MCP_TOKEN`，不设则拒绝启动，报错会直接告诉你要设哪个变量。设了以后每个 HTTP 请求都要带同一串 token，不带或带错返回 401，任何工具都不会执行。token 是你自己生成的一串随机字符，两边填同一个即可，不是账号：
+
+  ```bash
+  # 服务端
+  WAVE_MCP_TOKEN=$(openssl rand -hex 32) python -m wave_mcp.server --transport http --host 0.0.0.0 --port 8000
+  ```
+
+  ```json
+  // 客户端 mcp.json
+  {"mcpServers": {"wave-mcp": {
+    "url": "http://server:8000/mcp",
+    "headers": {"Authorization": "Bearer <同一串 token>"}
+  }}}
+  ```
+
+  服务进程以启动它的 OS 账号运行，能读写哪些文件由操作系统决定；wave-mcp 不做多租户，一台机器服务多人就每人各起一个进程。TLS 由可信反向代理终止。
 - **隔离网 / 离线自包含包**：有 docker 的机器一键打包（产出 glibc 2.28 / 2.17 两档），拷贝到隔离网离线安装，自带独立 Python + 全部 wheel + 可选 vcd2fst 与 viewer 资产：
 
   ```bash
@@ -345,8 +362,8 @@ wave-view sim.vcd
 ## 环境变量
 
 **多数人一个都不用配**：装完直接用，读 FST/VCD、静态分析、波形查看器全都开箱可用。
-只有两种情况需要配：要读 `.fsdb`（配 `VERDI_HOME`），或者多人共用一台主机想统一管理
-（配 `WAVE_MCP_SESSION_ROOT`）。其余变量都是特殊环境下的微调开关，按需再查。
+只有两种情况需要配：要读 `.fsdb`（配 `VERDI_HOME`），或者 HTTP 服务要让别的机器连过来
+（配 `WAVE_MCP_TOKEN`）。其余变量都是特殊环境下的微调开关，按需再查。
 
 要配的话，写在 MCP 客户端配置的 `env` 里，**不要用 shell 的 `export`**：Agent 以子进程
 方式拉起 Server，继承不到你交互式 shell 里的变量，写进 `env` 才稳定生效。
@@ -357,8 +374,7 @@ wave-view sim.vcd
     "wave-mcp": {
       "command": "wave-mcp",
       "env": {
-        "VERDI_HOME": "/tools/synopsys/verdi/T-2022.06-SP1",
-        "WAVE_MCP_SESSION_ROOT": "~/wave-sessions"
+        "VERDI_HOME": "/tools/synopsys/verdi/T-2022.06-SP1"
       }
     }
   }
@@ -368,20 +384,30 @@ wave-view sim.vcd
 | 变量 | 要配吗 | 作用 | 默认值 |
 | --- | --- | --- | --- |
 | `VERDI_HOME` | 读 `.fsdb` 时必配 | Verdi **安装根目录**（不是可执行文件所在的 `bin/`）。程序在其下找 `share/FsdbReader/linux64`，用法与排错见 [FSDB 波形接入指南](docs/FSDB_GUIDE.md) | 空。不配则 FSDB 输入不可用，其余功能正常 |
-| `WAVE_MCP_SESSION_ROOT` | 多人共用主机建议配 | Session 落点根目录。配了之后 `out_dir` 一律落在该目录下，位置由部署决定，不受 Agent 影响 | 空。按传入的 `out_dir` 原样落盘 |
+| `WAVE_MCP_SESSION_ROOT` | 不用配 | 不传 `out_dir` 时 session 的落点根目录，目录名取自输入的身份摘要，同一份 RTL 不论从哪调用都落到同一处、复用同一份网表。传了 `out_dir` 就按传入值原样使用，不改写 | `~/.wave-mcp/sessions` |
+| `WAVE_MCP_CACHE_ROOT` | 不用配 | 派生缓存根目录：VCD/FSDB 转出的 `.fst`、网表 msgpack 缓存、`fsdb2fst` 构建产物、viewer 资产。缓存永远不写到源波形旁边，删掉只是下次慢 | `~/.wave-mcp/cache` |
 | `WAVE_MCP_VIEWER_PORT_BASE` | 多人共用主机建议配 | 把视图端口限制在 `[base, base+64)`，便于固定一条 `ssh -L` 转发规则；每人分一段互不重叠 | 空。每次随机取高位端口 |
 | `NOVAS_HOME` | 不用配 | 同 `VERDI_HOME`，仅为老版本 Verdi 保留；两个都设时优先用 `VERDI_HOME` | 空 |
 | `FSDB2FST_FREADER` | 不用配 | 直接指向拷来的 `share/FsdbReader` 目录，用于只拷了运行库、没装完整 Verdi 的机器 | 空。自动读 `VERDI_HOME` / `NOVAS_HOME` |
 | `FSDB2FST_BIN` | 不用配 | 指定已编译好的 `fsdb2fst` | 空。自动探测，首次转换时按需就地编译 |
 | `WAVE_MCP_FSDB2FST_AUTOBUILD` | 不用配 | 设 `0` 关闭首次自动编译 | `1`（开启） |
 | `VCD2FST_BIN` | 不用配 | 指定 GTKWave `vcd2fst` 可执行文件 | `vcd2fst`（从 `PATH` 查找） |
-| `WAVE_MCP_VIEWER_ASSETS` | 不用配 | 波形查看器资产目录（须含 `surver` 与 `wasm/index.html`），离线包安装时自动设好 | 空。依次找 pip 资产包、`~/.cache/wave-mcp/viewer/` |
+| `WAVE_MCP_VIEWER_ASSETS` | 不用配 | 波形查看器资产目录（须含 `surver` 与 `wasm/index.html`），离线包安装时自动设好 | 空。依次找 pip 资产包、`~/.wave-mcp/cache/viewer/` |
 | `WAVE_MCP_MAX_VIEWS` | 不用配 | 并发视图上限，超出则关掉最旧的；设 `0` 取消上限 | `8` |
-| `XDG_CACHE_HOME` | 不用配 | 缓存根目录（`fsdb2fst` 构建产物、viewer 资产） | `~/.cache` |
+| `WAVE_MCP_WORKERS` | 不用配 | 同时执行的工具调用上限；超出的排队等待 | `4` |
+| `WAVE_MCP_QUEUE_CAPACITY` | 不用配 | 排队上限，满了直接返回 `server_busy` 而不是无限堆积 | `32` |
+| `WAVE_MCP_PER_OWNER_RUNNING` | 不用配 | 单个用户同时在跑的调用上限，防止一个客户端占满全部槽位 | `2` |
+| `WAVE_MCP_PER_OWNER_SESSIONS` | 不用配 | 单个用户可同时打开的 session 数，超出返回 `resource_limit` | `16` |
+| `WAVE_MCP_SESSION_TTL` | 不用配 | 空闲多少秒后自动关闭无在途请求的 session；`0` 关闭回收 | `1800` |
+| `WAVE_MCP_QUEUE_TIMEOUT` | 不用配 | 排队最长等多少秒，超时返回 `queue_timeout` | `30` |
+| `WAVE_MCP_SHUTDOWN_GRACE` | 不用配 | 收到 SIGTERM/SIGINT 后给在跑调用的宽限秒数，之后才强制退出 | `30` |
+| `WAVE_MCP_AUDIT_LOG` | 不用配 | 审计日志：每次工具调用一行 JSON（时间、request id、工具、状态、错误类型、耗时、数据集身份/版本，不含参数与路径）。填文件路径（0600 追加写）或 `stderr` | 空，不记录 |
+| `WAVE_MCP_TOKEN` | HTTP 绑非回环地址时必配 | HTTP 传输的共享密钥（至少 16 字符，`openssl rand -hex 32` 生成）。设了以后每个请求须带 `Authorization: Bearer <同一值>`，否则 401；不设则只允许 `--host 127.0.0.1`。stdio 用不到 | 空 |
 
-**Session 目录约定**：建议统一放 `~/wave-sessions/<项目>_<模块>/`，同一模块的静态分析与波形分析
-复用同一个 `out_dir` 以复用网表；不要用 `/tmp`（重启即丢，网表需重新精化）或共享盘（多人撞目录）。
-配上 `WAVE_MCP_SESSION_ROOT` 即可强制生效，不依赖 Agent 是否记得这条约定。
+**Session 目录**：`prepare_session` / `open_static_session` 的 `out_dir` 通常不用传，session 会落到
+`WAVE_MCP_SESSION_ROOT` 下以输入身份命名的目录里，同一份 RTL 的静态分析和波形分析自动共用一份网表，
+不依赖 Agent 记住任何约定。只有 session 目录必须放在特定位置（例如和 testbench 一起入库）时才传 `out_dir`，
+传了就原样使用。
 
 ## FAQ
 
@@ -397,7 +423,7 @@ SHM 不在计划内。Cadence Xcelium 用户不用转存量波形，推荐直接
 [Xcelium 直出 FST 指南](docs/XCELIUM_FST_GUIDE.md)。
 
 **Q2：需要商用 License 吗？**
-不需要，MIT 开源、任意并发、不限机器数。这也是它区别于商用调试 MCP 的核心点。
+不需要，Apache-2.0 开源、任意并发、不限机器数。这也是它区别于商用调试 MCP 的核心点。
 
 选择开源路线不只是省 license 费：FSDB、SHM 这类闭源波形格式，读取详细数据绕不开商用工具，
 license 成本难以支撑 AI Agent 深度融入工作流后产生的高并发、海量波形分析需求。
@@ -413,7 +439,7 @@ VCD 自动转换 / FSDB 转换 / Xcelium 直出）的对比与支持状态详见
 
 **Q4：数据准不准？**
 准。在真实生产级芯片项目上做了 225 万信号级验证，值查询正确性 100%；
-层次与文件类工具（`scope_info` / `find_files` / `modules_in_file`）32/32 模块验证通过。
+层次与文件类工具（`scope_info` / `files`）32/32 模块验证通过。
 
 **Q5：没有波形也能用吗？**
 能。`open_static_session` 只凭 RTL 源码做静态分析（仿真前可用），这是 wave-mcp 的独有能力。
@@ -489,25 +515,27 @@ wave-mcp 项目的主体核心能力（pyslang 静态网表、trace 引擎、MCP
 - **网表离线一次精化、落盘复用**：pyslang 精化结果持久化为 `netlist/maps.json`
   （DriverMap/FanInMap/LoadMap/LocMap + instance_tree），一个纯 JSON 文件，任何脚本可读。
   启动即加载，不每次重建；源码未变不重跑精化，静态 session 升级为波形 session 时同一份
-  网表直接复用（新旧判断基于源文件 mtime）。
-- **生成产物集中在 session 目录**：`prepare_session` 只向你指定的 `out_dir` 写入
-  `session.json`（清单 + 指纹）、`netlist/maps.json`（网表），以及仅当输入是 VCD 时
-  转换出的 `.fst`。分析查询全程在内存进行，不落盘任何索引或缓存，也不改动 RTL 源码
-  和原始波形所在目录；删掉 session 目录即完成全部清理。
+  网表直接复用（新旧判断基于源文件 mtime）。不传 `out_dir` 时网表按 RTL 源码的身份定位，
+  同一份源码的所有 session 共用一次精化。
+- **生成产物集中在两处**：session 目录（默认 `~/.wave-mcp/sessions/<输入身份>/`，
+  或你传的 `out_dir`）只放 `session.json`（清单 + 指纹）和 `netlist/maps.json`（网表）；
+  VCD/FSDB 转出的 `.fst` 与网表二级缓存放 `~/.wave-mcp/cache/`。分析查询全程在内存进行，
+  不改动 RTL 源码和原始波形所在目录；删掉这两处即完成全部清理。
 - **MCP 返回**：`structuredContent`（机器可读）+ `content[].text` 人读文本。
 
 ## 开源协议
 
-本项目以 **MIT** 许可发布（见 [`LICENSE`](LICENSE)）。依赖均为宽松许可（MIT/BSD），
-无 copyleft 传染；离线包附带的 `vcd2fst` 转换器由 GTKWave MIT 源码构建。
+本项目以 **Apache-2.0** 许可发布（见 [`LICENSE`](LICENSE)，内含全部第三方组件声明）。
+核心依赖均为宽松许可（MIT/BSD/Apache），无 copyleft 传染；离线包附带的 `vcd2fst` 转换器由 GTKWave MIT 源码构建。
 详见 [`docs/THIRD_PARTY.md`](docs/THIRD_PARTY.md)。
 
 ## 目录结构
 
 ```
 wave_mcp/
-  server.py              # MCP server，注册全部 34 工具
-  session.py             # Session / session.json / 指纹校验 / 三层 definition_name
+  server.py              # MCP server，注册全部 37 工具
+  session.py             # WorkSession / 共享数据集资源 / session.json / 三层 definition_name
+  runtime/               # identity（唯一哈希入口）/ storage（唯一写盘位置）/ executor / auth / audit / request
   pipeline.py            # prepare_session / prepare_static_session 编排
   diff.py                # diff_waveforms 首分歧定位（时钟对齐采样）
   sources/               # fst_source + rtl_source

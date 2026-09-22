@@ -69,7 +69,7 @@ VCD 的实际上限：超过 10 GB 后 `vcd2fst` 可能长时间转换直至超�
 
 ```python
 prepare_session(wave_path="dump.fsdb", filelist_path="rtl.f")
-prepare_session(wave_path="dump.fsdb", fsdb_scopes=["u_core"], filelist_path="rtl.f")  # 大设计切片
+prepare_session(wave_path="dump.fsdb", scopes=["u_core"], filelist_path="rtl.f")  # 大设计切片
 ```
 
 三条选路时就该知道的约束，其余细节（解析顺序、缓存、手工构建、转换语义、排错）

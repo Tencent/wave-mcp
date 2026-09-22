@@ -10,13 +10,13 @@
 
 ## 一键运行
 ```bash
-python examples/verilator_quickstart/run.py
+python examples/verilator_quickstart/run_demo.py
 ```
 
 脚本做四件事：
 1. `verilator --binary --trace-fst` 编译 `counter.sv` + `tb_counter.sv`
 2. 运行产出的仿真二进制 → 在 `build/` 下 dump 出真实 `counter.fst`
-3. `prepare_session(out_dir, wave_path=counter.fst, top=top_tb, filelist=[...])`，
+3. `prepare_session(wave_path=counter.fst, top=top_tb, filelist=[...])`（示例里显式传了 `out_dir` 让产物留在 `build/`，平时可省略），
    `.fst` 零转换直读，与 xrun 产出的 `.fst`/`.vcd` 走同一入口
 4. 打印 session 摘要 + 层次 / 信号 / 信号值查询结果
 
@@ -33,6 +33,6 @@ verilator --binary --trace-fst -j 0 --top-module top_tb -o Vcounter counter.sv t
 ## 文件
 - `counter.sv`：8 位自增计数器 DUT（带 overflow）
 - `tb_counter.sv`：自包含 testbench（时钟/复位 + `$dumpfile/$dumpvars`）
-- `run.py`：一键 orchestrator（编译 → 产 FST → prepare_session → 查询）
+- `run_demo.py`：一键 orchestrator（编译 → 产 FST → prepare_session → 查询）
 
 > 生成物都落在 `build/`（已被 `.gitignore` 忽略），可随时删除重跑。

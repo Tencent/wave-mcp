@@ -29,7 +29,8 @@
 ```bash
 deploy/docker_build_all.sh \
     --viewer /path/to/viewer-assets \      # 可选：Surfer WASM 资产目录
-    --python https://github.com/astral-sh/python-build-standalone/releases/download/20241016/cpython-3.11.10+20241016-x86_64-unknown-linux-gnu-install_only.tar.gz
+    --python https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.11.16+20260901-x86_64-unknown-linux-gnu-install_only.tar.gz \
+    --python-materials /path/to/python-materials   # 与该 Python 匹配的分发材料目录
 
 # 产物（dist/）：
 #   wave-mcp-bundle-glibc2.28.tar.gz   主流机器（CentOS 8+ / Ubuntu 18.10+）
@@ -160,7 +161,7 @@ bundle 里的 Python 依赖都是 wheel，glibc 兼容性由打包时的 `--targ
 
 隔离网机器如果有 Synopsys Verdi（`VERDI_HOME` 已设），wave-mcp 可以读 FSDB。
 转换器 `fsdb2fst` 会在**首次转换时自动编译**（约十几秒），编译完落在
-`~/.cache/wave-mcp/` 下，后续复用不再编译。升级 wave-mcp 版本后缓存键会变化，
+`~/.wave-mcp/cache/` 下，后续复用不再编译。升级 wave-mcp 版本后缓存键会变化，
 下次转换时自动重编。
 
 前提：目标机有 `g++` 和 Verdi FsdbReader 运行时。MCP 配置 `env` 块里加上
@@ -182,32 +183,19 @@ bundle 里的 Python 依赖都是 wheel，glibc 兼容性由打包时的 `--targ
 ## 4c. fstdumper VPI 插件（Xcelium 直出 FST，可选）
 
 fstdumper 让 Xcelium (xrun) 在仿真时直接产出 FST，跳过 VCD 中间文件。
-它是 GPL-3.0 开源项目，**不随 wave-mcp 分发**（许可不兼容），需要用户
-自行获取源码并编译。
-
-隔离网没有外网，无法在线 clone。做法是**在有网的机器上准备好源码目录，
-整体拷到隔离网**：
+它是 GPL-3.0 开源项目，**上游源码不随 wave-mcp 分发，构建脚本也不代为下载**，
+但离线 bundle 已自带配套材料：构建脚本 `deploy/build_fstdumper.sh`、
+Xcelium 修复补丁 `third_party/fstdumper/*.patch` 和 dump 控制模块
+`examples/xcelium_fst/fst_dump_cfg.sv`。用户只需自行准备一份上游源码目录：
 
 ```bash
-# ① 有网机器（一次性）
+# ① 有网机器（一次性，自行获取）
 git clone --depth 1 https://github.com/semify-eda/fstdumper.git /tmp/fstdumper
 
-# ② 拷到隔离网（U 盘 / scp / 共享目录）
-#    同时带上 wave-mcp 仓库中的 Xcelium 修复补丁：
-#    third_party/fstdumper/fstdumper-xcelium-fixes.patch
-#    third_party/fstdumper/fstdumper-perf-opt.patch（可选）
+# ② 把源码目录整体拷到隔离网（U 盘 / scp / 共享目录）
 
-# ③ 隔离网机器上构建（跳过 clone，直接打补丁 + make）
-FSTDUMPER_BUILD_DIR=/path/to/fstdumper bash deploy/build_fstdumper.sh
-```
-
-如果目标机上没有 `deploy/build_fstdumper.sh`（纯 bundle 安装），
-手工执行等价操作：
-
-```bash
-cd /path/to/fstdumper
-patch -p1 < /path/to/fstdumper-xcelium-fixes.patch
-make fstdumper.so
+# ③ 隔离网机器上构建（打补丁 + make）
+bash deploy/build_fstdumper.sh /path/to/fstdumper
 ```
 
 产出的 `fstdumper.so` 可拷给同环境所有人复用。完整使用指南见

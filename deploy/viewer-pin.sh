@@ -37,18 +37,17 @@
 # happened.
 SURFER_REF="${SURFER_REF:-86eedfd0cda70fc0a61ab200ebf37aabf97c5cde}"
 
-# Version of the wave-mcp-viewer-assets package. Tracks the wellen version of
-# the pinned pair, which is what actually has to match at connect time.
-#
-# A PEP 440 post-release suffix (`.postN`) is used for packaging-only fixes that
-# ship the SAME artifacts: the pinned pair, and therefore the wellen version,
-# is unchanged, so the base version must stay put. 0.25.6.post1 adds the
-# embedded-font license texts that 0.25.6 shipped without. Do NOT bump the base
-# version for this: that would claim a wellen version we did not package, and
-# the gate below compares against the real binaries.
-VIEWER_ASSETS_VERSION="${VIEWER_ASSETS_VERSION:-0.25.6.post1}"
+# Version stamped into locally-built wave-mcp-viewer-assets wheels. The
+# package is NOT distributed by wave-mcp anymore (no PyPI release, no core
+# ``viewer`` extra); users build assets themselves per docs/SELF_BUILD.md.
+# Keep this aligned with the wave-mcp version so a locally built wheel is
+# traceable to the core it was built against. (Up to 0.25.6.post1 this
+# tracked the upstream wellen version instead; that provenance now lives in
+# VIEWER_WELLEN_VERSION / SURFER_REF below and in the package's UPSTREAM fields.)
+VIEWER_ASSETS_VERSION="${VIEWER_ASSETS_VERSION:-1.0.0}"
 
-# Expected wellen version of both artifacts. build_viewer_assets.sh compares
+# Expected wellen version of both artifacts (the upstream Surfer release the
+# pinned commit belongs to). build_viewer_assets.sh compares
 # the two binaries against each other and against this value, so a stale pin is
 # caught even when surver and wasm happen to agree with each other.
 #

@@ -2,8 +2,12 @@
 // - hosts the Surfer WASM app in an iframe (?load_url + ?startup_commands)
 // - long-polls /api/view-state and applies desired-state deltas
 // - renders annotations into the log popup (collapsible capsule)
-// - writes back "actual" state (cursor from get_state polling) so agents
-//   can perceive the user via get_view_state (bidirectional awareness)
+// - writes back "actual" state (applied revision, page readiness)
+//
+// License isolation boundary: this Apache-2.0 shell talks to the EUPL viewer app
+// ONLY through page-load URL parameters and standard window.postMessage.
+// It must never reach into the viewer's JS realm: no contentWindow.eval,
+// no importing viewer modules, no holding viewer function handles.
 //
 // Update strategy (probed on the pinned Surfer build, see dev-docs):
 //   * cursor / viewport / markers  -> flicker-free runtime InjectMessage
@@ -26,10 +30,21 @@
 
   var appliedRevision = 0;
   var renderedAnnotations = {};
-  var userDirty = false;
-  var lastUserCursor = null;
   var compareMode = false;
   var sourcesInfo = [];       // [{id, path, label, end_time}]
+
+  // boot health: visible progress + bounded self-recovery
+  var bootEl = document.getElementById("wv-boot");
+  var bootText = document.getElementById("wv-boot-text");
+  var toastEl = document.getElementById("wv-toast");
+  var bootFinished = false;
+  var bootFailed = false;
+  var healAttempted = false;
+  var signalsHintShown = false;
+  var shownWarnings = {};
+  var latestDesired = null;
+  var latestWarnings = [];
+  var pollFailStreak = 0;     // consecutive /api/view-state failures
 
   // ---- BigInt encoding for Surfer Message fields ----------------------
 
@@ -171,28 +186,56 @@
     inject({ GoToTime: [parts, 0] });
   }
 
+  // ---- navigation diffing ----------------------------------------------
+  // Re-sending the whole navigation set on every update used to move the
+  // window: a viewport-only update replayed cursor + GoToTime as well, and
+  // its scroll overrode the requested zoom whenever the cursor sat outside
+  // the new window. Only changed fields are sent now.
+
+  function navSnapshot(desired) {
+    return {
+      cursor: desired.cursor || null,
+      viewport: desired.viewport || null,
+      markers: desired.markers || []
+    };
+  }
+
+  function navDiffers(desired) {
+    var a = navSnapshot(desired);
+    var b = lastAppliedNav || {};
+    return JSON.stringify(a.cursor) !== JSON.stringify(b.cursor || null)
+        || JSON.stringify(a.viewport) !== JSON.stringify(b.viewport || null)
+        || JSON.stringify(a.markers) !== JSON.stringify(b.markers || []);
+  }
+
   function applyNavigation(desired) {
+    var prev = lastAppliedNav || {};
     // cursor
-    var cur = desired.cursor;
-    if (cur && cur.time) {
+    var cur = desired.cursor || null;
+    if (cur && cur.time
+        && JSON.stringify(cur) !== JSON.stringify(prev.cursor || null)) {
       jumpCursor(cur.time);
     }
     // viewport
-    var vp = desired.viewport;
-    if (vp && vp.from !== undefined && vp.to !== undefined) {
+    var vp = desired.viewport || null;
+    if (vp && vp.from !== undefined && vp.to !== undefined
+        && JSON.stringify(vp) !== JSON.stringify(prev.viewport || null)) {
       var from = bigIntParts(vp.from);
       var to = bigIntParts(vp.to);
       if (from && to) {
         inject({ ZoomToRange: { start: from, end: to, viewport_idx: 0 } });
       }
     }
-    // markers: SetMarker is idempotent per id
+    // markers: SetMarker is idempotent per id, so the full list is safe
     var marks = desired.markers || [];
-    for (var i = 0; i < marks.length; i++) {
-      var mt = bigIntParts(marks[i].time);
-      if (!mt) continue;     // skip this marker, keep the rest
-      inject({ SetMarker: { id: i + 1, time: mt } });
+    if (JSON.stringify(marks) !== JSON.stringify(prev.markers || [])) {
+      for (var i = 0; i < marks.length; i++) {
+        var mt = bigIntParts(marks[i].time);
+        if (!mt) continue;     // skip this marker, keep the rest
+        inject({ SetMarker: { id: i + 1, time: mt } });
+      }
     }
+    lastAppliedNav = navSnapshot(desired);
   }
 
   // ---- view-state long-poll --------------------------------------------
@@ -200,17 +243,14 @@
   var booted = false;
   var logEverShown = false;
   var lastSignalsKey = null;
-  var lastNavKey = null;
+  // cursor/viewport/markers as the frame already carries them; updates
+  // only re-send fields that changed (see applyNavigation)
+  var lastAppliedNav = null;
 
   function signalsKey(desired) {
     var src = (desired.waveform || {}).sources || [];
     return JSON.stringify([desired.signals || [],
                            src.map(function (s) { return s.path; })]);
-  }
-
-  function navKey(desired) {
-    return JSON.stringify([desired.cursor, desired.viewport,
-                           desired.markers]);
   }
 
   function showError(msg) {
@@ -223,6 +263,170 @@
   function clearError() {
     var el = document.getElementById("wv-error");
     if (el) el.classList.remove("visible");
+  }
+
+  // ---- boot health: progress, readiness probe, bounded recovery --------
+  //
+  // The entry page bounds its worker wait, so this page may arrive with no
+  // service worker in control. The worker restores the `Server: Surfer`
+  // header that gateways rewrite, which Surfer needs to detect the backend.
+  // The probe below doubles as the readiness signal: it succeeds only once
+  // the backend is actually answerable from this page, so the overlay can
+  // honestly say "connected" instead of leaving a blank screen in silence.
+
+  function setBootText(t, cls) {
+    if (!bootText) return;
+    bootText.textContent = t;
+    bootText.className = cls || "";
+  }
+
+  function showToast(msg, warn) {
+    if (!toastEl || !msg) return;
+    toastEl.textContent = msg;
+    toastEl.classList.add("visible");
+    toastEl.classList.toggle("warn", !!warn);
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(function () {
+      toastEl.classList.remove("visible");
+    }, 14000);
+  }
+
+  // Storage can be denied entirely (sandboxed IDE webviews); the recovery
+  // path must keep working there, so both accesses go through these guards.
+  function ssGet(key) {
+    try { return sessionStorage.getItem(key); } catch (e) { return null; }
+  }
+  function ssSet(key, value) {
+    try { sessionStorage.setItem(key, value); } catch (e) { /* no storage */ }
+  }
+
+  function surverReachable() {
+    if (!token) return Promise.resolve(false);
+    return fetch("/surver/" + token + "/get_status", { cache: "no-store" })
+      .then(function (r) {
+        var srv = (r.headers.get("server") || "").toLowerCase();
+        return !!(r.ok && srv.indexOf("surfer") !== -1);
+      })
+      .catch(function () { return false; });
+  }
+
+  function markBootDone() {
+    if (bootEl) bootEl.classList.add("done");
+    if (bootFinished && !bootFailed) return;      // already done
+    bootFinished = true;
+    bootFailed = false;
+    console.log("[shell] waveform backend reachable; viewer ready");
+    postActual({ page_ready: true, page_error: null });
+    checkSignalsHint();
+    showNewWarnings();
+  }
+
+  function markBootFailed(msg) {
+    if (bootFinished && bootFailed) return;
+    bootFinished = true;
+    bootFailed = true;
+    if (bootEl) {
+      bootEl.classList.add("stuck");
+      var sp = bootEl.querySelector(".boot-spinner");
+      if (sp) sp.style.display = "none";
+    }
+    setBootText(msg, "error");
+    console.warn("[shell] waveform backend unreachable: " + msg.split("\n")[0]);
+    postActual({ page_ready: false, page_error: msg });
+  }
+
+  function healFailureMessage() {
+    return "The waveform backend could not be reached from this page.\n" +
+           "Possible causes: the port for this URL is not forwarded, the " +
+           "server was closed, or this browser blocks background workers " +
+           "while a gateway rewrites the backend headers.\n" +
+           "Try: reload this page once; if it stays blank, ask the agent " +
+           "to reopen the view (the port may have changed).";
+  }
+
+  function bootHealOrFail() {
+    if (bootFailed) return;
+    var hasSW = "serviceWorker" in navigator;
+    var controlled = hasSW && !!navigator.serviceWorker.controller;
+    if (!hasSW || controlled || healAttempted
+        || ssGet("wv_healed")) {
+      markBootFailed(healFailureMessage());
+      return;
+    }
+    healAttempted = true;
+    console.log("[shell] backend not reachable; retrying via worker");
+    setBootText("Connecting to the waveform backend...", "muted");
+    var done = false;
+    var budget = setTimeout(function () {
+      if (!done) { done = true; markBootFailed(healFailureMessage()); }
+    }, 6000);
+    navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" })
+      .then(function () { return navigator.serviceWorker.ready; })
+      .then(function () {
+        if (done) return;
+        done = true;
+        clearTimeout(budget);
+        // A fresh navigation from an active worker IS controlled, even if
+        // the current page never got claimed; reload once to pick it up.
+        ssSet("wv_healed", "1");
+        setBootText("Reconnecting with the background worker...", "muted");
+        location.reload();
+      })
+      .catch(function () {
+        if (done) return;
+        done = true;
+        clearTimeout(budget);
+        markBootFailed(healFailureMessage());
+      });
+  }
+
+  function bootWatchdog() {
+    var t0 = Date.now();
+    function tick() {
+      surverReachable().then(function (ok) {
+        if (ok) { markBootDone(); return; }
+        if (bootFailed) {
+          // failed overlay stays, but keep watching: a slow backend or a
+          // restored port forward should recover the page by itself
+          setTimeout(tick, 5000);
+          return;
+        }
+        var waited = Date.now() - t0;
+        if (waited >= 6000) {
+          bootHealOrFail();
+          setTimeout(tick, 5000);
+          return;
+        }
+        setTimeout(tick, waited < 2500 ? 700 : 1500);
+      });
+    }
+    setTimeout(tick, 800);
+  }
+
+  function checkSignalsHint() {
+    if (signalsHintShown || !latestDesired) return;
+    var sigs = latestDesired.signals || [];
+    if (sigs.length > 0) return;
+    signalsHintShown = true;
+    showToast("No signals selected yet. Ask the agent to add them " +
+              "(update_wave_view), or pick them in the signal tree.");
+  }
+
+  function showNewWarnings() {
+    var fresh = [];
+    for (var i = 0; i < latestWarnings.length; i++) {
+      var w = String(latestWarnings[i]);
+      if (shownWarnings[w]) continue;
+      shownWarnings[w] = true;
+      fresh.push(w);
+    }
+    if (!fresh.length) return;
+    if (fresh.length > 3) {
+      var extra = fresh.length - 3;
+      fresh = fresh.slice(0, 3).concat("... and " + extra +
+                                       " more (see get_view_state)");
+    }
+    showToast(fresh.join("\n"), true);
   }
 
   // Last-resort visibility: an unexpected script error must not leave a
@@ -250,23 +454,24 @@
     // reports the token with the state, so recover it here.
     if (!token && snap.token) { token = snap.token; }
     var desired = snap.desired || {};
+    latestDesired = desired;
+    latestWarnings = snap.warnings || [];
     var sigKey = signalsKey(desired);
-    var nKey = navKey(desired);
 
     if (!booted) {
       booted = true;
       lastSignalsKey = sigKey;
-      lastNavKey = nKey;
       bootSurfer(desired);
+      lastAppliedNav = navSnapshot(desired);
     } else if (sigKey !== lastSignalsKey) {
       // signal list / sources changed: no runtime encoding available,
       // reboot the iframe(s) with the full command set (~1s).
       lastSignalsKey = sigKey;
-      lastNavKey = nKey;
       bootSurfer(desired);
-    } else if (nKey !== lastNavKey) {
-      // navigation-only change: flicker-free runtime injection.
-      lastNavKey = nKey;
+      lastAppliedNav = navSnapshot(desired);
+    } else if (navDiffers(desired)) {
+      // navigation-only change: flicker-free runtime injection of the
+      // fields that actually changed.
       applyNavigation(desired);
     }
 
@@ -286,6 +491,10 @@
       }
     }
     appliedRevision = snap.revision || 0;
+    if (bootFinished && !bootFailed) {
+      checkSignalsHint();
+      showNewWarnings();
+    }
     postActual({});
   }
 
@@ -293,6 +502,19 @@
     fetch("/api/view-state?since=" + appliedRevision)
       .then(function (r) { return r.json(); })
       .then(function (snap) {
+        if (pollFailStreak >= 4) {
+          // The backend was gone long enough that the waveform stream died
+          // with it (sleep, VPN drop, a rebuilt port forward). The API
+          // answers again, so reconnect the stream too; otherwise the page
+          // stays empty even though polling recovered.
+          console.log("[shell] backend back after " + pollFailStreak +
+                      " failed polls; reconnecting the waveform stream");
+          if (latestDesired) {
+            bootSurfer(latestDesired);
+            lastAppliedNav = navSnapshot(latestDesired);
+          }
+        }
+        pollFailStreak = 0;
         applySnapshot(snap);
         clearError();
         setTimeout(poll, 200);
@@ -300,6 +522,7 @@
       .catch(function () {
         // Backend unreachable (server stopped, port forward dropped): say so
         // instead of polling a dead endpoint in silence forever.
+        pollFailStreak++;
         showError("viewer backend unreachable; retrying...");
         setTimeout(poll, 2000);
       });
@@ -309,8 +532,7 @@
 
   function postActual(extra) {
     var payload = {
-      applied_revision: appliedRevision,
-      user_dirty: userDirty
+      applied_revision: appliedRevision
     };
     for (var k in extra) payload[k] = extra[k];
     fetch("/api/view-state/actual", {
@@ -320,116 +542,24 @@
     }).catch(function () { /* best effort */ });
   }
 
-  // Poll Surfer's full app state for the user's cursor position. The
-  // pinned build has no push callback for user interactions, but
-  // get_state() reflects cursor moves from user clicks; we sample at 1 Hz.
-  // get_state is a module export, not on window: import surfer.js inside
-  // the iframe's realm (the ES module cache returns the same instance the
-  // app booted with) and cache the handle on the iframe window.
-  function pollSurferCursor() {
-    try {
-      var w = frame.contentWindow;
-      if (!w) { return schedule(); }
-      if (!w.__wv_get_state) {
-        if (!w.__wv_importing && w.eval) {
-          w.__wv_importing = true;
-          w.eval("import('./surfer.js').then(function(m){" +
-                 "window.__wv_get_state = m.get_state;})" +
-                 ".catch(function(){})");
-        }
-        return schedule();
-      }
-      Promise.resolve(w.__wv_get_state()).then(function (st) {
-        var s = String(st);
-        var m = s.match(/cursor: Some\(\((-?1), \[\s*([0-9,\s]*?)\s*\]/);
-        if (m) {
-          // digits are u32 little-endian chunks
-          var digits = m[2].split(",").map(function (x) {
-            return x.trim();
-          }).filter(Boolean);
-          var val = 0n;
-          for (var i = digits.length - 1; i >= 0; i--) {
-            val = (val << 32n) + BigInt(digits[i]);
-          }
-          var cur = val.toString();
-          if (cur !== lastUserCursor) {
-            var isFirst = lastUserCursor === null;
-            lastUserCursor = cur;
-            if (!isFirst) userDirty = true;
-            postActual({ cursor: { time: cur, unit: "ps" } });
-          }
-        }
-        schedule();
-      }).catch(schedule);
-    } catch (e) { schedule(); }
-    function schedule() { setTimeout(pollSurferCursor, 1000); }
-  }
+  // License isolation: the shell no longer imports viewer modules or calls
+  // viewer functions (the former get_state cursor polling did exactly
+  // that via contentWindow eval). User cursor readback is disabled; the
+  // "actual" state carries page readiness and the applied revision only.
 
   // periodic heartbeat so updated_at reflects liveness
   setInterval(function () { postActual({}); }, 10000);
-  setTimeout(pollSurferCursor, 4000);
 
-  // ---- compare-mode lockstep sync ---------------------------------------
-  // Pane A is the master. Poll its viewport (relative 0..1 fractions from
-  // get_state), convert to absolute time via the source's end_time, and
-  // inject ZoomToRange + CursorSet into pane B when they drift. 4 Hz gives
-  // smooth-enough tracking without saturating the WASM.
+  // probe the backend as soon as the shell is up: this turns the overlay
+  // into either "connected" or an actionable error, instead of a blank page
+  bootWatchdog();
 
-  function ensureGetState(w) {
-    if (!w) return null;
-    if (!w.__wv_get_state && !w.__wv_importing && w.eval) {
-      w.__wv_importing = true;
-      w.eval("import('./surfer.js').then(function(m){" +
-             "window.__wv_get_state = m.get_state;})" +
-             ".catch(function(){})");
-    }
-    return w.__wv_get_state || null;
-  }
-
-  var lastSync = null;
-
-  function lockstepSync() {
-    if (!compareMode || sourcesInfo.length < 2
-        || sourcesInfo[0].end_time == null) {
-      return setTimeout(lockstepSync, 1500);
-    }
-    var getA = ensureGetState(frame.contentWindow);
-    if (!getA) return setTimeout(lockstepSync, 1000);
-    Promise.resolve(getA()).then(function (st) {
-      var s = String(st);
-      var lm = s.match(/curr_left: \(([-0-9.e]+)\)/);
-      var rm = s.match(/curr_right: \(([-0-9.e]+)\)/);
-      var cm = s.match(/cursor: Some\(\((-?1), \[\s*([0-9,\s]*?)\s*\]/);
-      if (lm && rm) {
-        var end = sourcesInfo[0].end_time;
-        var from = Math.round(parseFloat(lm[1]) * end);
-        var to = Math.round(parseFloat(rm[1]) * end);
-        var key = from + ":" + to + ":" + (cm ? cm[2] : "");
-        if (key !== lastSync && to > from) {
-          lastSync = key;
-          var zFrom = bigIntParts(String(Math.max(0, from)));
-          var zTo = bigIntParts(String(to));
-          if (zFrom && zTo) {
-            injectTo(frameB, { ZoomToRange: {
-              start: zFrom, end: zTo, viewport_idx: 0 } });
-          }
-          if (cm) {
-            var digits = cm[2].split(",").map(function (x) {
-              return x.trim();
-            }).filter(Boolean);
-            var val = 0n;
-            for (var i = digits.length - 1; i >= 0; i--) {
-              val = (val << 32n) + BigInt(digits[i]);
-            }
-            var cB = bigIntParts(val.toString());
-            if (cB) injectTo(frameB, { CursorSet: cB });
-          }
-        }
-      }
-      setTimeout(lockstepSync, 250);
-    }).catch(function () { setTimeout(lockstepSync, 1000); });
-  }
-  setTimeout(lockstepSync, 5000);
+  // ---- compare-mode sync -------------------------------------------------
+  // Agent-driven navigation (cursor / viewport / markers) is injected into
+  // BOTH panes by inject(), so compare views stay aligned for every
+  // agent-set state. Following the user's manual pane-A zoom used to rely
+  // on polling the viewer's get_state from inside its JS realm; that direct
+  // call crossed the license isolation boundary and has been removed.
 
   // initial snapshot (no ?since -> immediate return)
   fetch("/api/view-state")

@@ -12,8 +12,9 @@
  *       -lnffr -lnsys -lz -lpthread -ldl \
  *       -Wl,-rpath,'$ORIGIN'
  *
- * License: MIT, with TraceWeave source and copyright notices retained below
- * and in docs/THIRD_PARTY.md. It links at build time against the Verdi
+ * License: Apache-2.0 (wave-mcp), with TraceWeave source and copyright notices
+ * retained below and in docs/THIRD_PARTY.md. It links at build time against
+ * the Verdi
  * FsdbReader libraries (libnffr.so / libnsys.so), which are NOT redistributed
  * here; the binary is a local artifact and never enters the public repo
  * or PyPI.
@@ -866,6 +867,36 @@ int main(int argc, char **argv) {
         fstWriterSetPackType(wctx, FST_WR_PT_FASTLZ);
     else
         fstWriterSetPackType(wctx, FST_WR_PT_LZ4);
+
+    /* Parallel packing when compiled in (deploy/build_fsdb2fst.sh passes
+     * -DHAVE_LIBPTHREAD=1 -DFST_WRITER_PARALLEL=1): the FSDB read side is a
+     * single-threaded closed library, so the writer is where multiple cores
+     * help. Both macros are required: fstapi.c #undefs FST_WRITER_PARALLEL
+     * without HAVE_LIBPTHREAD, and calling it on a build without the parallel
+     * path makes fstapi exit(255), so a plain build must never call it.
+     * Runtime escape hatch: FSDB2FST_PARALLEL=0/off/false/no falls back to
+     * serial packing without a rebuild, for hosts where the background writer
+     * is suspected. See docs/FSDB_GUIDE.md. */
+#if defined(FST_WRITER_PARALLEL) && defined(HAVE_LIBPTHREAD)
+    {
+        bool parallel_ok = true;
+        const char *par_env = std::getenv("FSDB2FST_PARALLEL");
+        if (par_env && *par_env) {
+            std::string v(par_env);
+            std::transform(v.begin(), v.end(), v.begin(),
+                [](unsigned char c) { return std::tolower(c); });
+            parallel_ok = !(v == "0" || v == "off" ||
+                            v == "false" || v == "no");
+        }
+        if (parallel_ok) {
+            fstWriterSetParallelMode(wctx, 1);
+            vlog("FST parallel writer enabled "
+                 "(FSDB2FST_PARALLEL=0 disables it)");
+        } else {
+            vlog("FST parallel writer disabled by FSDB2FST_PARALLEL");
+        }
+    }
+#endif
 
     /* create scopes + vars; dedupe shared idcodes as fst aliases */
     std::map<fsdbVarIdcode, fstHandle> id2fh;      /* idcode -> primary handle */

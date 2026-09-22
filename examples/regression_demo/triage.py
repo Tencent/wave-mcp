@@ -21,10 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
-import subprocess
 import sys
-import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -38,6 +35,23 @@ REPORT_DIR = HERE / "report"
 SHOTS = REPORT_DIR / "shots"
 
 from common import DemoDriver  # noqa: E402  (needs sys.path above)
+
+
+def _value_rows(d: DemoDriver, path: str | None = None) -> list:
+    """Value-change rows from the last ``signal_values`` reply.
+
+    Since 1.0 the tool answers for a batch of paths, so rows live under
+    ``signals[i].values``. This asks for one signal at a time, so the first
+    entry is the right one unless a path is named.
+    """
+    sc = d.last_structured()
+    entries = sc.get("signals")
+    if not isinstance(entries, list):
+        return sc.get("values", []) or []
+    for e in entries:
+        if path is None or e.get("path") == path:
+            return e.get("values", []) or []
+    return []
 
 TOP = "crc_regress_tb"
 DUT_CRC = f"{TOP}.dut.crc"
@@ -130,111 +144,65 @@ def group_failures(cases: list[dict]) -> dict[str, list[dict]]:
     return groups
 
 
-def analyse_case(d: DemoDriver, fail: dict, ref: dict) -> dict:
-    """Analyse one failing case against the in-testbench reference model.
-
-    Note on method: two different seeds drive DIFFERENT stimulus by design,
-    so diffing a failing waveform against a passing one would just report
-    that the payloads differ. The meaningful comparison is inside the
-    failing run itself: the DUT's `dut.crc` against the testbench's
-    reference `ref_crc`, which sees the same stimulus cycle by cycle.
-    """
-    fail_fst = str(HERE / fail["waveform"])
-
-    finding: dict = {"case_id": fail["case_id"], "seed": fail["seed"],
-                     "reference": "testbench 内参考模型（ref_crc）",
-                     "facts": [], "hypothesis": None, "evidence": [],
-                     "first_divergence": None, "diverging": []}
-
-    # each case has its own waveform: point the session at it, otherwise
-    # every query would read whichever waveform was opened first.
-    sess = RUNS / f"session_{fail['seed']:03d}"
-    d.call("prepare_session", {
-        "out_dir": str(sess), "wave_path": fail_fst,
-        "filelist_path": str(HERE / "rtl" / "crc_regress.f"), "top": TOP,
-    })
-
-    # 1. residue actually captured vs what the reference model expected
-    d.call("signal_values", {"full_path": RESIDUE})
-    res_rows = d.last_structured().get("values", [])
-    d.call("signal_values", {"full_path": EXPECTED})
-    exp_rows = d.last_structured().get("values", [])
-    got = res_rows[-1]["value"] if res_rows else None
-    want = exp_rows[-1]["value"] if exp_rows else None
-    if got is not None and want is not None:
-        finding["facts"].append(
-            f"捕获的残差为 `{got}`，参考模型期望值为 `{want}`")
-        finding["evidence"].append(
-            f"signal_values({RESIDUE})[-1]={got}; "
-            f"signal_values({EXPECTED})[-1]={want}")
-
-    # 2. walk dut.crc and ref_crc together to find the first cycle where
-    #    the DUT leaves the reference behind
-    d.call("signal_values", {"full_path": DUT_CRC, "max_number_of_values": 400})
-    dut_rows = d.last_structured().get("values", [])
-    d.call("signal_values", {"full_path": REF_CRC,
-                             "max_number_of_values": 400})
-    ref_rows = d.last_structured().get("values", [])
-
-    div_t = None
-    if dut_rows and ref_rows:
-        ref_at = {r["time"]: r["value"] for r in ref_rows}
-        ref_series = sorted(ref_at.items(), key=lambda kv: _ns(kv[0]))
-        for row in sorted(dut_rows, key=lambda r: _ns(r["time"])):
-            t = _ns(row["time"])
-            if t <= 15:                       # skip reset
-                continue
-            # value the reference holds at this instant
-            held = None
-            for rt, rv in ref_series:
-                if _ns(rt) <= t:
-                    held = rv
-                else:
-                    break
-            if held is not None and row["value"] != held:
-                div_t = row["time"]
-                finding["first_divergence"] = div_t
-                finding["facts"].append(
-                    f"`dut.crc` 在 {div_t} 处首次偏离参考模型：DUT 为 "
-                    f"`{row['value']}`，参考模型为 `{held}`")
-                finding["evidence"].append(
-                    f"signal_values({DUT_CRC}) vs signal_values({REF_CRC}): "
-                    f"首次不匹配于 {div_t} "
-                    f"({row['value']} != {held})")
+def _find_divergence(d: DemoDriver, finding: dict) -> str | None:
+    """Walk dut.crc and ref_crc together; return the first diverging time."""
+    d.call("signal_values", {"paths": DUT_CRC, "limit": 400})
+    dut_rows = _value_rows(d)
+    d.call("signal_values", {"paths": REF_CRC, "limit": 400})
+    ref_rows = _value_rows(d)
+    if not (dut_rows and ref_rows):
+        return None
+    ref_at = {r["time"]: r["value"] for r in ref_rows}
+    ref_series = sorted(ref_at.items(), key=lambda kv: _ns(kv[0]))
+    for row in sorted(dut_rows, key=lambda r: _ns(r["time"])):
+        t = _ns(row["time"])
+        if t <= 15:                       # skip reset
+            continue
+        # value the reference holds at this instant
+        held = None
+        for rt, rv in ref_series:
+            if _ns(rt) <= t:
+                held = rv
+            else:
                 break
+        if held is not None and row["value"] != held:
+            div_t = row["time"]
+            finding["first_divergence"] = div_t
+            finding["facts"].append(
+                f"`dut.crc` 在 {div_t} 处首次偏离参考模型：DUT 为 "
+                f"`{row['value']}`，参考模型为 `{held}`")
+            finding["evidence"].append(
+                f"signal_values({DUT_CRC}) vs signal_values({REF_CRC}): "
+                f"首次不匹配于 {div_t} "
+                f"({row['value']} != {held})")
+            return div_t
+    return None
 
-    if div_t is None:
-        finding["facts"].append(
-            "未在 `dut.crc` 与参考模型之间找到逐拍不匹配，"
-            "仅凭波形比较无法解释本次失败")
-        finding["hypothesis"] = (
-            "波形比较无定论。建议扩大比较窗口或检查包尾残差捕获路径。")
-        return finding
 
-    # 3. what was on the data bus in the cycles leading up to the mismatch.
-    #    The window is wide enough to show several nibbles, since a
-    #    data-dependent bug usually needs a short sequence, not one value.
+def _collect_data_window(d: DemoDriver, finding: dict, div_t: str) -> None:
+    """Record the data bus in the cycles leading up to the mismatch."""
     lo = max(0, _ns(div_t) - 80)
-    d.call("signal_values_in_range", {
-        "full_path": f"{TOP}.data",
-        "start_time_as_string": f"{lo}ns",
-        "end_time_as_string": div_t,
+    d.call("signal_values", {
+        "paths": f"{TOP}.data",
+        "start": f"{lo}ns",
+        "end": div_t,
     })
-    data_rows = d.last_structured().get("values", [])
-    if data_rows:
-        seq = " ".join(f"{r['value']}@{r['time']}" for r in data_rows[-8:])
-        finding["facts"].append(
-            f"偏离前 {lo}ns..{div_t} 窗口内的 `data` 变化："
-            f"{seq}")
-        finding["evidence"].append(
-            f"signal_values_in_range({TOP}.data, {lo}ns..{div_t}): "
-            f"{len(data_rows)} 次跳变")
-        finding["data_window"] = seq
+    data_rows = _value_rows(d)
+    if not data_rows:
+        return
+    seq = " ".join(f"{r['value']}@{r['time']}" for r in data_rows[-8:])
+    finding["facts"].append(
+        f"偏离前 {lo}ns..{div_t} 窗口内的 `data` 变化："
+        f"{seq}")
+    finding["evidence"].append(
+        f"signal_values({TOP}.data, {lo}ns..{div_t}): "
+        f"{len(data_rows)} 次跳变")
+    finding["data_window"] = seq
 
-    # 4. what drives the register that went wrong, and under what condition.
-    #    Each driver carries the actual source line, which is the strongest
-    #    pointer the netlist can give us.
-    d.call("signal_drivers", {"full_path": DUT_CRC})
+
+def _collect_drivers(d: DemoDriver, finding: dict) -> list:
+    """Inspect the drivers of dut.crc; return payload-related suspects."""
+    d.call("signal_drivers", {"path": DUT_CRC})
     drivers = d.last_structured().get("drivers") or []
     suspects = []
     for drv in drivers:
@@ -260,9 +228,69 @@ def analyse_case(d: DemoDriver, fail: dict, ref: dict) -> dict:
             f"与 payload 相关的写入位于 {loc}：`{snippet}`，"
             f"触发条件为 `{cond}`")
     finding["suspects"] = suspects
+    return suspects
+
+
+def analyse_case(d: DemoDriver, fail: dict, ref: dict) -> dict:
+    """Analyse one failing case against the in-testbench reference model.
+
+    Note on method: two different seeds drive DIFFERENT stimulus by design,
+    so diffing a failing waveform against a passing one would just report
+    that the payloads differ. The meaningful comparison is inside the
+    failing run itself: the DUT's `dut.crc` against the testbench's
+    reference `ref_crc`, which sees the same stimulus cycle by cycle.
+    """
+    fail_fst = str(HERE / fail["waveform"])
+
+    finding: dict = {"case_id": fail["case_id"], "seed": fail["seed"],
+                     "reference": "testbench 内参考模型（ref_crc）",
+                     "facts": [], "hypothesis": None, "evidence": [],
+                     "first_divergence": None, "diverging": []}
+
+    # each case has its own waveform: point the session at it, otherwise
+    # every query would read whichever waveform was opened first.
+    sess = RUNS / f"session_{fail['seed']:03d}"
+    d.call("prepare_session", {
+        "out_dir": str(sess), "wave_path": fail_fst,
+        "filelist_path": str(HERE / "rtl" / "crc_regress.f"), "top": TOP,
+    })
+
+    # 1. residue actually captured vs what the reference model expected
+    d.call("signal_values", {"paths": RESIDUE})
+    res_rows = _value_rows(d)
+    d.call("signal_values", {"paths": EXPECTED})
+    exp_rows = _value_rows(d)
+    got = res_rows[-1]["value"] if res_rows else None
+    want = exp_rows[-1]["value"] if exp_rows else None
+    if got is not None and want is not None:
+        finding["facts"].append(
+            f"捕获的残差为 `{got}`，参考模型期望值为 `{want}`")
+        finding["evidence"].append(
+            f"signal_values({RESIDUE})[-1]={got}; "
+            f"signal_values({EXPECTED})[-1]={want}")
+
+    # 2. walk dut.crc and ref_crc together to find the first cycle where
+    #    the DUT leaves the reference behind
+    div_t = _find_divergence(d, finding)
+    if div_t is None:
+        finding["facts"].append(
+            "未在 `dut.crc` 与参考模型之间找到逐拍不匹配，"
+            "仅凭波形比较无法解释本次失败")
+        finding["hypothesis"] = (
+            "波形比较无定论。建议扩大比较窗口或检查包尾残差捕获路径。")
+        return finding
+
+    # 3. what was on the data bus in the cycles leading up to the mismatch.
+    #    The window is wide enough to show several nibbles, since a
+    #    data-dependent bug usually needs a short sequence, not one value.
+    _collect_data_window(d, finding, div_t)
+
+    # 4. what drives the register that went wrong, and under what condition.
+    #    Each driver carries the actual source line, which is the strongest
+    #    pointer the netlist can give us.
+    suspects = _collect_drivers(d, finding)
 
     # 5. hypothesis, labelled as an inference
-    suspects = finding.get("suspects") or []
     finding["hypothesis"] = (
         f"DUT 的 CRC 状态在 {div_t} 处偏离参考模型，远早于包尾"
         f"报出残差错误的时刻，因此报告中的残差值只是下游症状，"
@@ -337,7 +365,7 @@ def screenshot(url: str, out: Path) -> str | None:
             page.goto(url, wait_until="domcontentloaded", timeout=45000)
             try:
                 page.wait_for_url("**/shell.html*", timeout=30000)
-            except Exception:
+            except Exception:  # pylint: disable=broad-except
                 pass
             page.wait_for_selector("#surfer", timeout=30000)
             page.frame_locator("#surfer").locator("canvas").first.wait_for(
@@ -352,7 +380,7 @@ def screenshot(url: str, out: Path) -> str | None:
         if out.stat().st_size < 20000:
             return None
         return out.name
-    except Exception as exc:
+    except Exception as exc:  # pylint: disable=broad-except
         print(f"  [warn] screenshot failed: {str(exc)[:120]}")
         return None
 
@@ -523,6 +551,16 @@ def write_report(man: dict, groups: dict, findings: list[dict],
 
 # ---------------------------------------------------------------------------
 
+def _load_manifest():
+    """Load the regression manifest; return (man, passing, failing)."""
+    man = json.loads(MANIFEST.read_text())
+    passing = [c for c in man["cases"]
+               if c["status"] == "pass" and c.get("waveform")]
+    failing = [c for c in man["cases"]
+               if c["status"] == "fail" and c.get("waveform")]
+    return man, passing, failing
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="triage the demo regression")
     ap.add_argument("--no-shots", action="store_true",
@@ -535,12 +573,7 @@ def main() -> int:
 
     if not MANIFEST.exists():
         sys.exit(f"error: {MANIFEST} not found. Run ./run_regression.py first.")
-    man = json.loads(MANIFEST.read_text())
-
-    passing = [c for c in man["cases"]
-               if c["status"] == "pass" and c.get("waveform")]
-    failing = [c for c in man["cases"]
-               if c["status"] == "fail" and c.get("waveform")]
+    man, passing, failing = _load_manifest()
 
     print(f"== regression: {man['summary']['pass']} passed, "
           f"{man['summary']['fail']} failed ==")

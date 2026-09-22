@@ -28,12 +28,20 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-# In a pip/wheel install the sources land under share/wave-mcp/fsdb2fst/ while
-# the build script sits in share/wave-mcp/deploy/, so the dirname-based
-# REPO_ROOT/third_party/fsdb2fst path does not exist.  convert.py resolves the
-# correct layout and passes SRC_DIR via the environment; fall back to the
-# checkout layout only when SRC_DIR is unset (manual invocation).
-SRC_DIR="${SRC_DIR:-$REPO_ROOT/third_party/fsdb2fst}"
+# SRC_DIR resolution (first match wins):
+#   1. explicit $SRC_DIR (convert.py passes the pip install layout)
+#   2. sources next to this script's parent: the bundle layout
+#      (fsdb2fst-src/deploy/build_fsdb2fst.sh -> fsdb2fst-src/) and the pip
+#      layout (share/wave-mcp/deploy/ -> share/wave-mcp/), where
+#      REPO_ROOT/third_party/fsdb2fst does not exist
+#   3. the git checkout layout (third_party/fsdb2fst under the repo root)
+if [ -z "${SRC_DIR:-}" ]; then
+    if [ -f "$(dirname "$0")/../fsdb2fst.cpp" ]; then
+        SRC_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+    else
+        SRC_DIR="$REPO_ROOT/third_party/fsdb2fst"
+    fi
+fi
 RUNTIME_DIR="$REPO_ROOT/third_party/verdi_runtime/linux64"
 
 log()  { printf '[build_fsdb2fst] %s\n' "$*"; }
@@ -46,7 +54,7 @@ esac
 
 command -v g++ >/dev/null 2>&1 || fail "g++ not found in PATH"
 for f in fsdb2fst.cpp fst/fstapi.c fst/lz4.c fst/fastlz.c; do
-    [ -f "$SRC_DIR/$f" ] || fail "missing $SRC_DIR/$f (fst sources must be vendored, see deploy/VCD2FST_BUILD.md for how they map to the gtkwave tarball)"
+    [ -f "$SRC_DIR/$f" ] || fail "missing $SRC_DIR/$f (fst sources must be vendored, see VCD2FST_BUILD.md for how they map to the gtkwave tarball)"
 done
 
 # ---- resolve the FsdbReader package ----------------------------------------
@@ -102,7 +110,7 @@ fi
 OUT="${FSDB2FST_OUT:-$SRC_DIR/fsdb2fst}"
 log "building $OUT ..."
 mkdir -p "$(dirname "$OUT")"
-g++ -O2 -std=c++17 -w \
+g++ -O2 -std=c++17 -w -DHAVE_LIBPTHREAD=1 -DFST_WRITER_PARALLEL=1 \
     "${INC_ARGS[@]}" \
     -o "$OUT" \
     "$SRC_DIR/fsdb2fst.cpp" \
@@ -115,5 +123,8 @@ g++ -O2 -std=c++17 -w \
 
 chmod 755 "$OUT"
 log "build OK: $OUT"
-log "RPATH: $(objdump -x "$OUT" 2>/dev/null | grep -m1 RUNPATH || echo 'none baked')"
-log "next:  bash third_party/fsdb2fst/selftest.sh   (needs a sample .fsdb)"
+# -Wl,-rpath bakes an RPATH entry (objdump prints it as RPATH, not RUNPATH);
+# match both so the log never claims "none baked" on a healthy binary.
+RPATH_LINE="$(objdump -x "$OUT" 2>/dev/null | grep -m1 -E '^\s*(RUNPATH|RPATH)' || true)"
+log "RPATH: ${RPATH_LINE:-none baked}"
+log "next:  bash \"$SRC_DIR/selftest.sh\"   (offline smoke, no Verdi needed)"

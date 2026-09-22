@@ -37,7 +37,7 @@ def expect_raises(name: str, fn, *args, **kwargs) -> None:
         check(name, False, "no exception raised")
     except ViewStateError:
         check(name, True)
-    except Exception as e:                                     # noqa: BLE001
+    except Exception as e:  # pylint: disable=broad-except
         check(name, False, f"wrong exception {type(e).__name__}: {e}")
 
 
@@ -293,7 +293,7 @@ def test_assets() -> None:
         check("degradation payload shape",
               hint["available"] is False
               and hint.get("error_type") == "viewer_unavailable"
-              and "pip install" in hint["hint"], str(hint))
+              and "SELF_BUILD" in hint["hint"], str(hint))
 
         # tool-level degradation via a manager with no assets
         from wave_mcp.viewer.manager import ViewManager
@@ -306,13 +306,22 @@ def test_assets() -> None:
             check("open_view degrades without assets", True,
                   "assets installed in env; skipped")
         r = mgr.update_view("nope")
-        check("update unknown view: error dict",
-              r["status"] == "error" and r["error_type"] == "unknown_view",
-              str(r))
+        if mgr.available:
+            check("update unknown view: error dict",
+                  r["status"] == "error" and r["error_type"] == "unknown_view",
+                  str(r))
+        else:
+            # without assets the manager degrades before looking any view up
+            check("update degrades without assets",
+                  r["status"] == "error" and "hint" in r, str(r))
         r = mgr.get_state("nope")
-        check("get_state unknown view: error dict",
-              r["status"] == "error" and r["error_type"] == "unknown_view",
-              str(r))
+        if mgr.available:
+            check("get_state unknown view: error dict",
+                  r["status"] == "error" and r["error_type"] == "unknown_view",
+                  str(r))
+        else:
+            check("get_state degrades without assets",
+                  r["status"] == "error" and "hint" in r, str(r))
     finally:
         if saved is not None:
             os.environ["WAVE_MCP_VIEWER_ASSETS"] = saved
@@ -508,7 +517,7 @@ def test_http() -> None:
                     put("/api/view-state",
                         {"annotations": [{"id": f"w{i}-{j}",
                                           "markdown": f"m{i}-{j}"}]})
-            except Exception as e:                             # noqa: BLE001
+            except Exception as e:  # pylint: disable=broad-except
                 errs.append(e)
 
         threads = [threading.Thread(target=writer, args=(i,))
@@ -583,17 +592,189 @@ def test_lifecycle():
     check("close_view rejects unknown id",
           mgr.close_view("nope").get("error_type") == "unknown_view")
 
-    # LRU: opening past max_views evicts the oldest
-    mgr.open_view([cdc], title="1")
+    # LRU: opening past max_views evicts the oldest and says which
+    r1 = mgr.open_view([cdc], title="1")
     mgr.open_view([xprop], title="2")
-    keep = mgr.open_view([cdc], title="3")["view_id"]
+    r3 = mgr.open_view([cdc], title="3")
+    keep = r3["view_id"]
     lv = mgr.list_views()
     check("max_views caps open views", lv["count"] == 2, str(lv["count"]))
     check("newest view survives eviction",
           keep in [v["view_id"] for v in lv["views"]])
+    check("evicted view id reported",
+          r3.get("evicted_view_id") == r1["view_id"], str(r3))
+    check("no phantom eviction on the first opens",
+          "evicted_view_id" not in r1, str(r1))
+    check("evicted view is really gone",
+          mgr.get_state(r1["view_id"]).get("error_type") == "unknown_view")
     mgr.close_all()
     check("close_all empties the registry",
           mgr.list_views()["count"] == 0)
+
+    # A token whose first character is "-" used to be parsed by clap as an
+    # option (exit 2), failing roughly 1 in 64 opens; with the token attached
+    # as --token=<value> every open must start. The patch makes the race a
+    # deterministic case instead of a probabilistic one.
+    import secrets as _secrets
+    real_token_urlsafe = _secrets.token_urlsafe
+    _secrets.token_urlsafe = lambda n=32: "-" + real_token_urlsafe(n)[1:]
+    try:
+        for i in range(3):       # each cycle starts a fresh surver -> new token
+            r = mgr.open_view([xprop], title=f"dash-{i}")
+            check(f"dash-leading token open #{i + 1}",
+                  r.get("available") is True, str(r))
+            if r.get("available"):
+                mgr.close_view(r["view_id"])
+    finally:
+        _secrets.token_urlsafe = real_token_urlsafe
+
+
+# --------------------------------------------------------- signal check --
+def test_signal_check() -> None:
+    """Advisory signal-name check: a name the waveform does not contain is
+    reported as a warning instead of being silently dropped by Surfer, and
+    the page-health fields plus the warnings list travel with the state."""
+    from pathlib import Path
+    import wave_mcp.viewer.manager as m
+
+    waves = Path(__file__).resolve().parents[1].parent / \
+        "examples/viewer_demos/waves"
+    fst = str(waves / "xprop.fst")
+    if not Path(fst).is_file():
+        check("xprop.fst present (signal check skipped)", True)
+        return
+
+    names = m._fst_signal_names(fst)
+    check("signal names parsed from the fst", bool(names))
+    check("existing signal not flagged",
+          m._missing_signals([fst], [{"path": "xprop_tb.din"}]) == [])
+    check("missing signal flagged",
+          m._missing_signals([fst], [{"path": "xprop_tb.nosuch"}])
+          == ["xprop_tb.nosuch"])
+    check("wildcard skipped",
+          m._missing_signals([fst], [{"path": "xprop_tb.*"}]) == [])
+    check("aggregated spelling accepted",
+          m._missing_signals([fst], [{"path": "xprop_tb.din[7:0]"}]) == [])
+    check("case-insensitive match",
+          m._missing_signals([fst], [{"path": "XPROP_TB.DIN"}]) == [])
+    check("cache returns the same set", m._fst_signal_names(fst) is names)
+    check("unreadable file stays quiet",
+          m._missing_signals(["/no/such.fst"], [{"path": "x"}]) == [])
+
+    # actual state carries the page health fields; snapshot carries warnings
+    st = ViewState()
+    st.write_actual({"page_ready": True, "page_error": "boom", "evil": 1})
+    check("page fields accepted in actual",
+          st.actual.get("page_ready") is True
+          and st.actual.get("page_error") == "boom"
+          and "evil" not in st.actual)
+    st.warnings.append("w1")
+    check("snapshot carries warnings", st.snapshot().get("warnings") == ["w1"])
+
+    # a missing signal must not block the open; it is reported instead
+    from wave_mcp.viewer.manager import ViewManager
+    mgr = ViewManager()          # isolated instance, not the singleton
+    if not mgr.available:
+        check("open_view missing-signal warning (skipped: no assets)", True)
+        return
+    r = mgr.open_view([fst], signals=[{"path": "xprop_tb.nosuch"}])
+    check("open_view still opens", r.get("available") is True, str(r))
+    check("missing signal reported as warning",
+          any("xprop_tb.nosuch" in w for w in r.get("warnings", [])),
+          str(r.get("warnings")))
+    if r.get("available"):
+        mgr.close_view(r["view_id"])
+    mgr.close_all()
+
+
+# --------------------------------------------------------- surver spawn --
+def test_surver_argv() -> None:
+    """The token must be passed attached (--token=<value>), never as a
+    separate argv item: token_urlsafe() may start with "-" (1 in 64) and
+    clap then reads the value as an option, so surver exits 2 without ever
+    starting. That was the intermittent open failure this pins down.
+    No assets or surver binary needed: Popen is a recorder here."""
+    import io
+    from wave_mcp.viewer import surver as sv
+
+    captured = {}
+
+    class _FakeProc:
+        def __init__(self):
+            self.stderr = io.StringIO("")
+            self.returncode = None
+
+        def poll(self):
+            return None
+
+    def _fake_popen(argv, **kwargs):
+        captured["argv"] = argv
+        return _FakeProc()
+
+    inst = sv.SurverInstance.__new__(sv.SurverInstance)   # no __init__ side effects
+    inst.token = "-starting-with-dash"
+    inst.fst_paths = ["/tmp/a.fst", "/tmp/b.fst"]
+
+    real_popen = sv.subprocess.Popen
+    sv.subprocess.Popen = _fake_popen
+    try:
+        inst._spawn("/bin/surver", 43210)
+    finally:
+        sv.subprocess.Popen = real_popen
+
+    argv = captured.get("argv", [])
+    check("token attached as --token=<value>",
+          "--token=-starting-with-dash" in argv, str(argv))
+    check("no bare --token / dash value pair",
+          "--token" not in argv and "-starting-with-dash" not in argv,
+          str(argv))
+    check("argv layout intact",
+          argv[:5] == ["/bin/surver", "--port", "43210", "--bind-address",
+                       "127.0.0.1"]
+          and argv[-2:] == ["/tmp/a.fst", "/tmp/b.fst"], str(argv))
+
+
+def test_stability_loop():
+    """Bounded open/close soak against a real surver: every open must
+    succeed and every close must stop its backend. 1 in 64 opens used to
+    fail on a dash-leading token, so even this small loop is a regression
+    net; set WAVE_MCP_VIEWER_LOOPS (test-only) to run a longer soak by
+    hand. Skips without viewer assets, like test_lifecycle."""
+    from pathlib import Path
+    from wave_mcp.viewer.manager import ViewManager
+
+    if ViewManager.instance().available is not True:
+        check("viewer assets present (stability loop skipped)", True)
+        return
+    waves = Path(__file__).resolve().parents[1].parent / \
+        "examples/viewer_demos/waves"
+    cdc, xprop = str(waves / "cdc.fst"), str(waves / "xprop.fst")
+    if not Path(cdc).is_file():
+        check("demo waveforms present (stability loop skipped)", True)
+        return
+
+    loops = int(os.environ.get("WAVE_MCP_VIEWER_LOOPS", "10"))
+    mgr = ViewManager()          # isolated instance, not the singleton
+    fails = []
+    t0 = time.time()
+    for i in range(loops):
+        r = mgr.open_view([cdc if i % 2 else xprop])
+        if not r.get("available"):
+            fails.append({"i": i, "step": "open", "resp": r})
+            continue
+        c = mgr.close_view(r["view_id"])
+        if not c.get("closed"):
+            fails.append({"i": i, "step": "close", "resp": c})
+    check(f"{loops} open/close cycles: no failures", not fails,
+          str(fails[:2]))
+    check("cycles leave no backend running",
+          mgr._surver_mgr is None
+          or not any(inst.alive()
+                     for inst in mgr._surver_mgr._instances.values()),
+          "surver still alive after close")
+    check("registry empty after the loop", mgr.list_views()["count"] == 0)
+    if loops > 10:
+        print(f"  (soak: {loops} cycles in {time.time() - t0:.1f}s)")
 
 
 def test_ports():
@@ -654,8 +835,11 @@ def main() -> int:
     test_translate()
     test_assets()
     test_error_contract()
+    test_signal_check()
+    test_surver_argv()
     test_http()
     test_lifecycle()
+    test_stability_loop()
     test_ports()
     print(f"\n  viewer suite: {len(PASSED)} passed, {len(FAILED)} failed")
     if FAILED:

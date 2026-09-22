@@ -45,6 +45,7 @@ _TIME_EXAMPLE = {"time": "1523400", "unit": "ps"}
 #: "100ns" style value: digits plus a unit suffix, whitespace tolerated.
 _SUFFIX_TIME_RE = re.compile(r"^(\d+)\s*([a-zA-Z]+)$")
 
+
 class ViewStateError(ValueError):
     """Raised when a desired-state fragment fails validation.
 
@@ -61,6 +62,7 @@ class ViewStateError(ValueError):
         self.expected = expected
         self.did_you_mean = did_you_mean
         self.example = example
+
 
 def _require(cond: bool, msg: str, **kw: Any) -> None:
     if not cond:
@@ -393,9 +395,9 @@ class ViewState:
             self.desired["annotations"].extend(new_anns)
             # recompute the sucl cache under the lock so long-pollers always
             # see a snapshot whose commands match its desired fields; the
-            # shell reloads the Surfer iframe when this string changes
-            # (runtime InjectMessage cursor control is a silent no-op on the
-            # pinned build, so boot-time commands are the reliable path).
+            # shell reboots the Surfer iframe with these commands when the
+            # signal list changes, and applies cursor/viewport/marker
+            # changes in place through runtime injection.
             report: List[str] = []
             from .translate import desired_to_sucl
             self.desired["startup_commands_cache"] = desired_to_sucl(
@@ -413,7 +415,8 @@ class ViewState:
     def write_actual(self, payload: Dict[str, Any]) -> None:
         with self._lock:
             for key in ("applied_revision", "cursor", "viewport",
-                        "selected_signals", "displayed_signals", "user_dirty"):
+                        "selected_signals", "displayed_signals", "user_dirty",
+                        "page_ready", "page_error"):
                 if key in payload:
                     self.actual[key] = payload[key]
             self.actual["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
@@ -427,6 +430,10 @@ class ViewState:
                 "revision": self.revision,
                 "desired": self.desired,
                 "actual": self.actual,
+                # advisories (dropped commands, signals not present in the
+                # waveform); the shell shows them so a silent drop is not
+                # mistaken for a broken viewer
+                "warnings": list(self.warnings),
             }
 
     def wait_change(self, since: int, timeout: float = 25.0) -> Dict[str, Any]:

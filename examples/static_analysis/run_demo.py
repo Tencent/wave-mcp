@@ -5,7 +5,7 @@ Demonstrates wave-mcp's unique waveform-free static analysis
 declarations from RTL source code alone — usable before any simulation exists.
 
 Run:
-    python examples/static_analysis/run.py
+    python examples/static_analysis/run_demo.py
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ sys.path.insert(0, ROOT)
 
 from wave_mcp.server import (
     open_static_session,
-    list_child_instances,
+    find_instances,
     list_modules,
     list_signals,
     signal_drivers,
@@ -27,7 +27,7 @@ from wave_mcp.server import (
     signal_connectivity,
     signal_info,
     scope_info,
-    modules_in_file,
+    files,
     signal_values,
 )
 
@@ -56,8 +56,8 @@ def main() -> None:
     print("netlist health:", r.get("netlist_health", {}).get("status"))
 
     # 2) Hierarchy (2 levels: u_tx and u_tx.u_baud_gen).
-    section("hierarchy — list_child_instances")
-    show(list_child_instances(instance_full_path="uart_top", number_of_levels=2))
+    section("hierarchy — find_instances")
+    show(find_instances(under="uart_top", max_depth=2))
 
     # 3) Modules in the design.
     section("modules — list_modules")
@@ -65,7 +65,7 @@ def main() -> None:
 
     # 4) Signals of the TX core.
     section("signals of u_tx — list_signals")
-    show(list_signals(instance_full_path="uart_top.u_tx"))
+    show(list_signals("uart_top.u_tx"))
 
     # 5) All drivers of tx_serial (RHS of every assignment that can write it).
     section("drivers of u_tx.tx_serial — signal_drivers")
@@ -88,8 +88,8 @@ def main() -> None:
     show(scope_info("uart_top.u_tx.u_baud_gen"))
 
     # 10) Modules declared in the file.
-    section("modules in uart_top.sv — modules_in_file")
-    show(modules_in_file(SV))
+    section("modules in uart_top.sv — files(modules_of=...)")
+    show(files(modules_of=SV))
 
     # 11) Value tools correctly refuse without a waveform.
     section("signal_values without a waveform (expect 'needs waveform')")

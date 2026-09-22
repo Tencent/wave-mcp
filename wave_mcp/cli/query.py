@@ -4,9 +4,9 @@ The exact same functions the MCP server exposes, callable from a shell:
 
     wave-mcp query --list
     wave-mcp query signal_values --session sessions/my_module \\
-        --full_path top.u_tx.tx_serial --t0 100ns --t1 200ns
+        --paths top.u_tx.tx_serial --start 100ns --end 200ns
     wave-mcp query signal_drivers --session sessions/my_module \\
-        --json-args '{"full_path": "top.u_tx.tx_serial"}'
+        --json-args '{"path": "top.u_tx.tx_serial"}'
 
 Arguments are derived from each tool's signature automatically, so every
 current and future tool gets a CLI surface with zero extra maintenance.
@@ -72,7 +72,7 @@ def _build_fn_parser(fn: Any, meta: Any, prog: str) -> argparse.ArgumentParser:
     sig = inspect.signature(fn)
     try:
         hints = get_type_hints(fn)
-    except Exception:
+    except (NameError, TypeError):
         hints = {}
     desc = (meta.description or "").strip().splitlines()
     desc = desc[0] if desc else "(no description)"
@@ -145,6 +145,11 @@ def main(argv: list[str] | None = None) -> int:
     name = known.tool
     registry = _tool_registry()
     if name not in registry:
+        hint = server.rename_hint(name)
+        if hint:
+            print(f"error: {hint['error']}; use {hint['use_instead']}",
+                  file=sys.stderr)
+            return 1
         print(f"error: unknown tool {name!r}. "
               f"Run 'wave-mcp query --list' to see all tools.",
               file=sys.stderr)
@@ -156,6 +161,28 @@ def main(argv: list[str] | None = None) -> int:
     if known.help:
         fn_parser.print_help()
         return 0
+
+    # A retired flag would otherwise die inside argparse as "unrecognized
+    # arguments", which does not tell the caller what to use instead. Check the
+    # 1.0 rename table first; this runs only on the failing path.
+    valid = set(inspect.signature(fn).parameters)
+    for tok in rest:
+        if not tok.startswith("--"):
+            continue
+        flag = tok[2:].split("=", 1)[0]
+        if flag in valid:
+            continue
+        new = server.renamed_param(flag)
+        if new:
+            # "path" vs "paths" depends on the tool: signal_values takes a
+            # batch, the single-signal tools take one. Point at whichever this
+            # tool actually declares instead of guessing.
+            if new == "path" and "path" not in valid and "paths" in valid:
+                new = "paths"
+            print(f"error: --{flag} was renamed in wave-mcp 1.0; "
+                  f"use --{new}", file=sys.stderr)
+            return 1
+
     args = fn_parser.parse_args(rest)
 
     kwargs = {k: v for k, v in vars(args).items() if v is not None}
@@ -172,20 +199,43 @@ def main(argv: list[str] | None = None) -> int:
 
     if known.session:
         try:
-            server.SESSIONS.open(known.session)
-        except Exception as exc:  # noqa: BLE001 — surface any open failure
+            session_id = server.SESSIONS.open(
+                known.session, owner_id=server.PRINCIPAL.owner_id)
+        except Exception as exc:  # pylint: disable=broad-except
             print(f"error: cannot open session {known.session!r}: {exc}",
                   file=sys.stderr)
             return 1
+        # Name the session on the call itself. This process holds exactly one, so
+        # the fallback would work today, but relying on it would make a later
+        # --session flag silently change what an earlier call addresses.
+        if "session_id" in inspect.signature(fn).parameters:
+            kwargs.setdefault("session_id", session_id)
 
     try:
         result = fn(**kwargs)
     except TypeError as exc:
+        hint = server.param_rename_hint(exc, name)
+        if hint:
+            print(f"error: {hint['error']}; use {hint['use_instead']}",
+                  file=sys.stderr)
+            return 1
         print(f"error: bad arguments for {name}: {exc}", file=sys.stderr)
         return 1
-    except Exception as exc:  # noqa: BLE001 — CLI must report tool failures
+    except Exception as exc:  # pylint: disable=broad-except
         print(f"error: {name} failed: {exc}", file=sys.stderr)
         return 1
+
+    if isinstance(result, dict) and result.get("error_type") == "invalid_argument":
+        # Query defaults live in the server process. `wave-mcp query` starts a
+        # fresh process per invocation, so defaults set by an earlier command
+        # are gone and the generic hint would send the user down a dead end.
+        hint = result.get("hint") or ""
+        if "query_defaults_set" in hint:
+            result = dict(result)
+            result["hint"] = (
+                "pass the argument explicitly: each 'wave-mcp query' run is a "
+                "new process, so query defaults cannot carry over between "
+                "commands (they persist within one MCP server session)")
 
     if known.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))

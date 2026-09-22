@@ -112,35 +112,42 @@ class TestResolveWaveform:
 
 
 # ---------------------------------------------------------------------------
-# _artifact_fallback_root
+# cache location: derived-cache layer, never the source directory
 # ---------------------------------------------------------------------------
 
-class TestFallbackRoot:
+class TestCacheLocation:
     def test_deterministic(self):
-        a = convert._artifact_fallback_root()
-        b = convert._artifact_fallback_root()
+        from wave_mcp.runtime import storage
+        a = storage.policy().cache_dir("fst", create=False)
+        b = storage.policy().cache_dir("fst", create=False)
         assert a == b
         assert "wave-mcp" in a
 
-    def test_used_when_src_readonly(self):
-        """When source dir is not writable, resolve_waveform uses the shared fallback root."""
+    def test_never_writes_next_to_source(self):
+        """A converted FST lands in the cache root even when the source dir is writable."""
         src = os.path.join(os.path.dirname(__file__), os.pardir,
                            "fourstate", "sim", "fourstate.vcd")
         if not os.path.exists(src):
             pytest.skip("fourstate VCD not available")
+        from wave_mcp.runtime import storage
         tmp = tempfile.mkdtemp()
+        cache = tempfile.mkdtemp()
+        old = os.environ.get("WAVE_MCP_CACHE_ROOT")
+        os.environ["WAVE_MCP_CACHE_ROOT"] = cache
         try:
-            work = os.path.join(tmp, "ro.vcd")
+            work = os.path.join(tmp, "rw.vcd")
             shutil.copy(src, work)
-            orig = convert._dir_writable
-            convert._dir_writable = lambda d: False
-            try:
-                got = convert.resolve_waveform(work)
-                assert got["fst_path"].startswith(convert._artifact_fallback_root())
-            finally:
-                convert._dir_writable = orig
+            before = set(os.listdir(tmp))
+            got = convert.resolve_waveform(work)
+            assert got["fst_path"].startswith(storage.policy().cache_dir("fst", create=False))
+            assert set(os.listdir(tmp)) == before
         finally:
+            if old is None:
+                os.environ.pop("WAVE_MCP_CACHE_ROOT", None)
+            else:
+                os.environ["WAVE_MCP_CACHE_ROOT"] = old
             shutil.rmtree(tmp, ignore_errors=True)
+            shutil.rmtree(cache, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------

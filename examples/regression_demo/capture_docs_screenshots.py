@@ -67,7 +67,7 @@ def shoot_report() -> bool:
             page.screenshot(path=str(REPORT_TARGET), clip={
                 "x": 0, "y": 0, "width": 1200, "height": 1000})
             browser.close()
-    except Exception as exc:
+    except Exception as exc:  # pylint: disable=broad-except
         print(f"report screenshot failed: {str(exc)[:140]}")
         return False
     print(f"report:   index.html -> {REPORT_TARGET.relative_to(REPO)}")
