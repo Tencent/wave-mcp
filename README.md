@@ -268,13 +268,15 @@ wave-session --vcd sim/dump.vcd --top top_tb --filelist rtl.f
 
 > 通过 MCP 工具使用时无需手动转换：`prepare_session` 传入 `.vcd` 会自动走 ① 的转换路径。
 
+**转换产物放在哪**：转出的 FST 和原波形放在同一目录，文件名相同只换扩展名（`sim/dump.vcd` → `sim/dump.fst`，FSDB 另有 `dump.fst.hier`）。旁边已经有 FST（不管是你手动转的还是之前自动转的），只要不比原波形旧就直接用，不再重转；比原波形旧或打不开就覆盖。三种情况会改放到 `~/.wave-mcp/cache/fst/`（受 `WAVE_MCP_CACHE_ROOT` 影响）并在返回里说明原因和位置：原波形目录不可写、带 `scopes`/`signals_file` 的部分转换（不占用完整波形的文件名）、目录仍不可写时复用缓存里那份。
+
 ---
 
 ## 工具（37 个，12 大类）
 
 | 类别 | 工具 | 说明 |
 | --- | --- | --- |
-| 波形准备 | `prepare_session` / `open_static_session` / `convert_vcd_to_fst` / `convert_fsdb_to_fst` | 波形入口 → session 一条龙（`.fst` / `.fsdb` / `.vcd` 自动识别，转换带缓存）；静态分析无需波形；不跑仿真器 |
+| 波形准备 | `prepare_session` / `open_static_session` / `convert_vcd_to_fst` / `convert_fsdb_to_fst` | 波形入口 → session 一条龙（`.fst` / `.fsdb` / `.vcd` 自动识别，转出的 FST 放原波形旁边并复用）；静态分析无需波形；不跑仿真器 |
 | 会话管理 | `open_session` / `close_session` / `session_info` | `session_info` 含 netlist_health + definition_coverage |
 | 查询默认值 | `query_defaults_set` / `query_defaults_get` / `query_defaults_clear` | 按会话设定默认信号与时间窗；显式参数始终优先，用到默认值的回复在 `_query.from_defaults` 里列出继承项；带 `defaults_revision` 可钉住一版，被改动则报 `defaults_conflict` |
 | 层次探索 | `find_instances` / `list_modules` / `scope_info` | 模块定义名三层解析：网表 → 命名推断 → 手工 scope_map |
@@ -304,7 +306,7 @@ wave-view sim.vcd
 ```
 
 - 命令行打印 URL；桌面环境自动开浏览器，SSH/code agent 场景 IDE 终端自动转发端口点开即看。
-- 波形格式：`.fst` 直接打开，`.vcd` / `.fsdb` 自动转成 FST，转换产物带缓存并与 `prepare_session` 共用，同一个波形先分析后看图还是先看图后分析都只转一次。其他格式在入口直接报错并列出支持的扩展名。
+- 波形格式：`.fst` 直接打开，`.vcd` / `.fsdb` 自动转成 FST，转出的 FST 放在原波形旁边并与 `prepare_session` 共用，同一个波形先分析后看图还是先看图后分析都只转一次，手动转好放在旁边的也直接用。其他格式在入口直接报错并列出支持的扩展名。
 - agent 典型闭环：case 挂了 → `diff_waveforms([pass, fail])` 定位首分歧 → `signal_fanin` 回溯根因 → `open_wave_view` 双波形 + 分歧 marker + 分析说明弹窗一次呈现。
 - 分析说明是可收起的 log 弹窗，说明里的时刻引用（如 `[85000ps](#t=85000ps)`）点击即跳游标，游标/视口/marker 更新为无闪刷新。
 - 完整指南（MCP 工具参数、调试工作流、架构原理、部署与排障）见 [`docs/WAVE_VIEWER.md`](docs/WAVE_VIEWER.md)。
@@ -384,8 +386,10 @@ wave-view sim.vcd
 | 变量 | 要配吗 | 作用 | 默认值 |
 | --- | --- | --- | --- |
 | `VERDI_HOME` | 读 `.fsdb` 时必配 | Verdi **安装根目录**（不是可执行文件所在的 `bin/`）。程序在其下找 `share/FsdbReader/linux64`，用法与排错见 [FSDB 波形接入指南](docs/FSDB_GUIDE.md) | 空。不配则 FSDB 输入不可用，其余功能正常 |
-| `WAVE_MCP_SESSION_ROOT` | 不用配 | 不传 `out_dir` 时 session 的落点根目录，目录名取自输入的身份摘要，同一份 RTL 不论从哪调用都落到同一处、复用同一份网表。传了 `out_dir` 就按传入值原样使用，不改写 | `~/.wave-mcp/sessions` |
-| `WAVE_MCP_CACHE_ROOT` | 不用配 | 派生缓存根目录：VCD/FSDB 转出的 `.fst`、网表 msgpack 缓存、`fsdb2fst` 构建产物、viewer 资产。缓存永远不写到源波形旁边，删掉只是下次慢 | `~/.wave-mcp/cache` |
+| `WAVE_MCP_SESSION_ROOT` | HOME 有配额时建议配 | 不传 `out_dir` 时 session 的落点根目录，目录名取自输入的身份摘要，同一份 RTL 不论从哪调用都落到同一处、复用同一份网表。传了 `out_dir` 就按传入值原样使用，不改写。芯片级设计的网表可达数百 MB，HOME 在 NFS 且有配额时指向本地大盘 | `~/.wave-mcp/sessions` |
+| `WAVE_MCP_CACHE_ROOT` | HOME 有配额时建议配 | 派生缓存根目录：落不到原波形旁的 `.fst`（目录不可写或部分转换）、网表按模块索引（大小与网表相当）、`fsdb2fst` 构建产物、viewer 资产。完整转换的 FST 放在原波形旁边，不在这里；缓存删掉只是下次慢 | `~/.wave-mcp/cache` |
+| `WAVE_MCP_LINT_CODES` | 不用配 | 逗号分隔的 slang 诊断码，追加到"按 lint 计、不降 trust"的内置列表（`MissingTimeScale`、`NewlineEOF` 等）。只对 slang 报为 error 的码生效，`WidthTruncate` 这类 warning 本来就不计入 errors，写进来没有作用 | 空 |
+| `WAVE_MCP_LAZY_NETLIST` | 不用配 | 网表按模块懒加载：`1` 强制开启，`0` 关闭 | 空。网表 ≥ 8 MB 时自动开启 |
 | `WAVE_MCP_VIEWER_PORT_BASE` | 多人共用主机建议配 | 把视图端口限制在 `[base, base+64)`，便于固定一条 `ssh -L` 转发规则；每人分一段互不重叠 | 空。每次随机取高位端口 |
 | `NOVAS_HOME` | 不用配 | 同 `VERDI_HOME`，仅为老版本 Verdi 保留；两个都设时优先用 `VERDI_HOME` | 空 |
 | `FSDB2FST_FREADER` | 不用配 | 直接指向拷来的 `share/FsdbReader` 目录，用于只拷了运行库、没装完整 Verdi 的机器 | 空。自动读 `VERDI_HOME` / `NOVAS_HOME` |
@@ -408,6 +412,15 @@ wave-view sim.vcd
 `WAVE_MCP_SESSION_ROOT` 下以输入身份命名的目录里，同一份 RTL 的静态分析和波形分析自动共用一份网表，
 不依赖 Agent 记住任何约定。只有 session 目录必须放在特定位置（例如和 testbench 一起入库）时才传 `out_dir`，
 传了就原样使用。
+
+**filelist 里的环境变量**：MCP server 由 IDE 拉起，不经过项目的 `cshrc`/`bashrc`。filelist 用到的
+`$PROJ_ROOT` 之类变量要写进上面 `env` 块，否则对应条目会被跳过。跳过的条目会列在
+`netlist_health.dropped_entries` / `undefined_env_vars` 和 `warnings` 里，`trust` 降为 `partial`，
+这时"找不到驱动"不能当作设计结论。
+
+**磁盘回收**：`wave-mcp gc` 列出 session 与缓存占用；`wave-mcp gc --older-than 30 --apply` 删除 30 天未打开的，
+`wave-mcp gc --max-size 20G --apply` 按最久未用删到总量不超过 20G。不加 `--apply` 只预览。只清理上面两个根目录，
+显式传了 `out_dir` 的 session 不会被动。
 
 ## FAQ
 

@@ -77,7 +77,7 @@ wave-view sim.vcd
 | `--labels` | 每个波形的显示标签，对比视图建议 `pass fail` |
 | `--no-browser` | 不尝试本机拉起浏览器 |
 
-转换产物带缓存，和 `prepare_session` 共用同一份 FST：同一个波形不管是先分析后看图，还是先看图后分析，都只转一次。缓存统一落在 `~/.wave-mcp/cache/fst/`（受 `WAVE_MCP_CACHE_ROOT` 影响），不写源文件目录，只读的回归目录也能用。GB 级 FSDB 转换耗时以分钟计，命中缓存则是秒级。
+转出的 FST 放在原波形旁边（`dump.vcd` → `dump.fst`），和 `prepare_session` 共用同一份：同一个波形不管是先分析后看图，还是先看图后分析，都只转一次，手动转好放在旁边的也直接用。原波形目录不可写（例如只读的回归目录）时改放 `~/.wave-mcp/cache/fst/`（受 `WAVE_MCP_CACHE_ROOT` 影响），`open_wave_view` 会在 `warnings` 里说明。GB 级 FSDB 转换耗时以分钟计，直接复用则是秒级。
 
 `.fst` / `.vcd` / `.fsdb` 以外的格式（如 `.ghw`、`.vpd`、SHM 目录）会在入口直接报错并列出支持的扩展名，不会落到转换器里报一个指向错误方向的问题。
 
@@ -318,7 +318,7 @@ export WAVE_MCP_VIEWER_PORT_BASE=45400   # 占用 45400-45463
 export WAVE_MCP_VIEWER_PORT_BASE=45500   # 占用 45500-45563
 ```
 
-另有两点值得注意。一是转换缓存写在每个用户自己的 `~/.wave-mcp/cache/` 下，不写源波形目录，所以多人分析同一份回归波形时各转一份；想共享一份产物，把 `WAVE_MCP_CACHE_ROOT` 指到同一个可写目录即可，同键并发转换只会构建一次。二是 `WAVE_MCP_MAX_VIEWS` 是每进程的上限，不是整机上限，机器上同时有几个人在用时，留意总的浏览器与 surver 进程数。
+另有两点值得注意。一是转出的 FST 放在原波形旁边，多人分析同一份波形时共用这一份，同时触发的转换只会构建一次；原波形在只读目录时各人回退到自己的 `~/.wave-mcp/cache/`，想在这种情况下也共享，把 `WAVE_MCP_CACHE_ROOT` 指到同一个可写目录即可。二是 `WAVE_MCP_MAX_VIEWS` 是每进程的上限，不是整机上限，机器上同时有几个人在用时，留意总的浏览器与 surver 进程数。
 
 如果你要的是"主机起一个 server、把链接分发给其他人连"，当前版本还不支持，viewer 只绑回环。这个形态在规划中。
 

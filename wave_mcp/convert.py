@@ -28,19 +28,22 @@ runtime is reachable (``$VERDI_HOME`` / ``$NOVAS_HOME`` / ``$FSDB2FST_FREADER``)
 the converter is **built on demand** into the user cache, so setting
 ``VERDI_HOME`` in the MCP config is the only setup step a user has to do.
 
-Both conversions share one **artifact cache** (``cached_fst``): a converted FST
-is reused as long as the source waveform's (path, mtime, size) and the slicing
-options are unchanged. FSDB files are routinely GB-scale and take minutes to
-convert, so without this every prepare_session on the same waveform would pay
-the full cost again.
+Both conversions share one placement rule (``cached_fst``): the FST lives
+beside its source as ``<name>.fst`` and is reused from there, including one the
+user converted by hand, until the source changes. Partial conversions and
+unwritable source directories use the derived cache instead. FSDB files are
+routinely GB-scale and take minutes to convert, so without reuse every
+prepare_session on the same waveform would pay the full cost again.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
 import sys
 import signal
+import socket
 import subprocess
 import tempfile
 import time
@@ -338,6 +341,7 @@ def _run_with_heartbeat(cmd: List[str], fst_path: str, timeout: float,
         # reaches other converters or viewers on the host.
         proc = subprocess.Popen(cmd, stdout=buf, stderr=subprocess.STDOUT,
                                 stdin=subprocess.DEVNULL, start_new_session=True)
+        _ACTIVE.add(proc)
         start = time.time()
         last_size = _bytes_of(fst_path)
         last_growth = start
@@ -375,13 +379,64 @@ def _run_with_heartbeat(cmd: List[str], fst_path: str, timeout: float,
                         f"{last_size / 1e6:.1f} MB). The converter may have "
                         f"hit an internal error or unresponsive I/O; re-run it "
                         f"by hand to see its own diagnostics.")
+                elif now - last_emit >= _HEARTBEAT_INTERVAL:
+                    # no growth this round: still say we are alive, and how
+                    # long until the cap, so a slow read phase is not silent
+                    _emit(f"[wave-mcp] {kind} conversion running "
+                          f"({now - start:.0f}s elapsed, "
+                          f"{last_size / 1e6:.1f} MB written, pid "
+                          f"{proc.pid}"
+                          f"{f', timeout {timeout:.0f}s' if timeout else ''})")
+                    last_emit = now
                 time.sleep(interval)
                 interval = min(interval * 1.5, 5.0)
         finally:
             if proc.poll() is None:
                 _kill_own_tree(proc)
+            _ACTIVE.discard(proc)
         buf.seek(0)
         return proc.returncode, (buf.read() or "")
+
+
+#: converters started by this process and not yet finished. The converter runs
+#: in its own session so a stall kill reaches only its tree, which also means
+#: the kernel does not stop it when this process dies: whoever ends the process
+#: calls :func:`stop_active_conversions` first.
+_ACTIVE: "set[subprocess.Popen[Any]]" = set()
+
+
+def stop_active_conversions() -> int:
+    """Terminate every converter this process started; returns how many."""
+    procs = [p for p in list(_ACTIVE) if p.poll() is None]
+    for p in procs:
+        _kill_own_tree(p, grace=1.0)
+    _ACTIVE.clear()
+    return len(procs)
+
+
+def install_exit_handlers() -> None:
+    """Stop running converters on SIGTERM/SIGHUP/SIGINT and at exit.
+
+    For the CLI entry points; the MCP server calls
+    :func:`stop_active_conversions` from its own shutdown handler. Without
+    this, ``timeout`` or a closed terminal kills wave-mcp but leaves the
+    converter running, still writing a hidden temporary file beside the
+    source.
+    """
+    import atexit
+    atexit.register(stop_active_conversions)
+
+    def _stop(signum, _frame):
+        stop_active_conversions()
+        signal.signal(signum, signal.SIG_DFL)
+        os.kill(os.getpid(), signum)
+
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        try:
+            if signal.getsignal(sig) in (signal.SIG_DFL, None):
+                signal.signal(sig, _stop)
+        except (ValueError, OSError):
+            pass
 
 
 def _kill_own_tree(proc: "subprocess.Popen[Any]", grace: float = 2.0) -> None:
@@ -417,17 +472,21 @@ def _kill_own_tree(proc: "subprocess.Popen[Any]", grace: float = 2.0) -> None:
 
 
 def _default_out_path(source: str) -> str:
-    """Default conversion target for the on-request convert tools.
+    """Conversion target when a library caller passes no output path.
 
-    Always the derived-cache layer (same place the automatic ``cached_fst``
-    conversions live), never next to the input: the CHANGELOG promises that
-    derived artefacts are not written into input directories, and regression
-    areas are often shared or read-only anyway. Pass an explicit ``fst_path``
-    to place the output anywhere else.
+    ``<name>.fst`` beside the source, like the automatic conversions, or the
+    source's cache directory when that directory is not writable. The MCP
+    tools and CLIs go through :func:`default_fst` instead, which also records
+    the conversion and reports the placement.
     """
-    cache_dir = storage.policy().cache_dir("fst", source, "on-request")
-    return os.path.join(
-        cache_dir, os.path.splitext(os.path.basename(source))[0] + ".fst")
+    target = beside_path(source)
+    if _dir_writable(os.path.dirname(target)) is None:
+        return target
+    kind = "fsdb" if source.lower().endswith(".fsdb") else "vcd"
+    opts = _opts_for(kind, default_pack(kind), None, None)
+    cache_dir = storage.policy().cache_dir("fst", source,
+                                           json.dumps(opts, sort_keys=True))
+    return os.path.join(cache_dir, os.path.basename(target))
 
 
 def convert(vcd_path: str, fst_path: Optional[str] = None, pack: str = "fastlz",
@@ -983,17 +1042,35 @@ def fsdb_info(fsdb_path: str, timeout: Optional[float] = 600) -> dict:
 
 
 # =============================================================================
-# Shared artifact cache (VCD and FSDB)
+# Converted FST placement and reuse (VCD and FSDB)
 # =============================================================================
 #
-# The cache keys on the source waveform's identity (path, mtime, size) *and* the
-# conversion options. Options must be part of the key: the same FSDB sliced with
-# -l u_core yields an FST holding only that subtree, so keying on the file alone
-# would reuse a partial FST when the slice changes and hand back a session with
-# missing signals and no warning.
+# Users keep a converted waveform next to its source, whether they ran the
+# converter by hand or a tool did it for them, so that is where wave-mcp looks
+# first and where it writes by default: ``<dir>/<name>.vcd`` pairs with
+# ``<dir>/<name>.fst`` (FSDB adds ``<name>.fst.hier``). Three cases depart
+# from "reuse or write beside silently", and each returns a ``notice`` that
+# says what happened, why, and where the FST is:
+#
+#   * the source directory is not writable (or writing there fails): the
+#     FST goes to the derived-cache layer and the source dir is untouched;
+#   * the conversion is partial (``scopes`` / ``signals_file``): a slice must
+#     not take the name every later caller reads as the full waveform, so it
+#     goes to the cache as well;
+#   * an FST beside the source is stale (older than the source, changed since
+#     we wrote it, missing its ``.hier``, or unreadable): it is overwritten,
+#     whoever wrote it, the same way a re-simulation overwrites the dump.
+#
+# Only the ``.fst`` (and ``.hier``) land beside the source. The conversion
+# record and the lock live in the cache, keyed by the target path, so the
+# source directory never gains bookkeeping files. A beside FST is reused when
+# its record matches the current source version, or, lacking a record of its
+# own (converted by hand), when it is not older than the source and opens.
 
-#: Conversion record stored beside a cached FST.
+#: Conversion record stored with a cached FST (cache placement).
 _CACHE_RECORD = "conversion.json"
+#: Record for an FST placed beside its source, kept in the cache.
+_BESIDE_RECORD = "beside.json"
 #: Bump when the converted output changes for the same input and options.
 _CONVERT_TOOL_VERSION = 2
 
@@ -1004,6 +1081,23 @@ def _conversion_record(src: str, opts: dict) -> dict:
             "options": opts, "tool_version": _CONVERT_TOOL_VERSION}
 
 
+def _lock_wait(source: str, kind: str, timeout: Optional[float]) -> float:
+    """How long to wait for another process converting the same waveform.
+
+    That holder is itself bounded by the conversion timeout, so waiting one
+    conversion's worth plus a margin covers a healthy holder; past it the
+    holder is stuck (or the lock is, on a network filesystem) and the call
+    fails with the holder named instead of hanging.
+    """
+    if timeout:
+        return float(timeout) + 120.0
+    try:
+        size = os.path.getsize(source)
+    except OSError:
+        size = 0
+    return _estimate_timeout(size, kind) + 120.0
+
+
 def _artifact_ok(fst_path: str, need_hier: bool) -> bool:
     if not os.path.exists(fst_path):
         return False
@@ -1012,15 +1106,22 @@ def _artifact_ok(fst_path: str, need_hier: bool) -> bool:
     return True
 
 
+def _read_json(path: str) -> Optional[dict]:
+    try:
+        with open(path) as fh:
+            got = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    return got if isinstance(got, dict) else None
+
+
 def _cache_hit(fst_path: str, record_path: str, want: dict,
                need_hier: bool) -> Optional[dict]:
     """The stored conversion detail when the cached FST matches ``want``."""
     if not (_artifact_ok(fst_path, need_hier) and os.path.exists(record_path)):
         return None
-    try:
-        with open(record_path) as fh:
-            have = json.load(fh)
-    except (OSError, ValueError):
+    have = _read_json(record_path)
+    if have is None:
         return None  # unreadable/corrupt record: reconvert
     # compare only the identity fields: the record also carries a "detail"
     # blob, so comparing whole dicts would never match.
@@ -1029,37 +1130,166 @@ def _cache_hit(fst_path: str, record_path: str, want: dict,
     return None
 
 
-def cached_fst(source: str, *, kind: str,
-               scopes: Optional[List[str]] = None,
-               signals_file: Optional[str] = None,
-               pack: Optional[str] = None,
-               timeout: Optional[float] = None) -> dict:
-    """Convert ``source`` to FST, reusing a previous artifact when still valid.
+def beside_path(source: str) -> str:
+    """The FST that belongs next to ``source``: same directory and stem."""
+    return os.path.splitext(os.path.abspath(source))[0] + ".fst"
 
-    ``kind`` is ``"fsdb"`` or ``"vcd"``. The artifact lives in the derived-cache
-    layer under ``fst/<digest of source path + options>/``, never next to the
-    source: regression areas are shared and often read-only, and a converted
-    file beside somebody's dump is a surprise. Every session on that waveform
-    finds the same directory, and a lock inside it makes two concurrent
-    callers build once and wait once.
 
-    The cache key is the *path* plus options; the record inside carries the
-    source ``file_version``, so a re-dump of the same path invalidates the
-    cache while a rename of the source yields a fresh conversion.
+def _fst_opens(fst_path: str) -> bool:
+    """Whether the FST reader accepts the file (header and hierarchy reachable)."""
+    try:
+        from pylibfst import ffi, lib
+    except ImportError:  # pragma: no cover - hard dependency
+        return True
+    ctx = lib.fstReaderOpen(fst_path.encode())
+    if ctx == ffi.NULL:
+        return False
+    lib.fstReaderClose(ctx)
+    return True
 
-    Returns a dict with ``fst_path``, ``cached`` (bool), ``cache_dir`` and the
-    underlying conversion detail, ready to drop into a pipeline step.
+
+def _dir_writable(directory: str) -> Optional[str]:
+    """``None`` when files can be created in ``directory``, else the reason."""
+    if not os.path.isdir(directory):
+        return "directory does not exist"
+    if not os.access(directory, os.W_OK | os.X_OK):
+        return "no write permission"
+    try:
+        fd, probe = tempfile.mkstemp(prefix=".wave-mcp-probe-", dir=directory)
+    except OSError as exc:
+        return exc.strerror or str(exc)
+    os.close(fd)
+    with contextlib.suppress(OSError):
+        os.remove(probe)
+    return None
+
+
+def _beside_state(source: str, target: str, kind: str,
+                  record_path: str) -> tuple:
+    """Classify the FST beside ``source``: ``(state, detail)``.
+
+    ``state`` is ``"absent"``, ``"hit"`` (reuse), ``"hand"`` (reuse, no record
+    of ours: converted by hand or by an older wave-mcp) or ``"stale"`` with a
+    human-readable reason in ``detail``.
     """
-    source = os.path.abspath(source)
-    if not os.path.exists(source):
-        raise ConversionError(f"{kind.upper()} not found: {source}")
+    need_hier = (kind == "fsdb")
+    if not os.path.exists(target):
+        return "absent", {}
+    if need_hier and not os.path.exists(target + ".hier"):
+        return "stale", {"reason": f"{os.path.basename(target)}.hier is missing"}
+    rec = _read_json(record_path)
+    if rec and rec.get("target_version") == file_version(target):
+        # the file is still the one we wrote: our record decides
+        if (rec.get("source") == source
+                and rec.get("source_version") == file_version(source)
+                and rec.get("tool_version") == _CONVERT_TOOL_VERSION):
+            if _fst_opens(target):
+                return "hit", rec.get("detail", {})
+            return "stale", {"reason": "the FST cannot be opened"}
+        return "stale", {"reason": "the source waveform changed since it "
+                                   "was converted"}
+    try:
+        newer = os.stat(target).st_mtime_ns >= os.stat(source).st_mtime_ns
+    except OSError:
+        newer = False
+    if not newer:
+        return "stale", {"reason": "it is older than the source waveform"}
+    if not _fst_opens(target):
+        return "stale", {"reason": "the FST cannot be opened"}
+    return "hand", {}
 
-    pack = pack or default_pack(kind)
+
+def _run_converter(source: str, out: str, kind: str, *, pack: str,
+                   scopes: Optional[List[str]], signals_file: Optional[str],
+                   timeout: Optional[float]) -> dict:
+    if kind == "fsdb":
+        return convert_fsdb(source, out, scopes=scopes,
+                            signals_file=signals_file, pack=pack,
+                            timeout=timeout).to_dict()
+    return convert(source, out, pack=pack, timeout=timeout).to_dict()
+
+
+def _tmp_prefix(target: str) -> str:
+    return os.path.join(os.path.dirname(target),
+                        f".{os.path.basename(target)}.wave-mcp-")
+
+
+def _sweep_dead_tmp(target: str) -> None:
+    """Remove hidden temporaries a killed conversion left beside ``target``.
+
+    Only this host's, and only when the pid in the name is gone: a live
+    process (or one on another host sharing the directory) may still be
+    writing its own. Called with the target's lock held.
+    """
+    prefix = _tmp_prefix(target)
+    base = os.path.basename(prefix)
+    mine = f"{socket.gethostname()}-"
+    try:
+        names = os.listdir(os.path.dirname(target))
+    except OSError:
+        return
+    for name in names:
+        if not name.startswith(base):
+            continue
+        rest = name[len(base):]
+        if not rest.startswith(mine):
+            continue
+        pid = rest[len(mine):].split(".", 1)[0]
+        if not pid.isdigit() or _pid_alive(int(pid)):
+            continue
+        with contextlib.suppress(OSError):
+            os.remove(os.path.join(os.path.dirname(target), name))
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
+def _convert_beside(source: str, target: str, kind: str, *, pack: str,
+                    timeout: Optional[float]) -> dict:
+    """Convert under a hidden temporary name in the target directory, then
+    rename into place so no reader ever sees a half-written FST."""
+    _sweep_dead_tmp(target)
+    tmp = (f"{_tmp_prefix(target)}{socket.gethostname()}-{os.getpid()}"
+           f".tmp.fst")
+    leftovers = (tmp, tmp + ".hier")
+    try:
+        res = _run_converter(source, tmp, kind, pack=pack, scopes=None,
+                             signals_file=None, timeout=timeout)
+        if kind == "fsdb":
+            os.replace(tmp + ".hier", target + ".hier")
+        os.replace(tmp, target)
+    finally:
+        for p in leftovers:
+            with contextlib.suppress(OSError):
+                os.remove(p)
+    res["fst_path"] = target
+    try:
+        res["fst_bytes"] = os.path.getsize(target)
+    except OSError:
+        pass
+    return res
+
+
+def _opts_for(kind: str, pack: str, scopes: Optional[List[str]],
+              signals_file: Optional[str]) -> dict:
     opts = {"kind": kind, "pack": pack}
     if kind == "fsdb":
         opts.update(scopes=sorted(scopes or []),
                     signals_file=os.path.abspath(signals_file) if signals_file else None)
+    return opts
 
+
+def _in_cache(source: str, kind: str, opts: dict, *,
+              scopes: Optional[List[str]], signals_file: Optional[str],
+              timeout: Optional[float], force: bool) -> dict:
+    """Cache placement: ``fst/<digest of source path + options>/<name>.fst``."""
     pol = storage.policy()
     cache_dir = pol.cache_dir("fst", source, json.dumps(opts, sort_keys=True))
     base = os.path.splitext(os.path.basename(source))[0]
@@ -1068,26 +1298,25 @@ def cached_fst(source: str, *, kind: str,
     need_hier = (kind == "fsdb")
     want = _conversion_record(source, opts)
 
-    detail = _cache_hit(fst_path, record_path, want, need_hier)
-    if detail is not None:
-        return {"fst_path": fst_path, "cached": True,
-                "cache_dir": cache_dir, "detail": detail}
-
-    with pol.locked(cache_dir):
-        # Somebody may have finished this exact conversion while we waited.
+    if not force:
         detail = _cache_hit(fst_path, record_path, want, need_hier)
         if detail is not None:
             return {"fst_path": fst_path, "cached": True,
                     "cache_dir": cache_dir, "detail": detail}
+    with pol.locked(cache_dir, what=f"another conversion of {source}",
+                    wait=_lock_wait(source, kind, timeout)):
+        if not force:
+            # Somebody may have finished this exact conversion while we waited.
+            detail = _cache_hit(fst_path, record_path, want, need_hier)
+            if detail is not None:
+                return {"fst_path": fst_path, "cached": True,
+                        "cache_dir": cache_dir, "detail": detail}
         # A stale or corrupt artifact is replaced, not reported.
         for stale in (fst_path, fst_path + ".hier", record_path):
             StoragePolicy.discard(stale)
-        if kind == "fsdb":
-            res = convert_fsdb(source, fst_path, scopes=scopes,
-                               signals_file=signals_file, pack=pack,
-                               timeout=timeout).to_dict()
-        else:
-            res = convert(source, fst_path, pack=pack, timeout=timeout).to_dict()
+        res = _run_converter(source, fst_path, kind, pack=opts["pack"],
+                             scopes=scopes, signals_file=signals_file,
+                             timeout=timeout)
         record = dict(want)
         record["detail"] = res
         try:
@@ -1098,6 +1327,152 @@ def cached_fst(source: str, *, kind: str,
     return {"fst_path": fst_path, "cached": False,
             "cache_dir": cache_dir, "detail": res}
 
+
+def _slice_desc(scopes: Optional[List[str]], signals_file: Optional[str]) -> str:
+    parts = []
+    if scopes:
+        parts.append(f"scopes={list(scopes)}")
+    if signals_file:
+        parts.append(f"signals_file={os.path.abspath(signals_file)}")
+    return ", ".join(parts)
+
+
+def cached_fst(source: str, *, kind: str,
+               scopes: Optional[List[str]] = None,
+               signals_file: Optional[str] = None,
+               pack: Optional[str] = None,
+               timeout: Optional[float] = None,
+               force: bool = False) -> dict:
+    """See :func:`_cached_fst`; a lock that never frees is a ConversionError."""
+    try:
+        return _cached_fst(source, kind=kind, scopes=scopes,
+                           signals_file=signals_file, pack=pack,
+                           timeout=timeout, force=force)
+    except storage.LockBusy as exc:
+        raise ConversionError(str(exc)) from exc
+
+
+def _cached_fst(source: str, *, kind: str,
+                scopes: Optional[List[str]] = None,
+                signals_file: Optional[str] = None,
+                pack: Optional[str] = None,
+                timeout: Optional[float] = None,
+                force: bool = False) -> dict:
+    """Give ``source`` an FST, reusing a valid one and converting otherwise.
+
+    ``kind`` is ``"fsdb"`` or ``"vcd"``. A full conversion lives beside the
+    source as ``<name>.fst`` (see the section comment above); partial
+    conversions and unwritable source directories fall back to the cache.
+    ``force=True`` skips reuse and always converts (the explicit convert
+    tools), still into the same place so later sessions pick it up.
+
+    Returns ``fst_path``, ``cached`` (reused without converting),
+    ``placement`` (``"beside"`` / ``"cache"``), ``notice`` (why the FST is
+    where it is, or what was replaced; ``None`` when nothing needs saying),
+    ``cache_dir`` for cache placements and the conversion ``detail``.
+    """
+    source = os.path.abspath(source)
+    if not os.path.exists(source):
+        raise ConversionError(f"{kind.upper()} not found: {source}")
+    pack = pack or default_pack(kind)
+    opts = _opts_for(kind, pack, scopes, signals_file)
+    target = beside_path(source)
+    need_hier = (kind == "fsdb")
+
+    # -- partial conversion: never under the full-waveform name ------------
+    if scopes or signals_file:
+        got = _in_cache(source, kind, opts, scopes=scopes,
+                        signals_file=signals_file, timeout=timeout, force=force)
+        got["placement"] = "cache"
+        got["notice"] = (
+            f"Partial conversion ({_slice_desc(scopes, signals_file)}) was "
+            f"placed in the wave-mcp cache at {got['fst_path']}, not at "
+            f"{target}: that name is reserved for the full waveform, which "
+            f"later sessions and viewers pick up automatically. Convert "
+            f"without scopes / signals_file to get the full waveform at "
+            f"{target}, or pass an explicit out_path to keep this slice "
+            f"elsewhere.")
+        return got
+
+    pol = storage.policy()
+    rec_dir = pol.cache_dir("fst", "beside", target)
+    record_path = os.path.join(rec_dir, _BESIDE_RECORD)
+
+    if not force:
+        state, info = _beside_state(source, target, kind, record_path)
+        if state in ("hit", "hand"):
+            return {"fst_path": target, "cached": True, "placement": "beside",
+                    "notice": None, "detail": info,
+                    "reused_by_hand": state == "hand"}
+
+    blocked = _dir_writable(os.path.dirname(source))
+    if blocked is None:
+        with pol.locked(rec_dir, what=f"another conversion of {source}",
+                        wait=_lock_wait(source, kind, timeout)):
+            state, info = _beside_state(source, target, kind, record_path)
+            if state in ("hit", "hand") and not force:
+                return {"fst_path": target, "cached": True,
+                        "placement": "beside", "notice": None, "detail": info,
+                        "reused_by_hand": state == "hand"}
+            notice = None
+            if state == "stale":
+                notice = (f"Replaced the existing {target}"
+                          f"{' (+ .hier)' if need_hier else ''}: "
+                          f"{info.get('reason')}. To keep such a file, "
+                          f"rename it before converting, or convert to "
+                          f"another name with out_path (CLI: --fst).")
+            elif state in ("hit", "hand"):
+                notice = (f"Replaced the existing {target}"
+                          f"{' (+ .hier)' if need_hier else ''}: a conversion "
+                          f"was requested explicitly. Pass out_path (CLI: "
+                          f"--fst) to write elsewhere instead.")
+            try:
+                res = _convert_beside(source, target, kind, pack=pack,
+                                      timeout=timeout)
+            except OSError as exc:
+                blocked = (f"writing there failed "
+                           f"({exc.strerror or exc})")
+            else:
+                record = _conversion_record(source, opts)
+                record["target"] = target
+                record["target_version"] = file_version(target)
+                record["detail"] = res
+                try:
+                    StoragePolicy.atomic_write_bytes(
+                        record_path, json.dumps(record, indent=2).encode())
+                except OSError:
+                    pass
+                return {"fst_path": target, "cached": False,
+                        "placement": "beside", "notice": notice,
+                        "detail": res}
+
+    # -- source directory unwritable: cache fallback -----------------------
+    got = _in_cache(source, kind, opts, scopes=None, signals_file=None,
+                    timeout=timeout, force=force)
+    got["placement"] = "cache"
+    verb = "Reused the FST" if got["cached"] else "Converted FST was placed"
+    got["notice"] = (
+        f"{verb} in the wave-mcp cache at {got['fst_path']} because "
+        f"{os.path.dirname(source)} is not writable ({blocked}); the usual "
+        f"place, {target}, was left untouched. Make the directory writable "
+        f"to keep the FST beside the source, or set WAVE_MCP_CACHE_ROOT to "
+        f"move the cache.")
+    return got
+
+
+def default_fst(source: str, *, kind: str,
+                scopes: Optional[List[str]] = None,
+                signals_file: Optional[str] = None,
+                pack: Optional[str] = None,
+                timeout: Optional[float] = None) -> dict:
+    """Default output of the explicit convert tools (no ``out_path`` given).
+
+    Always converts, into the same place ``cached_fst`` reads from, so the
+    result is reused by every later session and viewer on that waveform.
+    """
+    return cached_fst(source, kind=kind, scopes=scopes,
+                      signals_file=signals_file, pack=pack, timeout=timeout,
+                      force=True)
 
 def default_pack(kind: str) -> str:
     """Default compressor per converter: fastlz for vcd2fst, lz4 for fsdb2fst.
@@ -1129,7 +1504,8 @@ def resolve_waveform(path: str, *,
     callers must not vary them, since the conversion options are part of the
     cache key and a mismatch silently forces a second conversion.
 
-    Returns ``{fst_path, kind, converted, cached, source}``.
+    Returns ``{fst_path, kind, converted, cached, source, placement,
+    notice}``; ``notice`` explains a cache placement or an overwritten FST.
     """
     source = os.path.abspath(path)
     kind = waveform_kind(source)
@@ -1143,4 +1519,5 @@ def resolve_waveform(path: str, *,
         pack=pack, timeout=timeout)
     return {"fst_path": got["fst_path"], "kind": kind, "converted": True,
             "cached": bool(got.get("cached")), "source": source,
+            "placement": got.get("placement"), "notice": got.get("notice"),
             "cache_dir": got.get("cache_dir"), "detail": got.get("detail", {})}

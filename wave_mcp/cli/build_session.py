@@ -66,8 +66,10 @@ def _resolve_vcd(args, p) -> None:
             convert.ConversionError) as exc:
         p.error(str(exc))
     detail = got.get("detail") or {}
+    if got.get("notice"):
+        print(f"[note] {got['notice']}")
     if got.get("cached"):
-        print(f"[ok] reused cached FST -> {got['fst_path']}")
+        print(f"[ok] reused existing FST -> {got['fst_path']}")
     else:
         elapsed = detail.get("elapsed_sec")
         ratio = detail.get("compression_ratio")
@@ -144,6 +146,8 @@ def _run_wave(args, p) -> int:
 
 
 def main(argv=None):
+    from .. import convert
+    convert.install_exit_handlers()
     p = argparse.ArgumentParser(description="Build a wave-mcp session directory")
     p.add_argument("--fst", help="FST waveform path (or use --vcd to convert)")
     p.add_argument("--vcd", help="waveform to convert to FST (.vcd / .fsdb); "

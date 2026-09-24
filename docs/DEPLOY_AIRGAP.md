@@ -24,12 +24,15 @@
 
 ### 1.0 推荐：Docker 一键流水线（构建侧容器化，交付物仍是 tarball）
 
-打包机只需要 docker（首轮需联网），一条命令产出完整发布矩阵：
+打包机只需要 docker（首轮需联网），一条命令产出完整发布矩阵。带独立 Python 时先生成与之配套的分发材料
+（许可文本、对应源码、逐字节比对清单），脚本会打印它下载并校验过的 install_only 包路径：
 
 ```bash
+python3 deploy/build_python_materials.py --out /path/to/python-materials
+
 deploy/docker_build_all.sh \
     --viewer /path/to/viewer-assets \      # 可选：Surfer WASM 资产目录
-    --python https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.11.16+20260901-x86_64-unknown-linux-gnu-install_only.tar.gz \
+    --python /path/to/cpython-3.11.16+20260901-x86_64-unknown-linux-gnu-install_only.tar.gz \
     --python-materials /path/to/python-materials   # 与该 Python 匹配的分发材料目录
 
 # 产物（dist/）：
@@ -65,15 +68,22 @@ tarball + `install.sh`。
 以下 1a~1c 为分步手工路径（不便使用 docker 或需单独重编某组件时参考）。
 
 ```bash
-# 1a. download a relocatable Python (python-build-standalone, install_only,
-#     x86_64-gnu, 3.11.x) from github.com/astral-sh/python-build-standalone
+# 1a. relocatable Python + its redistribution materials (network needed once;
+#     downloads are verified by SHA256 and cached)
+python3 deploy/build_python_materials.py --out /path/to/python-materials
 # 1b. optional: a glibc-2.28-compatible vcd2fst (see section 4)
 
 deploy/build_offline_bundle.sh \
     --out /tmp/wave-mcp-bundle \
-    --python /path/to/cpython-3.11.x-...-install_only.tar.gz \
-    --vcd2fst /path/to/glibc228/vcd2fst        # optional
+    --python /path/to/cpython-3.11.16+20260901-x86_64-unknown-linux-gnu-install_only.tar.gz \
+    --python-materials /path/to/python-materials \
+    --vcd2fst /path/to/glibc228/vcd2fst \          # optional
+    --vcd2fst-materials /path/to/vcd2fst-materials # required with --vcd2fst
 ```
+
+带 `--python` 就必须带配套的 `--python-materials`。三种选择：不带 `--python`，目标机用自带 python3（3.10 以上），
+不需要材料；与已发布离线包同一个 Python，直接复用那个包里的 `materials/python/`，无需联网；
+其余情况用上面的脚本生成，说明见 [PACKAGING_MATERIALS.md](PACKAGING_MATERIALS.md)。
 
 产物：`/tmp/wave-mcp-bundle/` 与 `/tmp/wave-mcp-bundle.tar.gz`。
 > 注意：生成 bundle 的机器**架构必须与目标一致(x86_64)**；wheel 是 cp311，故须搭配 3.11 的独立 Python。
@@ -94,7 +104,8 @@ deploy/build_offline_bundle.sh \
     --out /tmp/wave-mcp-bundle-el7 \
     --target-glibc 2.17 \
     --pyslang-wheel /tmp/pyslang-manylinux2014/pyslang-*.whl \
-    --python /path/to/cpython-3.11.x-...-install_only.tar.gz
+    --python /path/to/cpython-3.11.16+20260901-x86_64-unknown-linux-gnu-install_only.tar.gz \
+    --python-materials /path/to/python-materials
 ```
 
 > 独立 Python（python-build-standalone）本身最低要求 glibc 2.17，兼容 CentOS 7+，无需特殊处理。

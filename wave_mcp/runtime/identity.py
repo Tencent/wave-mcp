@@ -74,6 +74,12 @@ def dataset_identity(manifest: Dict[str, Any], base_dir: str) -> str:
         "filelist": manifest_filelist(base_dir, manifest),
         "scope_map": sorted((manifest.get("scope_map") or {}).items()),
     })
+    # what the filelist declared beyond the resolved files (dropped entries,
+    # -y/-v libraries): two inputs that resolve to the same files but declared
+    # different things are different designs. Absent on complete filelists,
+    # so their identity is unchanged.
+    if manifest.get("declared_inputs"):
+        payload["declared_inputs"] = manifest["declared_inputs"]
     return _digest(json.dumps(payload, sort_keys=True, default=str).encode())
 
 

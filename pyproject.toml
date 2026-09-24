@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wave-mcp"
-version = "1.0.1"
+version = "1.1.0"
 description = "Open-source, license-free MCP server for RTL waveform debug (FST + SystemVerilog static analysis), an Indago/Verisium Debug MCP alternative."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -33,10 +33,8 @@ dependencies = [
 # wave-mcp anymore (no PyPI assets package, no release attachment). Users
 # build them locally: see docs/SELF_BUILD.md. The former `viewer` extra is
 # removed so `pip install wave-mcp[viewer]` no longer pulls EUPL artifacts.
-# Optional: C-accelerated msgpack cache for large netlist maps.json files.
-# Speeds up session loading on multi-hundred-MB netlists; without it the
-# loader falls back to plain JSON automatically.
-perf = ["msgpack>=1.0"]
+# The former `perf` extra (msgpack) is removed too: large netlists open
+# through a standard-library per-module store, no optional accelerator.
 
 [project.urls]
 Homepage = "https://github.com/Tencent/wave-mcp"

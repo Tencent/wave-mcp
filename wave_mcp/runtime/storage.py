@@ -9,17 +9,22 @@ section 2):
                            otherwise ``<session_root>/<dataset identity>``, where
                            session_root is ``$WAVE_MCP_SESSION_ROOT`` |
                            ``~/.wave-mcp/sessions``
+    converted waveform  ``<dir>/<name>.fst`` (+ ``.fst.hier`` for FSDB) next to
+                        ``<dir>/<name>.vcd|.fsdb``, where users keep converted
+                        dumps anyway (``convert.cached_fst``, standard 2.8)
     derived caches      rebuildable from the inputs, losing them only costs time
-                        (converted ``.fst``, msgpack sidecars, built helpers)
+                        (FSTs that cannot sit beside their source, conversion
+                        records, netlist module stores, built helpers)
                         -> ``$WAVE_MCP_CACHE_ROOT`` | ``~/.wave-mcp/cache``
     temporary           lives for one call (FIFOs, logs, probes)
                         -> ``tempfile``; the caller deletes it
 
-Nothing else is a valid destination. In particular the directory an input file
-lives in is never written to: regression areas are shared and often read-only,
-and a derived artefact next to somebody's dump is a surprise they did not ask
-for. Cache writes are atomic (temp name, fsync, rename) and serialized per key
-with a lock file, so two processes converting the same waveform build it once.
+Nothing else is a valid destination. Beside an input only the converted FST
+itself may appear: its record and lock live in the cache, and it is written
+under a hidden temporary name then renamed. An unwritable source directory or
+a partial conversion sends the FST to the cache, with a notice. Cache writes
+are atomic (temp name, fsync, rename) and serialized per key with a lock file,
+so two processes converting the same waveform build it once.
 
 The two roots resolve the same way and mean the same thing: a default location
 for what the caller did not place explicitly. Neither rewrites a path the
@@ -34,7 +39,10 @@ import contextlib
 import errno
 import fcntl
 import os
+import socket
+import sys
 import tempfile
+import time
 from typing import Callable, Iterator, Optional
 
 from .identity import cache_key
@@ -143,18 +151,26 @@ class StoragePolicy:
         return d
 
     @contextlib.contextmanager
-    def locked(self, directory: str) -> Iterator[None]:
+    def locked(self, directory: str, *, what: str = "",
+               wait: Optional[float] = None) -> Iterator[None]:
         """Hold ``<directory>/.lock`` exclusively for the block.
 
-        Blocks until the lock is free rather than failing: the other holder is
-        building the very artefact this caller wants, so waiting and then
-        re-checking the cache is the cheap path.
+        Waits for the lock rather than failing: the other holder is building
+        the very artefact this caller wants, so waiting and then re-checking
+        the cache is the cheap path. The wait is never silent: once the lock
+        turns out to be busy, a line on stderr names ``what`` is being waited
+        for, the lock file and the holder (pid@host, written by every holder),
+        repeated every 30 s. ``wait`` (seconds) bounds it: past that,
+        :class:`LockBusy` is raised with the same details, so a holder that
+        never lets go (a wedged process, a lock stuck on a network
+        filesystem) fails the call instead of hanging it.
         """
         os.makedirs(directory, exist_ok=True)
-        fd = os.open(os.path.join(directory, LOCK_NAME),
-                     os.O_RDWR | os.O_CREAT, 0o644)
+        path = os.path.join(directory, LOCK_NAME)
+        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
+            _acquire(fd, path, what or directory, wait)
+            _write_holder(fd)
             yield
         finally:
             try:
@@ -200,6 +216,77 @@ class StoragePolicy:
                 raise
 
 
+class LockBusy(TimeoutError):
+    """A lock stayed held by another process past the allowed wait."""
+
+
+#: seconds between "still waiting" lines while a lock is busy
+_LOCK_NOTE_INTERVAL = 30.0
+
+
+def _note(msg: str) -> None:
+    try:
+        sys.stderr.write(msg + "\n")
+        sys.stderr.flush()
+    except Exception:  # pylint: disable=broad-except
+        pass
+
+
+def _holder(path: str) -> str:
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            text = fh.read(200).strip()
+        return text.splitlines()[0] if text else "unknown"
+    except OSError:
+        return "unknown"
+
+
+def _write_holder(fd: int) -> None:
+    """Record ``pid@host`` in the lock file, for whoever waits on it next."""
+    try:
+        os.ftruncate(fd, 0)
+        os.pwrite(fd, f"pid {os.getpid()}@{socket.gethostname()}\n".encode(), 0)
+    except OSError:
+        pass
+
+
+def _acquire(fd: int, path: str, what: str, wait: Optional[float]) -> None:
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return
+    except BlockingIOError:
+        pass
+    start = time.monotonic()
+    holder = _holder(path)
+    limit = f", giving up after {wait:.0f}s" if wait else ""
+    _note(f"[wave-mcp] waiting for {what}: lock {path} is held by {holder}"
+          f"{limit}")
+    last_note = start
+    delay = 0.2
+    while True:
+        time.sleep(delay)
+        delay = min(delay * 1.5, 2.0)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _note(f"[wave-mcp] lock acquired after "
+                  f"{time.monotonic() - start:.0f}s: {path}")
+            return
+        except BlockingIOError:
+            pass
+        now = time.monotonic()
+        if wait and now - start >= wait:
+            raise LockBusy(
+                f"gave up after {now - start:.0f}s waiting for {what}: lock "
+                f"{path} is still held by {_holder(path)}. If that process "
+                f"is gone or stuck, stop it; a lock left behind on a network "
+                f"filesystem clears once its client releases it, or delete "
+                f"{path} when nothing is using it.")
+        if now - last_note >= _LOCK_NOTE_INTERVAL:
+            _note(f"[wave-mcp] still waiting ({now - start:.0f}s) for {what}: "
+                  f"lock {path} held by {_holder(path)}")
+            last_note = now
+
+
 def _fsync_file(path: str) -> None:
     try:
         fd = os.open(path, os.O_RDONLY)
@@ -218,6 +305,134 @@ def policy() -> StoragePolicy:
     return StoragePolicy.from_env()
 
 
+#: marker file a session directory is touched through on every open
+LAST_USED_NAME = ".last_used"
+
+
+def mark_used(session_dir: str) -> None:
+    """Record that a session was just opened (mtime of ``.last_used``).
+
+    Only inside wave-mcp's own session root: a session the caller placed with
+    an explicit ``out_dir`` is theirs, and ``gc`` never touches it anyway.
+    """
+    try:
+        root = os.path.abspath(default_session_root())
+        d = os.path.abspath(session_dir)
+        if os.path.dirname(d) != root or not os.path.isdir(d):
+            return
+        p = os.path.join(d, LAST_USED_NAME)
+        with open(p, "a"):
+            pass
+        os.utime(p, None)
+    except OSError:
+        pass
+
+
+def _tree_size(path: str) -> int:
+    total = 0
+    for dirpath, _dirs, files in os.walk(path):
+        for f in files:
+            try:
+                total += os.lstat(os.path.join(dirpath, f)).st_size
+            except OSError:
+                pass
+    return total
+
+
+def _last_used(path: str) -> float:
+    for name in (LAST_USED_NAME, "session.json"):
+        try:
+            return os.path.getmtime(os.path.join(path, name))
+        except OSError:
+            continue
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return 0.0
+
+
+def usage_entries() -> list:
+    """Every session directory and cache entry wave-mcp owns, with size/age.
+
+    Sessions: direct children of the session root. Caches: direct children of
+    each ``<cache_root>/<kind>/`` directory. Entries named explicitly by a
+    caller (``out_dir``) live elsewhere and are never listed.
+    """
+    import time as _time
+    now = _time.time()
+    out = []
+    sroot = default_session_root()
+    if os.path.isdir(sroot):
+        for name in sorted(os.listdir(sroot)):
+            p = os.path.join(sroot, name)
+            if os.path.isdir(p) and not os.path.islink(p):
+                out.append({"kind": "session", "path": p,
+                            "bytes": _tree_size(p),
+                            "idle_days": (now - _last_used(p)) / 86400.0})
+    croot = default_cache_root()
+    if os.path.isdir(croot):
+        for kind in sorted(os.listdir(croot)):
+            kd = os.path.join(croot, kind)
+            if not os.path.isdir(kd) or os.path.islink(kd):
+                continue
+            for name in sorted(os.listdir(kd)):
+                p = os.path.join(kd, name)
+                if os.path.islink(p) or name == LOCK_NAME:
+                    continue
+                size = _tree_size(p) if os.path.isdir(p) else os.path.getsize(p)
+                out.append({"kind": f"cache/{kind}", "path": p, "bytes": size,
+                            "idle_days": (now - _last_used(p) if os.path.isdir(p)
+                                          else now - os.path.getmtime(p)) / 86400.0})
+    return out
+
+
+def gc(older_than_days: Optional[float] = None,
+       max_total_bytes: Optional[int] = None, dry_run: bool = True,
+       keep: Optional[set] = None) -> dict:
+    """Remove idle sessions / cache entries under wave-mcp's own roots.
+
+    ``older_than_days`` removes entries idle longer than that. ``max_total_bytes``
+    then removes least-recently-used entries until the total fits. Nothing is
+    removed with ``dry_run`` (the default). ``keep`` lists paths never removed
+    (sessions open in this process). Only direct children of the two roots are
+    candidates, so a symlink or a caller's ``out_dir`` is never followed.
+    """
+    import shutil
+    keep = {os.path.abspath(k) for k in (keep or set())}
+    entries = [e for e in usage_entries() if os.path.abspath(e["path"]) not in keep]
+    doomed = []
+    if older_than_days is not None:
+        doomed = [e for e in entries if e["idle_days"] > older_than_days]
+    if max_total_bytes is not None:
+        rest = sorted((e for e in entries if e not in doomed),
+                      key=lambda e: -e["idle_days"])
+        total = sum(e["bytes"] for e in rest)
+        for e in rest:
+            if total <= max_total_bytes:
+                break
+            doomed.append(e)
+            total -= e["bytes"]
+    freed = 0
+    removed = []
+    for e in doomed:
+        if not dry_run:
+            try:
+                if os.path.isdir(e["path"]):
+                    shutil.rmtree(e["path"])
+                else:
+                    os.remove(e["path"])
+            except OSError:
+                continue
+        freed += e["bytes"]
+        removed.append(e)
+    total_before = sum(e["bytes"] for e in entries)
+    return {"dry_run": dry_run, "session_root": default_session_root(),
+            "cache_root": default_cache_root(),
+            "entries": len(entries), "total_bytes": total_before,
+            "removed": removed, "freed_bytes": freed}
+
+
 __all__ = ["SESSION_ROOT_ENV", "CACHE_ROOT_ENV", "LOCK_NAME",
            "StoragePolicy", "policy", "user_path", "default_root",
-           "default_cache_root", "default_session_root"]
+           "default_cache_root", "default_session_root", "mark_used",
+           "usage_entries", "gc", "LAST_USED_NAME"]

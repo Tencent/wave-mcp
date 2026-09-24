@@ -58,11 +58,19 @@ def _batch(args) -> int:
     print(f"[ok] batch converting {len(uniq)} file(s) with up to {jobs} slot(s)")
 
     def _one(path: str):
-        out = os.path.splitext(path)[0] + ".fst"
-        res = convert.convert(path, out, pack=args.pack,
-                              parallel=not args.no_parallel,
-                              compress=args.compress, timeout=args.timeout)
-        return res.to_dict()
+        if args.no_parallel or args.compress:
+            out = os.path.splitext(path)[0] + ".fst"
+            res = convert.convert(path, out, pack=args.pack,
+                                  parallel=not args.no_parallel,
+                                  compress=args.compress, timeout=args.timeout)
+            return res.to_dict()
+        got = convert.default_fst(path, kind="vcd", pack=args.pack,
+                                  timeout=args.timeout)
+        d = dict(got["detail"])
+        d["fst_path"] = got["fst_path"]
+        if got.get("notice"):
+            print(f"[note] {got['notice']}")
+        return d
 
     failures = 0
     done = 0
@@ -87,12 +95,15 @@ def _batch(args) -> int:
 
 
 def main(argv=None):
+    convert.install_exit_handlers()
     p = argparse.ArgumentParser(
         description="Fast VCD -> FST converter (vcd2fst wrapper)")
     p.add_argument("--vcd", required=True, nargs="+",
                    help="input VCD file(s); with --batch also accepts several "
                         "files or shell-quoted globs")
-    p.add_argument("--fst", help="output FST file (default: <vcd>.fst)")
+    p.add_argument("--fst", help="output FST file (default: <vcd>.fst beside "
+                        "the VCD, which prepare_session reuses; the wave-mcp "
+                        "cache when that directory is not writable)")
     p.add_argument("--pack", choices=list(convert.PACKS), default="fastlz",
                    help="FST compressor: fastlz (fastest, default), lz4, zlib (smallest)")
     p.add_argument("--no-parallel", action="store_true", help="disable parallel packing")
@@ -131,6 +142,18 @@ def main(argv=None):
             print(f"     FST  : {res.fst_path}")
             print(f"     now point $dumpfile at the FIFO and run xrun; "
                   f"FST completes when sim ends.")
+        elif args.fst is None and not args.no_parallel and not args.compress:
+            got = convert.default_fst(vcd, kind="vcd", pack=args.pack,
+                                      timeout=args.timeout)
+            d = got["detail"]
+            print(f"[ok] {d['vcd_path']} -> {got['fst_path']}")
+            if got.get("notice"):
+                print(f"[note] {got['notice']}")
+            print(f"     pack={d['pack']} parallel={d['parallel']} "
+                  f"elapsed={d['elapsed_sec']}s")
+            if d["compression_ratio"]:
+                print(f"     {d['vcd_bytes']} -> {d['fst_bytes']} bytes "
+                      f"(x{d['compression_ratio']} smaller)")
         else:
             res = convert.convert(vcd, args.fst, pack=args.pack,
                                   parallel=not args.no_parallel,

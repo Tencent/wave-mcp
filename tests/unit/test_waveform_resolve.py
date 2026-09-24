@@ -112,7 +112,7 @@ class TestResolveWaveform:
 
 
 # ---------------------------------------------------------------------------
-# cache location: derived-cache layer, never the source directory
+# placement: beside the source (cache fallbacks: tests/unit/test_fst_beside.py)
 # ---------------------------------------------------------------------------
 
 class TestCacheLocation:
@@ -123,13 +123,12 @@ class TestCacheLocation:
         assert a == b
         assert "wave-mcp" in a
 
-    def test_never_writes_next_to_source(self):
-        """A converted FST lands in the cache root even when the source dir is writable."""
+    def test_writes_beside_source(self):
+        """A converted FST lands beside a writable source as <name>.fst."""
         src = os.path.join(os.path.dirname(__file__), os.pardir,
                            "fourstate", "sim", "fourstate.vcd")
         if not os.path.exists(src):
             pytest.skip("fourstate VCD not available")
-        from wave_mcp.runtime import storage
         tmp = tempfile.mkdtemp()
         cache = tempfile.mkdtemp()
         old = os.environ.get("WAVE_MCP_CACHE_ROOT")
@@ -137,10 +136,10 @@ class TestCacheLocation:
         try:
             work = os.path.join(tmp, "rw.vcd")
             shutil.copy(src, work)
-            before = set(os.listdir(tmp))
             got = convert.resolve_waveform(work)
-            assert got["fst_path"].startswith(storage.policy().cache_dir("fst", create=False))
-            assert set(os.listdir(tmp)) == before
+            assert got["fst_path"] == os.path.join(tmp, "rw.fst")
+            assert got["placement"] == "beside"
+            assert sorted(os.listdir(tmp)) == ["rw.fst", "rw.vcd"]
         finally:
             if old is None:
                 os.environ.pop("WAVE_MCP_CACHE_ROOT", None)

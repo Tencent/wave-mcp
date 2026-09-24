@@ -47,3 +47,19 @@ python3 tests/run_regression.py --quick
 # 完整回归（含项目级验证，需按上文配置项目数据；未配置则自动跳过）
 python3 tests/run_regression.py
 ```
+
+在仓库里直接运行即可，不需要设置 `PYTHONPATH` 或 `pip install -e`：
+单测会自动从仓库根导入 `wave_mcp`。
+
+## 在离线包目标机上跑回归
+
+离线包安装后，wave-mcp 装在安装目录的 `runtime/` 虚拟环境里，系统的
+`python3` 里没有它。在解包目录下用这个环境的解释器运行：
+
+```bash
+cd <解包目录>                     # 含 tests/ 的那个目录
+<安装目录>/runtime/bin/python tests/run_regression.py --quick
+```
+
+`<安装目录>` 是 `./install.sh --prefix` 指定的目录，不指定时就是解包目录本身。
+pytest、httpx 等开发依赖和 iverilog 不随包提供，依赖它们的套件会注明原因后跳过。

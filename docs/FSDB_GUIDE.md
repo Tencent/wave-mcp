@@ -55,7 +55,7 @@ prepare_session(wave_path="dump.fsdb", filelist_path="your_filelist.f")
 | 缓存的东西 | 位置 | 失效条件 |
 | --- | --- | --- |
 | **转换器二进制**（`fsdb2fst`） | `~/.wave-mcp/cache/fsdb2fst/<key>/` | 换 Verdi 路径或改转换器源码则重编 |
-| **转换产物**（`.fst` + `.fst.hier`） | 默认落在 `.fsdb` 旁，目录不可写时回退 session 目录 | 源波形 mtime/size 变化，或切片参数变化则重转 |
+| **转换产物**（`.fst` + `.fst.hier`） | 完整转换落在 `.fsdb` 旁（`x.fsdb` → `x.fst` + `x.fst.hier`）；目录不可写或带 `scopes`/`signals_file` 切片时落 `~/.wave-mcp/cache/fst/`，返回里会说明 | 旁边的 FST 比源波形旧、缺 `.hier` 或打不开则覆盖重转；手动转好放旁边的直接复用 |
 
 前者让你只编一次转换器，后者让同一份波形反复建 session 只转一次。
 

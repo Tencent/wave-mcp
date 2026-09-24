@@ -57,10 +57,14 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
 
     from .. import convert as _convert
+    _convert.install_exit_handlers()
     resolved = []
     for p in args.fst:
         try:
-            resolved.append(_convert.resolve_waveform(p)["fst_path"])
+            got = _convert.resolve_waveform(p)
+            resolved.append(got["fst_path"])
+            if got.get("notice"):
+                print("note:", got["notice"], file=sys.stderr)
         except (_convert.UnsupportedWaveformError, FileNotFoundError,
                 _convert.ConversionError) as exc:
             print("error:", exc, file=sys.stderr)
@@ -93,6 +97,7 @@ def main(argv=None) -> int:
         # SIGTERM does not run atexit hooks, so surver children would leak
         # (a stale process holding a port). Clean up explicitly, then exit.
         try:
+            _convert.stop_active_conversions()
             mgr.close_all()
         finally:
             sys.exit(128 + signum)

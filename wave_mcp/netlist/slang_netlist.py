@@ -19,7 +19,7 @@ Output maps (persisted as JSON, loaded by RtlSource):
 from __future__ import annotations
 
 import os
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 # This module intentionally uses broad ``except Exception`` at many points: its
 # whole job is to extract as much of the netlist as possible from a possibly
@@ -32,9 +32,14 @@ try:
     import pyslang as ps
     from pyslang.syntax import SyntaxTree
     from pyslang.ast import Compilation
+    try:
+        from pyslang.ast import CompilationOptions as _CompilationOptions
+    except ImportError:  # pragma: no cover - very old pyslang
+        _CompilationOptions = None
     _PYSLANG_OK = True
 except ImportError:  # pragma: no cover
     _PYSLANG_OK = False
+    _CompilationOptions = None
 
 
 class NetlistError(RuntimeError):
@@ -740,6 +745,51 @@ _DIAG_HINTS = {
 }
 
 
+#: Diagnostics slang reports at Error severity that do not affect elaboration:
+#: style lint and conventions the simulators accept. Counted as ``lints``, kept
+#: in ``by_code``/``samples``, excluded from ``errors``. Unknown codes keep their
+#: native severity. Extend per site with ``$WAVE_MCP_LINT_CODES`` (comma list).
+#:
+#: Scope: this reclassifies Error-severity diagnostics only. Warning-severity
+#: codes (``WidthTruncate``, ``BitwiseOpMismatch``, ``EmptyOutputPortConn``,
+#: ...) never count as errors, so listing them here changes nothing (verified
+#: 2026-09-24 on a production chip filelist: errors 65 / warnings 18 / lints 0
+#: with and without WAVE_MCP_LINT_CODES=WidthTruncate,BitwiseOpMismatch).
+LINT_CODES = (
+    "EmptyBody", "SignCompare", "WidthCompare", "IntBoolConv", "ImplicitConv",
+    # measured on production chip filelists 2026-09-23 (1328 "errors",
+    # all four codes below, netlist complete): mixed `timescale across files,
+    # missing trailing newline, indentation style, unnamed generate blocks
+    "MissingTimeScale", "NewlineEOF", "MisleadingIndentation",
+    "NonStandardGenBlock",
+)
+LINT_CODES_ENV = "WAVE_MCP_LINT_CODES"
+
+
+def lint_codes() -> Tuple[str, ...]:
+    """Built-in lint codes plus any listed in ``$WAVE_MCP_LINT_CODES``."""
+    extra = [c.strip() for c in os.environ.get(LINT_CODES_ENV, "").split(",")]
+    return LINT_CODES + tuple(c for c in extra if c and c not in LINT_CODES)
+
+
+def _diag_code(dg) -> str:
+    """``DiagCode(UnknownModule)`` -> ``UnknownModule``."""
+    return str(getattr(dg, "code", "")).replace("DiagCode(", "").rstrip(")")
+
+
+def _diag_is_error(dg) -> bool:
+    """Native severity. pyslang exposes ``isError`` as a method, not a flag:
+    reading the attribute returns a bound method, which is always truthy and
+    used to count every warning as an error."""
+    attr = getattr(dg, "isError", None)
+    if callable(attr):
+        try:
+            return bool(attr())
+        except Exception:  # pylint: disable=broad-except
+            return True
+    return bool(attr)
+
+
 def _summarize_diagnostics(diags, sm, max_items: int = 40) -> dict:
     """Turn raw pyslang diagnostics into a structured, actionable summary.
 
@@ -747,39 +797,34 @@ def _summarize_diagnostics(diags, sm, max_items: int = 40) -> dict:
     human-readable messages, and surfaces which classes of missing inputs
     (include dirs / defines / package sources) likely caused a failed build.
 
-    Severity re-classification: slang ships style-lint diagnostics (EmptyBody,
-    SignCompare, ...) flagged as Error severity, but they are purely stylistic
-    and elaboration continues normally with them present. Counting them as
-    errors made ``netlist_health.trust`` sink to ``partial`` on clean real
-    designs (measured 2026-08-31: 29 of 33 "errors" on a healthy filelist were
-    these two codes alone). They are counted in ``lints`` and kept in
-    ``by_code``/``samples`` unchanged, but excluded from ``errors``/``partial``.
+    Severity: an entry counts as an error only when slang says so
+    (``isError()``) and its code is not in :func:`lint_codes`. Lint codes are
+    Error severity in slang but elaboration continues normally with them, so
+    counting them sank ``netlist_health.trust`` to ``partial`` on healthy
+    designs. They are counted in ``lints`` and kept in ``by_code``/``samples``.
     """
     try:
         de = ps.DiagnosticEngine(sm)
     except Exception:
         de = None
-    # style-lint diagnostics that carry Error severity in slang but are not
-    # real build blockers. Matched as substrings of the code string, e.g.
-    # "DiagCode(Error, EmptyBody)". Keep this list to codes verified on real
-    # designs; unknown codes keep their native severity.
-    _lint_codes = ("EmptyBody", "SignCompare", "WidthCompare",
-                   "IntBoolConv", "ImplicitConv")
+    lint_set = lint_codes()
     by_code: Dict[str, int] = {}
     samples: List[dict] = []
     n_err = 0
     n_lint = 0
     lint_by_code: Dict[str, int] = {}
+    error_by_code: Dict[str, int] = {}
     for dg in diags:
-        code = str(getattr(dg, "code", "")).replace("DiagCode(", "").rstrip(")")
+        code = _diag_code(dg)
         by_code[code] = by_code.get(code, 0) + 1
-        is_err = bool(getattr(dg, "isError", False))
-        if is_err and any(c in code for c in _lint_codes):
-            # reclassified: stylistic slang lint, not a build blocker
+        is_err = _diag_is_error(dg)
+        if is_err and code in lint_set:
             n_lint += 1
             lint_by_code[code] = lint_by_code.get(code, 0) + 1
+            is_err = False
         elif is_err:
             n_err += 1
+            error_by_code[code] = error_by_code.get(code, 0) + 1
         if len(samples) < max_items:
             text = ""
             if de is not None:
@@ -799,6 +844,7 @@ def _summarize_diagnostics(diags, sm, max_items: int = 40) -> dict:
         "total": len(diags),
         "errors": n_err,
         "lints": n_lint,
+        "error_by_code": dict(sorted(error_by_code.items(), key=lambda x: -x[1])),
         "lint_by_code": dict(sorted(lint_by_code.items(), key=lambda x: -x[1])),
         "by_code": dict(sorted(by_code.items(), key=lambda x: -x[1])),
         "samples": samples,
@@ -1003,6 +1049,88 @@ def _find_package_file(pkgname: str, roots: List[str],
     return None
 
 
+def _unknown_modules(diags) -> List[str]:
+    """Names of instantiated modules that have no definition (``UnknownModule``)."""
+    out: List[str] = []
+    for dg in diags:
+        if _diag_code(dg) != "UnknownModule":
+            continue
+        args = list(getattr(dg, "args", []) or [])
+        if args and str(args[0]) not in out:
+            out.append(str(args[0]))
+    return out
+
+
+def _library_lookup(names: List[str], libdirs: List[str], libexts: List[str],
+                    have: set) -> List[str]:
+    """Resolve module names against ``-y`` dirs the way simulators do.
+
+    A ``-y <dir>`` library directory is searched for ``<dir>/<module><ext>``
+    for each ``+libext+`` extension, in the order the directories were given.
+    Only the file named after the module is taken: this is lookup by name, not
+    an include path, so the rest of the directory is never elaborated.
+    """
+    exts = list(libexts) or [".v", ".sv"]
+    found: List[str] = []
+    for name in names:
+        for d in libdirs:
+            hit = None
+            for ext in exts:
+                cand = os.path.join(d, name + ext)
+                if os.path.isfile(cand):
+                    hit = os.path.abspath(cand)
+                    break
+            if hit:
+                if hit not in have and hit not in found:
+                    found.append(hit)
+                break
+    return found
+
+
+def _new_compilation(top: Optional[str]):
+    """A Compilation that elaborates only ``top`` when it names a module.
+
+    Without this pyslang treats every uninstantiated module as a top, so a
+    requested top still produced a forest (and every library/testbench
+    leftover got elaborated for nothing).
+    """
+    if top and _CompilationOptions is not None:
+        try:
+            opts = _CompilationOptions()
+            opts.topModules = {top}
+            return Compilation(ps.Bag([opts]))
+        except Exception:
+            pass
+    return Compilation()
+
+
+def _declared_module_names(trees) -> set:
+    """Module names declared in ``trees`` (to validate a requested top)."""
+    names: set = set()
+    try:
+        from pyslang.syntax import SyntaxKind
+    except Exception:
+        return names
+    kinds = {SyntaxKind.ModuleDeclaration}
+    for k in ("InterfaceDeclaration", "ProgramDeclaration"):
+        if hasattr(SyntaxKind, k):
+            kinds.add(getattr(SyntaxKind, k))
+
+    def cb(node):
+        if getattr(node, "kind", None) in kinds:
+            try:
+                names.add(node.header.name.valueText)
+            except Exception:
+                pass
+        return True
+    for t in trees:
+        try:
+            t.root.visit(cb)
+        except Exception:
+            pass
+    return names
+
+
 def _incdir_for_include(include_arg: str, found_dir: str) -> str:
     """Given an `` `include "sub/foo.svh" `` and the dir where foo.svh was found,
     return the incdir to add so the relative path resolves (strip the subdir)."""
@@ -1016,18 +1144,51 @@ def _incdir_for_include(include_arg: str, found_dir: str) -> str:
     return d or found_dir
 
 
+def _libfile_index(libfiles: List[str]) -> Dict[str, str]:
+    """module name -> ``-v`` library file declaring it (first declaration wins)."""
+    import re
+    decl = re.compile(r"^\s*(?:module|macromodule|interface|program)\s+"
+                      r"(?:automatic\s+|static\s+)?([A-Za-z_]\w*)", re.MULTILINE)
+    index: Dict[str, str] = {}
+    for f in libfiles:
+        try:
+            with open(f, "r", errors="replace") as fh:
+                text = fh.read()
+        except OSError:
+            continue
+        for m in decl.finditer(text):
+            index.setdefault(m.group(1), os.path.abspath(f))
+    return index
+
+
 def build_netlist(files: List[str], top: Optional[str] = None,
                   incdirs: Optional[List[str]] = None,
                   defines: Optional[List[str]] = None,
                   out_path: Optional[str] = None,
                   self_heal: bool = True, max_heal_rounds: int = 4,
-                  auto_detect_uvm: bool = True) -> dict:
+                  auto_detect_uvm: bool = True,
+                  libdirs: Optional[List[str]] = None,
+                  libexts: Optional[List[str]] = None,
+                  libfiles: Optional[List[str]] = None,
+                  build_inputs: Optional[dict] = None) -> dict:
+    """Elaborate ``files`` into netlist maps.
+
+    ``libdirs`` / ``libexts`` / ``libfiles`` are the ``-y`` / ``+libext+`` /
+    ``-v`` library inputs: a module that is instantiated but not defined is
+    looked up there by name and only that file is added. ``top`` restricts
+    elaboration to that module when the sources declare it, so the hierarchy
+    is one tree. ``build_inputs`` is stored verbatim so a later reuse can tell
+    whether the netlist was built from the same declared inputs.
+    """
     if not _PYSLANG_OK:
         raise NetlistError("pyslang is not available; cannot build netlist")
     files = [f for f in files if f and os.path.exists(f)]
     if not files:
         raise NetlistError("no source files to elaborate")
     incdirs = list(incdirs or [])
+    libdirs = [d for d in (libdirs or []) if d and os.path.isdir(d)]
+    libexts = list(libexts or [])
+    lib_index = _libfile_index(list(libfiles or [])) if libfiles else {}
     # UVM lives in the Xcelium install, outside the design tree — add it up front
     # so `include "uvm_macros.svh" resolves and the package self-heal can locate
     # uvm_pkg.sv there. Additive & best-effort (no-op in non-Cadence flows).
@@ -1054,16 +1215,58 @@ def build_netlist(files: List[str], top: Optional[str] = None,
     # found and we stop — the per-member try/except keeps DUT extraction alive.
     auto_added_incdirs: List[str] = []
     auto_added_files: List[str] = []
+    library_files: List[str] = []
     healed_rounds = 0
     inc_index: Optional[Dict[str, List[str]]] = None
     roots: List[str] = []
     sm, trees, parse_errors = _build_trees(files, incdirs, define_header)
     if not trees:
         raise NetlistError("failed to parse any source file: " + "; ".join(parse_errors))
-    comp = Compilation()
+    comp_top = top
+    comp = _new_compilation(comp_top)
     for t in trees:
         comp.addSyntaxTree(t)
     diags = comp.getAllDiagnostics()
+
+    # library resolution rounds (-y / -v): each round may add modules that
+    # instantiate further library modules, so iterate until nothing is new.
+    # Separate from self-heal: this is the declared filelist semantics, not a
+    # guess, and runs even with self_heal=False.
+    lib_rounds = 0
+    while (libdirs or lib_index) and lib_rounds < 16:
+        missing = _unknown_modules(diags)
+        if not missing:
+            break
+        have = set(files)
+        new = _library_lookup(missing, libdirs, libexts, have) if libdirs else []
+        for name in missing:
+            f = lib_index.get(name)
+            if f and f not in have and f not in new:
+                new.append(f)
+        if not new:
+            break
+        files.extend(new)
+        library_files.extend(new)
+        lib_rounds += 1
+        sm, trees, parse_errors = _build_trees(files, incdirs, define_header)
+        comp = _new_compilation(comp_top)
+        for t in trees:
+            comp.addSyntaxTree(t)
+        diags = comp.getAllDiagnostics()
+
+    # a requested top the sources do not declare would make pyslang elaborate
+    # nothing; fall back to automatic tops and say so instead
+    top_note = None
+    if top and _CompilationOptions is not None:
+        declared = _declared_module_names(trees)
+        if declared and top not in declared:
+            top_note = (f"top '{top}' is not a module declared in the sources; "
+                        "elaborated every uninstantiated module instead")
+            comp_top = None
+            comp = _new_compilation(None)
+            for t in trees:
+                comp.addSyntaxTree(t)
+            diags = comp.getAllDiagnostics()
 
     while self_heal and healed_rounds < max_heal_rounds:
         miss_inc, miss_pkg = _collect_missing(diags)
@@ -1099,7 +1302,7 @@ def build_netlist(files: List[str], top: Optional[str] = None,
         sm, trees, parse_errors = _build_trees(files, incdirs, define_header)
         if not trees:
             break
-        comp = Compilation()
+        comp = _new_compilation(comp_top)
         for t in trees:
             comp.addSyntaxTree(t)
         diags = comp.getAllDiagnostics()
@@ -1125,17 +1328,24 @@ def build_netlist(files: List[str], top: Optional[str] = None,
             failed_tops.append(getattr(top_inst, "name", "?"))
 
     modules = {name: b.finalize() for name, b in builders.items()}
+    skipped_total = sum(int(m.get("skipped_members", 0) or 0)
+                        for m in modules.values())
+    source_files = sorted({m.get("file") for m in modules.values()
+                           if m.get("file")})
     # partial when elaboration produced diagnostics or emitted no top instance
     # but we still recovered some modules — better to serve a partial netlist
     # (flagged) than to degrade every connectivity/trace tool to unavailable.
     partial = bool(diag_summary["errors"]) or not instance_tree
+    tops = [p for p in instance_tree if "." not in p]
     result = {
         "tool": "pyslang",
         "version": getattr(ps, "__version__", "?"),
         # cwd the netlist was built from: the fallback base for any relative
         # source path that survived _abs_source().
         "build_root": os.getcwd(),
-        "top": top or (list(instance_tree)[0] if instance_tree else None),
+        "top": comp_top or (tops[0] if tops else None),
+        "requested_top": top or "",
+        "roots": tops,
         "diagnostics": len(diags),
         "diagnostics_summary": diag_summary,
         "partial": partial and bool(modules),
@@ -1148,13 +1358,42 @@ def build_netlist(files: List[str], top: Optional[str] = None,
             "added_files": auto_added_files,
             "uvm_incdirs": uvm_incdirs,
         },
+        # modules taken from -y / -v libraries by name (declared semantics)
+        "library": {"dirs": libdirs, "exts": libexts or [".v", ".sv"],
+                    "files": library_files, "rounds": lib_rounds,
+                    "unresolved": _unknown_modules(diags)}
+                   if (libdirs or lib_index) else {},
         "failed_tops": failed_tops,
+        "skipped_members_total": skipped_total,
+        "source_files": source_files,
         "modules": modules,
         "instance_tree": instance_tree,
     }
+    if top_note:
+        result["top_note"] = top_note
+    if build_inputs is not None:
+        result["build_inputs"] = build_inputs
     if out_path:
-        import json
-        os.makedirs(os.path.dirname(os.path.abspath(out_path)) or ".", exist_ok=True)
-        with open(out_path, "w") as fh:
-            json.dump(result, fh, indent=2)
+        write_maps(out_path, result)
+        # the per-module store the first open would otherwise build by parsing
+        # maps.json back (18 s on a 1.2 GB netlist); written from memory here
+        from .lazy_store import prebuild
+        prebuild(out_path, result)
     return result
+
+
+def write_maps(out_path: str, result: dict) -> None:
+    """Persist netlist maps: compact JSON, written atomically.
+
+    Compact separators instead of ``indent=2``: the indented form was about a
+    third whitespace on large designs and every open parsed it back. Atomic so a
+    concurrent open never reads a half-written file.
+    """
+    import json
+    from ..runtime.storage import StoragePolicy
+
+    def writer(tmp: str) -> None:
+        with open(tmp, "w") as fh:
+            json.dump(result, fh, separators=(",", ":"))
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)) or ".", exist_ok=True)
+    StoragePolicy.atomic_write(out_path, writer)

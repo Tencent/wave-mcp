@@ -77,7 +77,7 @@ Arguments:
 | `--labels` | display label per waveform; `pass fail` recommended for compare views |
 | `--no-browser` | don't try to launch a local browser |
 
-Converted output is cached and shared with `prepare_session`: the same waveform is converted once whether you analyse it first and view it later, or the other way round. The cache lives under `~/.wave-mcp/cache/fst/` (honouring `WAVE_MCP_CACHE_ROOT`) and is never written next to the source, so read-only regression areas work as-is. A GB-scale FSDB conversion costs minutes; a cache hit costs seconds.
+Converted output is cached and shared with `prepare_session`: the same waveform is converted once whether you analyse it first and view it later, or the other way round. The FST is written next to the source (`dump.vcd` → `dump.fst`), and one you converted by hand is used as is. When the source directory is not writable (a read-only regression area, say) it goes to `~/.wave-mcp/cache/fst/` (honouring `WAVE_MCP_CACHE_ROOT`) instead, and `open_wave_view` says so in `warnings`. A GB-scale FSDB conversion costs minutes; reusing the FST costs seconds.
 
 Anything other than `.fst` / `.vcd` / `.fsdb` (`.ghw`, `.vpd`, an SHM directory) is rejected at the entry point with the list of supported extensions, instead of falling through to a converter that reports a problem pointing in the wrong direction.
 
@@ -306,7 +306,7 @@ export WAVE_MCP_VIEWER_PORT_BASE=45400   # uses 45400-45463
 export WAVE_MCP_VIEWER_PORT_BASE=45500   # uses 45500-45563
 ```
 
-Two more notes. Conversion artifacts are cached under each user's own `~/.wave-mcp/cache/`, never next to the source waveform, so several people analysing the same regression dump each convert once; to share one artifact, point `WAVE_MCP_CACHE_ROOT` at a common writable directory, where concurrent conversions of the same key build exactly once. And `WAVE_MCP_MAX_VIEWS` is a per-process cap rather than a per-host one, so keep an eye on the total number of browser and backend processes when several people work at once.
+Two more notes. Conversion artifacts sit next to the source waveform, so several people analysing the same dump share one FST and concurrent conversions build exactly once. When the dump lives in a read-only area, each user falls back to their own `~/.wave-mcp/cache/`; to share there too, point `WAVE_MCP_CACHE_ROOT` at a common writable directory. And `WAVE_MCP_MAX_VIEWS` is a per-process cap rather than a per-host one, so keep an eye on the total number of browser and backend processes when several people work at once.
 
 If what you want is one server on a host handing out links to other people, that is not supported yet: the viewer binds to loopback only. That mode is on the roadmap.
 

@@ -34,6 +34,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from . import timeutil
 from .runtime import LOCAL_OWNER, ResourceLease, ResourceRegistry
+from .runtime import storage
 from .runtime.executor import ResourceLimit
 from .runtime.identity import dataset_identity, dataset_version, file_version
 from .runtime.manifest import manifest_filelist, manifest_inputs
@@ -278,7 +279,20 @@ class DatasetResource:
             self.fst = FstSource(self.fst_path)
         else:
             self.fst = None
-        self.rtl = RtlSource(self.filelist, self.maps_path, fst=self.fst)
+        self.rtl = RtlSource(self.filelist, self.maps_path, fst=self.fst,
+                             filelist_report=manifest.get("filelist_report"),
+                             requested_top=self.top)
+        report = manifest.get("filelist_report") or {}
+        if report.get("dropped_entries"):
+            names = report.get("undefined_env_vars") or []
+            msg = (f"filelist: {report['dropped_entries']} of "
+                   f"{report.get('declared_entries', '?')} declared entries were "
+                   "not resolved and are absent from the netlist")
+            if names:
+                msg += ("; undefined environment variables: "
+                        + ", ".join("$" + n for n in names)
+                        + " (set them in the MCP server env block)")
+            self.warnings.append(msg)
 
         # Resolve each FST scope's module *definition* name so module_type reports
         # the real module (e.g. "decode") instead of the generic scope kind
@@ -639,6 +653,7 @@ class SessionManager:
         self._check_quota(owner)
         identity, version = _identify(session_path)
         resource, key, reused = self._load(owner, session_path, identity, version)
+        storage.mark_used(os.path.dirname(_manifest_path(session_path)))
         ws = WorkSession(uuid.uuid4().hex[:16], owner, resource, key,
                          identity, version, signature)
         ws.resource_reused = reused

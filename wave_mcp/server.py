@@ -876,9 +876,13 @@ def prepare_session(wave_path: str, out_dir: Optional[str] = None,
     This never runs a simulator. Run your sim (xrun / Verilator / etc.) with your
     own flow first, then point this at the resulting ``.fst``, ``.fsdb`` or ``.vcd``.
 
-    Conversions are cached under the user cache dir (~/.wave-mcp/cache),
-    never next to the source waveform, so repeated sessions on the same
-    waveform convert only once and read-only regression areas stay untouched.
+    A converted FST is kept beside its source as ``<name>.fst`` (FSDB adds
+    ``<name>.fst.hier``), and one already there, whether converted by hand
+    or by an earlier call, is reused instead of converting again. Partial
+    conversions (``scopes`` / ``signals_file``) and unwritable source
+    directories use the wave-mcp cache (~/.wave-mcp/cache) instead; a stale
+    FST beside the source is overwritten. Each of those cases is explained
+    in the reply's ``hints``.
 
     Call this first whenever you want to start analyzing a waveform; afterwards
     use the query tools (signal_values, find_instances, signal_activity, ...).
@@ -1009,6 +1013,16 @@ def open_static_session(out_dir: Optional[str] = None,
             "session_path": result["session_path"], **sess.summary()}
 
 
+def _default_conversion(source: str, kind: str, **kw) -> dict[str, Any]:
+    """Convert tools without ``out_path``: the shared placement, with notice."""
+    got = convert.default_fst(source, kind=kind, **kw)
+    out = {"status": "ok", **got["detail"], "fst_path": got["fst_path"],
+           "placement": got["placement"]}
+    if got.get("notice"):
+        out["notice"] = got["notice"]
+    return out
+
+
 @_tool()
 def convert_vcd_to_fst(vcd_path: str, out_path: Optional[str] = None,
                        pack: str = "fastlz",
@@ -1021,10 +1035,10 @@ def convert_vcd_to_fst(vcd_path: str, out_path: Optional[str] = None,
 
     Args:
         vcd_path: input .vcd path.
-        out_path: output .fst path (default: the derived cache under
-            ~/.wave-mcp/cache/fst/, never the input's directory; pass an
-            explicit path to place it elsewhere. This tool converts on
-            request, it is not the cache).
+        out_path: output .fst path. Default: ``<name>.fst`` beside the VCD,
+            the same file ``prepare_session`` and ``open_wave_view`` reuse
+            (overwritten if present); the wave-mcp cache when the VCD's
+            directory is not writable, reported in ``notice``.
         pack: FST compressor: "fastlz" (fastest, default), "lz4" or "zlib" (smallest).
         timeout: optional conversion timeout in seconds; default auto-estimates
             from the file size. A converter that stops writing output fails
@@ -1035,8 +1049,10 @@ def convert_vcd_to_fst(vcd_path: str, out_path: Optional[str] = None,
     (see the ``wave-vcd2fst --stream`` CLI / README).
     """
     try:
-        res = convert.convert(vcd_path, out_path, pack=pack, timeout=timeout)
-        return {"status": "ok", **res.to_dict()}
+        if out_path:
+            res = convert.convert(vcd_path, out_path, pack=pack, timeout=timeout)
+            return {"status": "ok", **res.to_dict()}
+        return _default_conversion(vcd_path, "vcd", pack=pack, timeout=timeout)
     except convert.ConversionError as exc:
         return {"status": "error", "error": str(exc)}
 
@@ -1058,10 +1074,13 @@ def convert_fsdb_to_fst(fsdb_path: str, out_path: Optional[str] = None,
 
     Args:
         fsdb_path: input .fsdb path.
-        out_path: output .fst path (default: the derived cache under
-            ~/.wave-mcp/cache/fst/, never the input's directory). The companion
-            ``<fst>.hier`` sidecar is written alongside and BOTH files are needed
-            to open the FST.
+        out_path: output .fst path. Default: ``<name>.fst`` beside the FSDB,
+            the same file ``prepare_session`` and ``open_wave_view`` reuse
+            (overwritten if present); the wave-mcp cache when the FSDB's
+            directory is not writable or ``scopes`` / ``signals_file`` make
+            it a partial conversion, reported in ``notice``. The companion
+            ``<fst>.hier`` sidecar is written alongside and BOTH files are
+            needed to open the FST.
         scopes: convert only signals whose full path contains any of these
             substrings (fsdb2fst -l). Required for very large designs: the loader
             refuses batches above 5M signals and can crash beyond that regardless.
@@ -1082,10 +1101,14 @@ def convert_fsdb_to_fst(fsdb_path: str, out_path: Optional[str] = None,
         if info_only:
             return {"status": "ok", "info_only": True,
                     **convert.fsdb_info(fsdb_path)}
-        res = convert.convert_fsdb(fsdb_path, out_path, scopes=scopes,
+        if out_path:
+            res = convert.convert_fsdb(fsdb_path, out_path, scopes=scopes,
+                                       signals_file=signals_file, pack=pack,
+                                       timeout=timeout)
+            return {"status": "ok", **res.to_dict()}
+        return _default_conversion(fsdb_path, "fsdb", scopes=scopes,
                                    signals_file=signals_file, pack=pack,
                                    timeout=timeout)
-        return {"status": "ok", **res.to_dict()}
     except convert.ConversionError as exc:
         return {"status": "error", "error": str(exc)}
 
@@ -2444,6 +2467,7 @@ def open_wave_view(fst_paths: List[str],
                          "separate characters",
                 "parameter": "fst_paths"}
     resolved: List[str] = []
+    notices: List[str] = []
     for p in fst_paths:
         try:
             got = _convert.resolve_waveform(p)
@@ -2462,15 +2486,20 @@ def open_wave_view(fst_paths: List[str],
                     "error": str(exc),
                     "hint": "check the waveform path"}
         resolved.append(got["fst_path"])
+        if got.get("notice"):
+            notices.append(got["notice"])
 
     try:
-        return _viewer().open_view(
+        res = _viewer().open_view(
             resolved, signals=signals, cursor=cursor, viewport=viewport,
             markers=markers, diff=diff,
             annotations=[annotation] if annotation else None,
             labels=labels, owner=PRINCIPAL.owner_id)
     except Exception as exc:  # pylint: disable=broad-except
         return _viewer_fail(exc)
+    if notices and isinstance(res, dict):
+        res["warnings"] = list(res.get("warnings") or []) + notices
+    return res
 
 
 @_tool()
@@ -2656,9 +2685,11 @@ def main():
     def _drain():
         # Stop admitting, refuse waiters, give running bodies their grace, then
         # reap our own viewer children. Running C scans cannot be interrupted;
-        # they are reported, not killed.
+        # they are reported, not killed. Converters are separate processes in
+        # their own session, so they are stopped first or they outlive us.
         stop.set()
         try:
+            convert.stop_active_conversions()
             left = EXECUTOR.shutdown()
             if left["still_running"]:
                 sys.stderr.write(

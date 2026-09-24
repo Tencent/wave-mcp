@@ -47,6 +47,31 @@ compare the actual install-only files with the full archive, and retain
 PYTHON.json plus its declared licenses. The PSF text alone does not cover all
 linked or embedded dependencies. Preserve the runtime's own notices too.
 
+`deploy/build_python_materials.py` does all of that and checks the result.
+There are three ways to package Python:
+
+- No bundled Python: omit `--python`; the target uses its own python3 (3.10 or
+  newer). No Python materials are needed.
+- Same runtime as a published bundle: reuse that bundle's `materials/python/`
+  together with the same install_only tarball. No network needed.
+- Build the materials yourself (any release/version, network needed):
+
+```bash
+python3 deploy/build_python_materials.py --out /path/to/python-materials
+# prints the verified install_only tarball it downloaded; then
+bash deploy/build_offline_bundle.sh --out /path/to/new-bundle \
+  --python /path/to/cpython-...-install_only.tar.gz \
+  --python-materials /path/to/python-materials
+```
+
+Defaults are the runtime wave-mcp's bundles embed (CPython 3.11.16,
+python-build-standalone 20260901). For another one pass `--release` and
+`--python-version`; hashes then come from that release's SHA256SUMS, and
+`--build-src-sha256` must name the hash of the release's source tag archive,
+which SHA256SUMS does not cover. Downloads (about 450 MB) are cached under
+`--work` and reused. Reading the full archive needs the `zstandard` module or
+the `zstd` command.
+
 For viewer assets, export material for both native surver and the WASM build.
 Cargo.lock can supply a conservative source inventory but does not establish
 which target/features were built. Keep registry checksums, exact git commits,

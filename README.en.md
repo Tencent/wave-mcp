@@ -308,13 +308,15 @@ wave-session --vcd sim/dump.vcd --top top_tb --filelist rtl.f
 > No manual conversion needed when using the MCP tools: `prepare_session` auto-converts when
 > given a `.vcd` (path 1 above).
 
+**Where the converted FST goes**: next to the source waveform, same name with the `.fst` extension (`sim/dump.vcd` → `sim/dump.fst`; FSDB adds `dump.fst.hier`). An FST already there, whether you converted it by hand or an earlier call did, is reused as long as it is not older than the source; a stale or unreadable one is overwritten. Three cases use `~/.wave-mcp/cache/fst/` instead (honouring `WAVE_MCP_CACHE_ROOT`), and the reply says why and where: the source directory is not writable, the conversion is partial (`scopes` / `signals_file`, which must not take the full waveform's name), or the directory is still unwritable and the cached copy is reused.
+
 ---
 
 ## Tools (37, in 12 categories)
 
 | Category | Tools | Notes |
 | --- | --- | --- |
-| Waveform prep | `prepare_session` / `open_static_session` / `convert_vcd_to_fst` / `convert_fsdb_to_fst` | waveform → session in one shot (`.fst` / `.fsdb` / `.vcd` auto-detected, conversions cached); static analysis needs no waveform; never runs a simulator |
+| Waveform prep | `prepare_session` / `open_static_session` / `convert_vcd_to_fst` / `convert_fsdb_to_fst` | waveform → session in one shot (`.fst` / `.fsdb` / `.vcd` auto-detected, converted FST kept next to the source and reused); static analysis needs no waveform; never runs a simulator |
 | Session mgmt | `open_session` / `close_session` / `session_info` | `session_info` includes netlist_health + definition_coverage |
 | Query defaults | `query_defaults_set` / `query_defaults_get` / `query_defaults_clear` | per-session default signals + time window; an explicit argument always wins, a reply that drew a default lists the inherited fields in `_query.from_defaults`; pin a `defaults_revision` and a moved default answers `defaults_conflict` |
 | Hierarchy | `find_instances` / `list_modules` / `scope_info` | three-layer module-def resolution: netlist → name inference → scope_map |
@@ -352,9 +354,9 @@ wave-view sim.vcd
 - The CLI prints a URL; desktops auto-open a browser, and in SSH / code-agent
   sessions the IDE terminal auto-forwards the localhost port.
 - Waveform formats: `.fst` opens directly, `.vcd` / `.fsdb` are converted to
-  FST automatically. Converted output is cached and shared with
-  `prepare_session`, so the same waveform is converted once whether you analyse
-  it first or view it first. Other formats are rejected at the entry point with
+  FST automatically. The converted FST sits next to the source and is shared
+  with `prepare_session`, so the same waveform is converted once whether you
+  analyse it first or view it first, and one you converted by hand is used as is. Other formats are rejected at the entry point with
   the list of supported extensions.
 - Typical agent loop: a case fails → `diff_waveforms([pass, fail])` pinpoints the
   first divergence → `signal_fanin` backtracks the cause → `open_wave_view`
@@ -453,8 +455,10 @@ inherit your interactive shell's environment.
 | Variable | Configure? | Purpose | Default |
 | --- | --- | --- | --- |
 | `VERDI_HOME` | required for `.fsdb` | Verdi **installation root** (not the `bin/` directory holding the executable). `share/FsdbReader/linux64` is resolved under it; see the [FSDB guide](docs/FSDB_GUIDE.md) for usage and troubleshooting | empty. FSDB input unavailable, everything else works |
-| `WAVE_MCP_SESSION_ROOT` | no | Where sessions land when `out_dir` is omitted; the directory is named by the inputs' identity digest, so the same RTL asked for from anywhere resolves to one place and reuses one netlist. An explicit `out_dir` is used as given, never rewritten | `~/.wave-mcp/sessions` |
-| `WAVE_MCP_CACHE_ROOT` | no | Root for derived caches: converted `.fst` files, netlist msgpack caches, `fsdb2fst` build output, viewer assets. Caches are never written next to the source waveform; deleting them only costs time | `~/.wave-mcp/cache` |
+| `WAVE_MCP_SESSION_ROOT` | recommended when HOME has a quota | Where sessions land when `out_dir` is omitted; the directory is named by the inputs' identity digest, so the same RTL asked for from anywhere resolves to one place and reuses one netlist. An explicit `out_dir` is used as given, never rewritten. Chip-level netlists reach hundreds of MB; point this at a large local disk when HOME is a quota-limited NFS share | `~/.wave-mcp/sessions` |
+| `WAVE_MCP_CACHE_ROOT` | recommended when HOME has a quota | Root for derived caches: converted `.fst` files that cannot sit next to the source (unwritable directory or partial conversion), per-module netlist index (about the size of the netlist), `fsdb2fst` build output, viewer assets. Full conversions live next to the source, not here; deleting the cache only costs time | `~/.wave-mcp/cache` |
+| `WAVE_MCP_LINT_CODES` | no | Comma-separated slang diagnostic codes appended to the built-in list counted as lint rather than errors (`MissingTimeScale`, `NewlineEOF`, ...), so they never lower `trust`. Applies to codes slang reports as errors only; warnings such as `WidthTruncate` never count as errors, so listing them has no effect | empty |
+| `WAVE_MCP_LAZY_NETLIST` | no | Per-module lazy netlist loading: `1` forces it on, `0` off | empty. On for netlists of 8 MB or more |
 | `WAVE_MCP_VIEWER_PORT_BASE` | recommended on a shared host | Confines view ports to `[base, base+64)` so one `ssh -L` rule keeps working; give each user a non-overlapping window | empty. A random high port per view |
 | `NOVAS_HOME` | no | Same meaning as `VERDI_HOME`, kept for older Verdi installs; `VERDI_HOME` wins when both are set | empty |
 | `FSDB2FST_FREADER` | no | Points straight at a copied `share/FsdbReader` directory, for machines with the runtime but no full Verdi install | empty. Read from `VERDI_HOME` / `NOVAS_HOME` |
@@ -478,6 +482,18 @@ omitted; the session lands under `WAVE_MCP_SESSION_ROOT` in a directory named by
 identity, and the static and waveform sessions of one RTL source set share a netlist without
 the agent remembering any convention. Pass `out_dir` only when the directory has to live at a
 specific place (e.g. checked in next to a testbench); it is then used as given.
+
+**Environment variables in filelists**: the MCP server is spawned by the IDE and never sources
+your project `cshrc`/`bashrc`. Variables such as `$PROJ_ROOT` used by the filelist must be set in
+the `env` block above, or those entries are skipped. Skipped entries are listed in
+`netlist_health.dropped_entries` / `undefined_env_vars` and in `warnings`, and `trust` drops to
+`partial`: a "no driver found" answer is then not a design fact.
+
+**Reclaiming disk**: `wave-mcp gc` lists what sessions and caches use;
+`wave-mcp gc --older-than 30 --apply` removes entries not opened for 30 days, and
+`wave-mcp gc --max-size 20G --apply` removes least recently used entries until the total fits.
+Without `--apply` it only previews. Only the two roots above are cleaned; sessions placed with
+an explicit `out_dir` are never touched.
 
 ## FAQ
 

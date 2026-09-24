@@ -435,13 +435,13 @@ if [[ -n "$VIEWER_SRC" ]]; then
 fi
 cp "$MATERIAL_CHECK" "$OUT/materials/check.py"
 
-# test-build provenance + integrity manifest --------------------------------
-# TEST-BUILD-NOTES records what this bundle is (test build, commit, contents)
+# build provenance + integrity manifest -------------------------------------
+# TEST-BUILD-NOTES records what this bundle is (build time, commit, contents)
 # so a box under test can always answer "which build is this?"; SHA256SUMS
 # lets the receiving side verify the copy before wasting a test round on a
 # truncated transfer. Both are generated last so they cover every file.
 {
-  echo "wave-mcp offline bundle (TEST BUILD, not for release or distribution)"
+  echo "wave-mcp offline bundle"
   echo "built:   $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
   echo "host:    $(hostname 2>/dev/null || echo unknown)"
   echo "commit:  $(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)$(git -C "$REPO_ROOT" diff --quiet 2>/dev/null || echo ' (dirty worktree)')"

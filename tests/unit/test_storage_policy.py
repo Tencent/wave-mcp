@@ -259,12 +259,32 @@ def _stage_conversion_cache(tmp: str) -> None:
     shutil.copy(FOURSTATE_VCD, vcd)
     cache_root = os.path.join(tmp, "cache")
     before = set(os.listdir(src_dir))
-    os.chmod(src_dir, stat.S_IRUSR | stat.S_IXUSR)
+    # an unwritable source dir sends the FST to the cache (forced through the
+    # probe, so it also holds when the suite runs as root)
+    real_probe = convert._dir_writable  # pylint: disable=protected-access
+    convert._dir_writable = lambda d: "no write permission"
     try:
-        with _env(WAVE_MCP_CACHE_ROOT=cache_root):
-            got = convert.cached_fst(vcd, kind="vcd")
+        _conversion_cache_checks(convert, vcd, src_dir, before, cache_root)
     finally:
-        os.chmod(src_dir, stat.S_IRWXU)
+        convert._dir_writable = real_probe
+
+    # two processes, same key, beside placement: both succeed, one converts
+    cache2 = os.path.join(tmp, "cache2")
+    ctx = mp.get_context("fork")
+    with ctx.Pool(2) as pool:
+        results = pool.map(_convert_in_child, [(vcd, cache2), (vcd, cache2)])
+    converted = [r for r in results if not r["cached"]]
+    check("two concurrent processes: both got the same artifact",
+          results[0]["fst"] == results[1]["fst"], str(results))
+    check("two concurrent processes: exactly one converted",
+          len(converted) == 1, str(results))
+
+
+def _conversion_cache_checks(convert, vcd, src_dir, before, cache_root) -> None:
+    with _env(WAVE_MCP_CACHE_ROOT=cache_root):
+        got = convert.cached_fst(vcd, kind="vcd")
+    check("unwritable source dir: notice names the reason",
+          "not writable" in (got.get("notice") or ""))
     check("read-only source dir: conversion succeeds", os.path.exists(got["fst_path"]))
     check("read-only source dir: zero writes next to the source",
           set(os.listdir(src_dir)) == before, str(os.listdir(src_dir)))
@@ -291,17 +311,6 @@ def _stage_conversion_cache(tmp: str) -> None:
     with _env(WAVE_MCP_CACHE_ROOT=cache_root):
         fresh = convert.cached_fst(vcd, kind="vcd")
     check("rewritten source: cache invalidated", fresh["cached"] is False)
-
-    # two processes, same key: both succeed, exactly one converts
-    cache2 = os.path.join(tmp, "cache2")
-    ctx = mp.get_context("fork")
-    with ctx.Pool(2) as pool:
-        results = pool.map(_convert_in_child, [(vcd, cache2), (vcd, cache2)])
-    converted = [r for r in results if not r["cached"]]
-    check("two concurrent processes: both got the same artifact",
-          results[0]["fst"] == results[1]["fst"], str(results))
-    check("two concurrent processes: exactly one converted",
-          len(converted) == 1, str(results))
 
 
 def _stage_manifest_caches(tmp: str) -> None:
@@ -348,20 +357,31 @@ def _stage_manifest_caches(tmp: str) -> None:
               str(info.get("warnings")))
         srv.close_session(session_id=sid)
 
-        # netlist msgpack cache lands in the cache root, not beside maps.json
+        # netlist module store lands in the cache root, never beside maps.json
         sample = os.path.join(EXAMPLES, "sample", "session")
         maps = os.path.join(sample, "netlist", "maps.json")
+        from wave_mcp.netlist import lazy_store
         from wave_mcp.sources import rtl_source
-        if rtl_source._msgpack is not None and os.path.exists(maps):
-            rtl_source._load_maps_json(maps)
-            check("no msgpack sidecar beside maps.json",
-                  not os.path.exists(maps + ".msgpack"))
-            check("msgpack cache under <cache_root>/netlist-cache/",
-                  os.path.exists(rtl_source._maps_cache_path(maps))
-                  and rtl_source._maps_cache_path(maps).startswith(
-                      os.path.join(cache_root, "netlist-cache")))
+        if os.path.exists(maps):
+            before = set(os.listdir(os.path.dirname(maps)))
+            os.environ[lazy_store.LAZY_ENV] = "1"
+            try:
+                src = rtl_source.RtlSource(maps_path=maps)
+            finally:
+                os.environ.pop(lazy_store.LAZY_ENV, None)
+            check("lazy store opened", isinstance(src.maps.get("modules"),
+                                                  lazy_store.LazyModules))
+            check("nothing written beside maps.json",
+                  set(os.listdir(os.path.dirname(maps))) == before)
+            store_root = os.path.join(cache_root, "netlist-store")
+            check("module store under <cache_root>/netlist-store/",
+                  os.path.isdir(store_root) and bool(os.listdir(store_root)))
+            check("no msgpack cache anywhere",
+                  not os.path.exists(os.path.join(cache_root, "netlist-cache")))
+            check("rtl_source no longer imports msgpack",
+                  not hasattr(rtl_source, "_msgpack"))
         else:
-            print("  [SKIP] msgpack not installed or sample netlist missing")
+            print("  [SKIP] sample netlist missing")
 
 
 def main() -> int:

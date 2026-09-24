@@ -4,6 +4,54 @@ All notable changes to wave-mcp are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-09-24
+
+### 中文
+
+#### 新增
+
+- `wave-mcp gc`：列出 session 与缓存占用；`--older-than DAYS`、`--max-size SIZE` 配合 `--apply` 回收，不加 `--apply` 只预览。只处理 `~/.wave-mcp/` 下的两个根目录，显式 `out_dir` 的 session 不受影响。
+
+#### 修复
+
+- filelist 中含未定义环境变量或不存在的路径时，不再静默丢弃：`netlist_health` 给出 `dropped_entries`、`undefined_env_vars`，`trust` 降为 `partial`，并写入 `warnings`；丢条目的 filelist 不再与完整 filelist 共用同一个 session。
+- `-y <库目录>` 配合 `+libext+`（缺省 `.v`/`.sv`）按模块名查找定义文件，不再报 `UnknownModule`。
+- `MissingTimeScale`、`NewlineEOF`、`MisleadingIndentation`、`NonStandardGenBlock` 计入 lint，不再计为错误，也不再拉低 `trust`；`WAVE_MCP_LINT_CODES` 可按站点追加。
+- 未传 `top` 且存在多个根模块时，`netlist_health` 报告 `roots` 数量与样例，并提示传 `top`。
+- 对实例路径调用 `signal_drivers` 返回 `is_an_instance`，并指向 `scope_info` / `list_signals`，不再误报为常量。
+
+#### 变更
+
+- 转出的 FST 改回放在原波形同目录（`dump.vcd` → `dump.fst`，FSDB 另有 `dump.fst.hier`），自动转换和 `convert_vcd_to_fst`/`convert_fsdb_to_fst`（不传 `out_path`）共用这一份。旁边已有的 FST（含手动转换）不早于原波形且能打开就直接复用；过期或损坏则覆盖。原波形目录不可写、带 `scopes`/`signals_file` 的部分转换改放 `~/.wave-mcp/cache/fst/`，返回的 `notice`/`hints`/`warnings` 说明原因和位置。转换记录与锁在缓存内，原波形目录只多出 FST 本身。此前 FST 一律进缓存，已有的 FST 用不上，同一波形换路径即重转。
+- 移除 msgpack：`perf` extra 与 `netlist-cache/` 侧车缓存删除，网表加载只依赖标准库。大网表走按模块索引（`netlist-store/`），缓存占用减半（1.2 GB 网表实测：944 MB → 482 MB）。旧 `netlist-cache/` 不再读取，可用 `wave-mcp gc` 回收。
+- 网表构建完成时直接从内存结果写按模块索引，首次打开不再重新解析 maps.json；索引缺失时的重建解析提速约 40%（同一网表：24.5 s → 14.7 s）。
+- 转换更可控：wave-mcp 被 `timeout`、SIGTERM 或关终端结束时，一并终止它启动的 vcd2fst/fsdb2fst，不再留下孤儿进程继续往源目录写临时文件；下次转换前清掉本机已退出进程的残留。另一个进程占着同一波形的转换锁时，stderr 说明在等谁，超过一次转换的时限即报错，不再无限等待。读 FSDB 阶段也有心跳输出。
+- 覆盖旁边已有 FST 的提示补上保留方法（先改名，或用 `out_path` / `--fst`）；切片转换的提示补上"不切片即可在原位得到完整波形"。`WAVE_MCP_LINT_CODES` 文档写明只对 slang 报为 error 的诊断码生效。
+- 新增 `deploy/build_python_materials.py`：从 python-build-standalone 下载并按 SHA256 校验，生成 `--python-materials` 所需的分发材料并自检。此前带独立 Python 的离线包只能用我们生成的材料。
+
+### English
+
+#### Added
+
+- `wave-mcp gc` lists session and cache usage; `--older-than DAYS` and `--max-size SIZE` reclaim with `--apply`, and only preview without it. Only the two roots under `~/.wave-mcp/` are touched; sessions with an explicit `out_dir` are left alone.
+
+#### Fixed
+
+- Filelist entries with undefined environment variables or missing paths are no longer dropped silently: `netlist_health` reports `dropped_entries` and `undefined_env_vars`, `trust` drops to `partial`, and a warning is emitted; such a filelist no longer shares a session with the complete one.
+- `-y <libdir>` with `+libext+` (default `.v`/`.sv`) resolves module definitions by name instead of reporting `UnknownModule`.
+- `MissingTimeScale`, `NewlineEOF`, `MisleadingIndentation` and `NonStandardGenBlock` count as lints, not errors, and no longer lower `trust`; `WAVE_MCP_LINT_CODES` extends the list per site.
+- With no `top` and several root modules, `netlist_health` reports the `roots` count and samples and suggests passing `top`.
+- `signal_drivers` on an instance path returns `is_an_instance` and points to `scope_info` / `list_signals` instead of reporting a constant.
+
+#### Changed
+
+- Converted FSTs live next to the source waveform again (`dump.vcd` → `dump.fst`; FSDB adds `dump.fst.hier`), shared by automatic conversion and by `convert_vcd_to_fst`/`convert_fsdb_to_fst` without `out_path`. An FST already there, including a hand-converted one, is reused when it is not older than the source and opens; a stale or corrupt one is overwritten. An unwritable source directory or a partial conversion (`scopes`/`signals_file`) uses `~/.wave-mcp/cache/fst/` instead, and `notice`/`hints`/`warnings` say why and where. Records and locks stay in the cache; only the FST appears beside the source. Previously every FST went to the cache, so existing FSTs were ignored and a moved waveform was converted again.
+- msgpack removed: the `perf` extra and the `netlist-cache/` sidecar are gone; netlist loading uses the standard library only. Large netlists open through the per-module store (`netlist-store/`), halving cache usage (1.2 GB netlist: 944 MB → 482 MB). Old `netlist-cache/` entries are no longer read; reclaim them with `wave-mcp gc`.
+- The netlist build writes the per-module store from its in-memory result, so the first open no longer re-parses maps.json; rebuilding a missing store parses about 40% faster (24.5 s → 14.7 s on the same netlist).
+- Conversions stop with wave-mcp: on `timeout`, SIGTERM or a closed terminal the vcd2fst/fsdb2fst it started is terminated instead of lingering and writing temporaries beside the source; leftovers from exited processes on this host are removed before the next conversion. Waiting on another process's conversion lock is reported on stderr (lock file and holder) and fails after one conversion's time limit instead of blocking forever. The FSDB read phase prints heartbeats.
+- The notice for an overwritten FST says how to keep one (rename it first, or `out_path` / `--fst`); the partial-conversion notice says a conversion without slicing lands at the usual name. `WAVE_MCP_LINT_CODES` is documented to apply to error-severity codes only.
+- New `deploy/build_python_materials.py` downloads python-build-standalone archives, verifies them by SHA256 and produces the `--python-materials` directory, then checks it. Previously only our own materials could accompany a bundled Python.
+
 ## [1.0.1] - 2026-09-22
 
 ### 中文

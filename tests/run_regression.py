@@ -49,7 +49,8 @@ _SUITE_ORDER = ["unit/smoke", "unit/definition_name", "unit/dut_root",
                 "unit/p3", "protocol/query_defaults", "protocol/http_sessions",
                 "protocol/http_token",
                 "unit/viewer", "unit/cli_version",
-                "unit/fsdb2fst_packaging", "viewer/e2e",
+                "unit/fsdb2fst_packaging", "unit/fst_beside",
+                "unit/waveform_resolve", "viewer/e2e",
                 "fourstate/base", "fourstate/ext",
                 "projects/functional_verify"]
 
@@ -246,6 +247,10 @@ def main():
          [PY, "-m", "pytest", os.path.join(HERE, "unit", "test_cli_version.py"), "-q"]),
         ("unit/fsdb2fst_packaging",
          [PY, "-m", "pytest", os.path.join(HERE, "unit", "test_fsdb2fst_packaging.py"), "-q"]),
+        ("unit/fst_beside",
+         [PY, "-m", "pytest", os.path.join(HERE, "unit", "test_fst_beside.py"), "-q"]),
+        ("unit/waveform_resolve",
+         [PY, "-m", "pytest", os.path.join(HERE, "unit", "test_waveform_resolve.py"), "-q"]),
     ]
     if _has_pytest():
         for name, cmd in pytest_tests:

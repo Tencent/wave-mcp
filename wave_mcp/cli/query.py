@@ -110,6 +110,8 @@ def _print_tools() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    from .. import convert as _convert
+    _convert.install_exit_handlers()
 
     parser = argparse.ArgumentParser(
         prog="wave-mcp query",

@@ -344,6 +344,25 @@ class TraceEngine:
         return mod, leaf, recs
 
     # -- empty-result classification ----------------------------------------
+    def _instance_named(self, m: dict, inst: str,
+                        leaf: str) -> Optional[Tuple[str, str]]:
+        """``(full path, definition)`` when ``leaf`` names an instance in ``m``.
+
+        Checks the module's instance list first (exact name, then the base
+        name of an arrayed/generate instance such as ``u_x[0]``), then the
+        elaborated ``instance_tree`` under ``inst``.
+        """
+        base = leaf.split("[", 1)[0]
+        for ins in m.get("instances", []) or []:
+            name = ins.get("name", "")
+            if name == leaf or name.split("[", 1)[0] == base:
+                full = f"{inst}.{leaf}" if inst else leaf
+                return full, ins.get("def") or "?"
+        full = f"{inst}.{leaf}" if inst else leaf
+        if full in self.instance_tree:
+            return full, self.instance_tree[full]
+        return None
+
     def classify_empty(self, inst: str, leaf: str, mod: Optional[str],
                        context: str) -> Tuple[str, str]:
         """Classify why a connectivity query returned empty for this signal.
@@ -363,12 +382,24 @@ class TraceEngine:
         port_info = m.get("ports", {}).get(leaf)
         sig_info = m.get("signals", {}).get(leaf)
 
-        # Not in ports or signals → likely parameter / localparam / constant
+        # Not a port or signal: first check whether it names an instance.
+        # A path that stops at an instance (``top.u_core``) is a scope, not a
+        # net; calling it a constant sent callers the wrong way.
         if not port_info and not sig_info:
+            inst_hit = self._instance_named(m, inst, leaf)
+            if inst_hit is not None:
+                full, idef = inst_hit
+                return ("is_an_instance",
+                        f"'{leaf}' is an instance of module '{idef}' inside "
+                        f"'{mod}' (path {full}), not a signal. Instances have "
+                        "no driver of their own: query one of its ports, e.g. "
+                        f"'{full}.<port>', or use scope_info / list_signals "
+                        f"on '{full}' to list them.")
             return ("parameter_or_constant",
-                    f"'{leaf}' is not declared as a port or signal in module "
-                    f"'{mod}'. It is likely a parameter, localparam, enum "
-                    "value, or constant — these have no dynamic connectivity.")
+                    f"'{leaf}' is not declared as a port, signal or instance "
+                    f"in module '{mod}'. It is likely a parameter, localparam, "
+                    "enum value, or constant — these have no dynamic "
+                    "connectivity.")
 
         if port_info:
             direction = port_info.get("direction", "implicit")

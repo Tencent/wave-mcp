@@ -14,64 +14,23 @@ never a silently wrong answer.
 """
 from __future__ import annotations
 
-import json
 import os
 from dataclasses import dataclass
 from typing import List, Optional
 
+from ..netlist import lazy_store
 from ..netlist.trace_engine import TraceEngine
-from ..runtime import storage
-from ..runtime.identity import file_version
-from ..runtime.storage import StoragePolicy
-
-try:  # optional C-accelerated cache; installed via the "perf" extra
-    import msgpack as _msgpack
-except ImportError:  # installs without it keep working on plain JSON
-    _msgpack = None
-
-
-def _maps_cache_path(maps_path: str) -> str:
-    """Derived-cache location of the msgpack form of ``maps_path``.
-
-    Keyed by the maps file's ``file_version``: a rebuilt netlist gets a new
-    file, an unchanged one keeps hitting the same entry, and nothing is ever
-    written next to the user's session artefacts.
-    """
-    pol = storage.policy()
-    return os.path.join(pol.cache_dir("netlist-cache", create=True),
-                        file_version(maps_path) + ".msgpack")
 
 
 def _load_maps_json(maps_path: str) -> dict:
-    """Load a netlist maps.json, through its msgpack cache when available.
+    """Load a netlist maps.json with the standard library only.
 
-    msgpack parses the same structure several times faster than JSON; the
-    cache is written lazily on the first JSON load. Any problem with the cache
-    falls back to plain JSON (and the entry is replaced), and any problem with
-    both yields ``{}`` exactly as the old inline loader did.
+    Large netlists never come through here on a normal open: they go through
+    the lazy per-module store (netlist/lazy_store.py), which is built once and
+    then read module by module. This path serves small netlists and the one
+    parse that builds the store. Any problem yields ``{}``.
     """
-    cache_path = None
-    if _msgpack is not None and os.path.exists(maps_path):
-        try:
-            cache_path = _maps_cache_path(maps_path)
-            if os.path.exists(cache_path):
-                with open(cache_path, "rb") as fh:
-                    return _msgpack.unpack(fh, raw=False)
-        except Exception:  # pylint: disable=broad-except
-            if cache_path:
-                StoragePolicy.discard(cache_path)  # corrupt: rebuild below
-    try:
-        with open(maps_path) as fh:
-            data = json.load(fh)
-    except (OSError, ValueError):
-        return {}
-    if _msgpack is not None and data and cache_path:
-        try:
-            StoragePolicy.atomic_write_bytes(
-                cache_path, _msgpack.packb(data, use_bin_type=True))
-        except OSError:
-            pass  # cache is an optimisation; never fail the load over it
-    return data
+    return lazy_store.load_json(maps_path)
 
 
 @dataclass
@@ -87,31 +46,54 @@ class Unavailable:
 
 class RtlSource:
     def __init__(self, filelist: Optional[List[str]] = None,
-                 maps_path: Optional[str] = None, fst=None):
+                 maps_path: Optional[str] = None, fst=None,
+                 filelist_report: Optional[dict] = None,
+                 requested_top: str = ""):
         self.files: List[str] = [f for f in (filelist or []) if f]
         self.maps: dict = {}
         self.engine: Optional[TraceEngine] = None
         self.fst = fst
         self._maps_dir: Optional[str] = None
+        self._maps_path: Optional[str] = None
+        #: declared/resolved/dropped accounting of the filelist this netlist
+        #: was built from (session.json ``filelist_report``)
+        self.filelist_report: dict = dict(filelist_report or {})
+        self.requested_top = requested_top or ""
         if maps_path and os.path.exists(maps_path):
+            self._maps_path = maps_path
             self._load_maps(maps_path)
 
     def _load_maps(self, maps_path: str):
-        # msgpack sidecar when available; plain JSON otherwise (see
-        # _load_maps_json). An empty result keeps the previous behaviour:
-        # degrade gracefully, never raise.
-        self.maps = _load_maps_json(maps_path)
-        if not self.maps:
-            return
+        # Large netlists open through the lazy per-module store (see
+        # netlist/lazy_store.py): only the summary is read up front and each
+        # module is decoded, and its file paths normalized, on first access.
+        # Small ones keep the eager path (one plain JSON parse). An empty
+        # result degrades gracefully.
         self._maps_dir = os.path.dirname(os.path.abspath(maps_path))
-        self._normalize_map_paths()
+        lazy = None
+        if lazy_store.lazy_enabled(maps_path):
+            lazy = lazy_store.open_lazy(maps_path, fixup=self._fix_module_paths,
+                                        loader=_load_maps_json)
+        if lazy is not None:
+            self.maps = lazy
+        else:
+            self.maps = _load_maps_json(maps_path)
+            if not self.maps:
+                return
+            self._normalize_map_paths()
         if self.maps.get("modules"):
             self.engine = TraceEngine(self.maps, self.fst)
             # backfill files from netlist if filelist empty
             if not self.files:
-                fs = {self.resolve_file(m.get("file"))
-                      for m in self.maps["modules"].values() if m.get("file")}
-                self.files = sorted(f for f in fs if f)
+                self.files = self._files_from_maps()
+
+    def _files_from_maps(self) -> List[str]:
+        """Source files named by the netlist, for sessions without a filelist."""
+        recorded = self.maps.get("source_files")
+        if recorded:
+            return sorted({self.resolve_file(f) for f in recorded if f})
+        fs = {self.resolve_file(f) for _n, f, _l in self._module_file_table() if f}
+        return sorted(f for f in fs if f)
 
     # -- path resolution ------------------------------------------------
 
@@ -169,6 +151,30 @@ class RtlSource:
                     fix(v)
 
         fix(self.maps.get("modules"))
+
+    def _fix_module_paths(self, module: dict) -> None:
+        """Per-module form of :meth:`_normalize_map_paths` (lazy store fixup).
+
+        Absolute entries are left alone without touching the filesystem, which
+        is what almost every netlist stores; only relative ones are resolved.
+        """
+        cache = self.__dict__.setdefault("_path_cache", {})
+
+        def fix(node):
+            if isinstance(node, dict):
+                f = node.get("file")
+                if isinstance(f, str) and f and not f.startswith("/"):
+                    if f not in cache:
+                        cache[f] = self.resolve_file(f)
+                    node["file"] = cache[f]
+                for v in node.values():
+                    if isinstance(v, (dict, list)):
+                        fix(v)
+            elif isinstance(node, list):
+                for v in node:
+                    if isinstance(v, (dict, list)):
+                        fix(v)
+        fix(module)
 
     def resolve_file(self, f: Optional[str]) -> Optional[str]:
         """Map a netlist file entry onto an existing absolute path.
@@ -235,28 +241,77 @@ class RtlSource:
         if dsum.get("by_code"):
             health["top_diagnostic_codes"] = dict(
                 list(dsum["by_code"].items())[:6])
+        if dsum.get("error_by_code"):
+            health["error_codes"] = dict(list(dsum["error_by_code"].items())[:6])
+        if dsum.get("lint_by_code"):
+            health["lint_codes"] = dict(list(dsum["lint_by_code"].items())[:6])
         # self-healing report: incdirs/package-files the builder auto-discovered
         # (so the user can fold them back into the .f) and any tops that failed.
         auto = self.maps.get("auto_resolved") or {}
         if (auto.get("added_incdirs") or auto.get("added_files")
                 or auto.get("rounds") or auto.get("uvm_incdirs")):
             health["auto_resolved"] = auto
+        lib = self.maps.get("library") or {}
+        if lib:
+            health["library"] = {"dirs": len(lib.get("dirs", [])),
+                                 "exts": lib.get("exts", []),
+                                 "resolved_modules": len(lib.get("files", [])),
+                                 "unresolved": lib.get("unresolved", [])[:20]}
         if self.maps.get("failed_tops"):
             health["failed_tops"] = self.maps["failed_tops"]
+        if self.maps.get("top_note"):
+            health["top_note"] = self.maps["top_note"]
+
+    def _roots(self) -> List[str]:
+        roots = self.maps.get("roots")
+        if roots is None:  # netlists built before roots were recorded
+            roots = [p for p in (self.maps.get("instance_tree") or {})
+                     if "." not in p]
+        return list(roots)
+
+    def _hierarchy_health(self, health: dict) -> None:
+        """``roots`` count; a forest (no single top) is named, not implied."""
+        roots = self._roots()
+        health["roots"] = len(roots)
+        if len(roots) > 1:
+            health["hierarchy"] = "forest"
+            health["root_samples"] = roots[:10]
+            health["hierarchy_hint"] = (
+                f"no single top: {len(roots)} uninstantiated modules are each "
+                "a root. Pass top=<module> to elaborate one tree"
+                + ("" if not self.requested_top else
+                   f" (requested top '{self.requested_top}' was not found)")
+                + ".")
+        elif roots:
+            health["hierarchy"] = "tree"
+            health["root"] = roots[0]
 
     def netlist_health(self) -> dict:
         """Netlist-build health so callers know whether to trust connectivity /
         driver / trace answers (and why they might be limited).
 
         Reports module/instance counts, elaboration diagnostics, how many body
-        members were skipped (partial-elaboration robustness), and a coarse
+        members were skipped (partial-elaboration robustness), the filelist
+        accounting (declared / resolved / dropped entries) and a coarse
         ``status``/``trust`` verdict with an actionable hint on failure.
+
+        ``trust`` is ``full`` only when elaboration had no errors *and* every
+        filelist entry resolved. A dropped entry (undefined ``$VAR``, missing
+        path) means part of the design is absent, so absence of a driver or
+        load cannot be read as a design fact: trust is ``partial``.
         """
         if not self.has_netlist:
-            return self._unavailable_health()
+            health = self._unavailable_health()
+            if self.filelist_report:
+                health.update(self.filelist_report)
+            return health
         mods = self.maps.get("modules", {})
         diagnostics = int(self.maps.get("diagnostics", 0) or 0)
-        skipped = sum(int(m.get("skipped_members", 0) or 0) for m in mods.values())
+        if "skipped_members_total" in self.maps:
+            skipped = int(self.maps.get("skipped_members_total") or 0)
+        else:  # netlists built before the summary existed
+            skipped = sum(int(m.get("skipped_members", 0) or 0)
+                          for m in mods.values())
         n_inst = len(self.maps.get("instance_tree", {}) or {})
         is_partial = bool(self.maps.get("partial"))
         dsum = self.maps.get("diagnostics_summary", {}) or {}
@@ -264,9 +319,19 @@ class RtlSource:
         # UVM produces thousands of harmless lint WARNINGS (IntBoolConv, etc.)
         # that must not be mistaken for a broken netlist.
         errors = int(dsum.get("errors", 0) or 0)
-        warnings = max(diagnostics - errors, 0)
         n_lints = int(dsum.get("lints", 0) or 0)
-        if errors == 0 and not is_partial:
+        warnings = max(diagnostics - errors - n_lints, 0)
+        dropped = int(self.filelist_report.get("dropped_entries", 0) or 0)
+        reasons: List[str] = []
+        if errors:
+            reasons.append(f"{errors} elaboration error(s)")
+        if is_partial and not errors:
+            reasons.append("no top instance elaborated")
+        if dropped:
+            reasons.append(f"{dropped} filelist entr"
+                           + ("y" if dropped == 1 else "ies")
+                           + " not resolved")
+        if not reasons:
             status = "ok" if skipped == 0 else "ok_with_warnings"
             trust = "full"
         else:
@@ -275,24 +340,38 @@ class RtlSource:
             "available": True,
             "status": status,
             "trust": trust,
-            "partial": is_partial,
+            "partial": is_partial or bool(dropped),
             "modules": len(mods),
             "instances": n_inst,
             "diagnostics": diagnostics,
             "diagnostic_errors": errors,
             "diagnostic_warnings": warnings,
-            # slang style-lint diagnostics reclassified out of the error count
-            # (EmptyBody/SignCompare/...): informational, never affect trust.
+            # slang Error-severity lint reclassified out of the error count
+            # (MissingTimeScale/NewlineEOF/...): informational, never affect trust.
             "diagnostic_lints": n_lints,
             "skipped_members": skipped,
             "source_files": len(self.files),
-            "note": ("clean elaboration" if trust == "full" else
-                     f"{errors} error(s), {warnings} warning(s)"
-                     + (f", {n_lints} style lint(s)" if n_lints else "")
-                     + "; warnings are usually harmless UVM lint. Some "
-                     "connectivity/trace paths may be incomplete only if "
-                     "errors > 0."),
         }
+        if self.filelist_report:
+            health.update(self.filelist_report)
+        if trust == "full":
+            health["note"] = "clean elaboration"
+        else:
+            note = "; ".join(reasons)
+            if dropped:
+                note += (". Missing sources make absent drivers/loads "
+                         "inconclusive; fix the filelist before trusting "
+                         "'not found' answers")
+            elif errors:
+                note += ". Some connectivity/trace paths may be incomplete"
+            health["note"] = note
+        if self._maps_path:
+            try:
+                health["maps_mb"] = round(
+                    os.path.getsize(self._maps_path) / 1e6, 1)
+            except OSError:
+                pass
+        self._hierarchy_health(health)
         self._extend_health_guidance(health, dsum)
         return health
 
@@ -306,12 +385,21 @@ class RtlSource:
         s = short.lower()
         return [f for f in self.files if s in os.path.basename(f).lower()]
 
+    def _module_file_table(self):
+        """(name, file, line) for every module; from the store summary when lazy."""
+        mods = self.maps.get("modules", {})
+        files = getattr(mods, "files", None)
+        if files:
+            lines = getattr(mods, "lines", {}) or {}
+            return [(n, files.get(n), lines.get(n)) for n in mods.keys()]
+        return [(n, m.get("file"), m.get("line")) for n, m in mods.items()]
+
     def modules_in_file(self, full_file_path: str) -> List[str]:
         ap = os.path.abspath(full_file_path)
         if self.has_netlist:
             out = []
-            for name, m in self.maps["modules"].items():
-                resolved = self.resolve_file(m.get("file"))
+            for name, f, _line in self._module_file_table():
+                resolved = self.resolve_file(f)
                 if resolved and os.path.abspath(resolved) == ap:
                     out.append(name)
             return out
@@ -319,7 +407,15 @@ class RtlSource:
 
     # -- declarations (2.5 / 3-line) ---------------------------------------
     def module_declaration(self, module_name: str) -> Optional[dict]:
-        m = self.maps.get("modules", {}).get(module_name)
+        mods = self.maps.get("modules", {})
+        if module_name not in mods:
+            return None
+        files = getattr(mods, "files", None)
+        if files:
+            return {"file": self.resolve_file(files.get(module_name)),
+                    "line": (getattr(mods, "lines", {}) or {}).get(module_name),
+                    "module": module_name}
+        m = mods.get(module_name)
         if not m:
             return None
         return {"file": self.resolve_file(m.get("file")),
