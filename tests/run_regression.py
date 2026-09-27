@@ -48,7 +48,7 @@ _SUITE_ORDER = ["unit/smoke", "unit/definition_name", "unit/dut_root",
                 "unit/session_isolation", "unit/request_snapshot",
                 "unit/p3", "protocol/query_defaults", "protocol/http_sessions",
                 "protocol/http_token",
-                "unit/viewer", "unit/cli_version",
+                "unit/viewer", "unit/timeutil", "unit/cli_version",
                 "unit/fsdb2fst_packaging", "unit/fst_beside",
                 "unit/waveform_resolve", "viewer/e2e",
                 "fourstate/base", "fourstate/ext",
@@ -243,6 +243,8 @@ def main():
     # the whole run. Where pytest IS available, the dev-file assertions inside
     # skip themselves (see the unit test files). ----
     pytest_tests = [
+        ("unit/timeutil",
+         [PY, "-m", "pytest", os.path.join(HERE, "unit", "test_timeutil.py"), "-q"]),
         ("unit/cli_version",
          [PY, "-m", "pytest", os.path.join(HERE, "unit", "test_cli_version.py"), "-q"]),
         ("unit/fsdb2fst_packaging",

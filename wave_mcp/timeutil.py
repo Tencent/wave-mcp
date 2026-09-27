@@ -10,6 +10,7 @@ callers.
 from __future__ import annotations
 
 import re
+from fractions import Fraction
 
 # exponent (power of ten, in seconds) for each supported unit
 _UNIT_EXP = {
@@ -28,19 +29,24 @@ VALID_UNITS = tuple(_UNIT_EXP)
 _TIME_RE = re.compile(r"^\s*([0-9]*\.?[0-9]+)\s*([a-zA-Z]*)\s*$")
 
 
+def _parse_time(text: str) -> tuple[str, int]:
+    """Validate a time string without losing its decimal digits."""
+    m = _TIME_RE.match(str(text))
+    if not m:
+        raise ValueError(f"invalid time string: {text!r}")
+    unit = (m.group(2) or "s").lower()
+    if unit not in _UNIT_EXP:
+        raise ValueError(f"unknown time unit in {text!r}; expected one of {list(_UNIT_EXP)}")
+    return m.group(1), _UNIT_EXP[unit]
+
+
 def parse_time_to_seconds(text: str) -> float:
     """Parse a time string such as ``"100ns"`` into seconds (float).
 
     A bare number (no unit) is interpreted as seconds.
     """
-    m = _TIME_RE.match(str(text))
-    if not m:
-        raise ValueError(f"invalid time string: {text!r}")
-    value = float(m.group(1))
-    unit = (m.group(2) or "s").lower()
-    if unit not in _UNIT_EXP:
-        raise ValueError(f"unknown time unit in {text!r}; expected one of {list(_UNIT_EXP)}")
-    return value * (10.0 ** _UNIT_EXP[unit])
+    value, exp = _parse_time(text)
+    return float(value) * (10.0 ** exp)
 
 
 #: fstReaderGetValueFromHandleAtTime takes the time as uint64_t. A larger
@@ -54,9 +60,12 @@ def time_to_fst_units(text: str, timescale_exp: int) -> int:
 
     Raises ``ValueError`` when the value does not fit the FST time range
     (e.g. ``"1000000000000s"`` on a ps-scale dump).
+    Fractional ticks round to the nearest integer, with ties to even.
     """
-    seconds = parse_time_to_seconds(text)
-    units = int(round(seconds / (10.0 ** timescale_exp)))
+    value, exp = _parse_time(text)
+    # Float seconds lose uint64 ticks and can move exact half-tick ties to
+    # either side. Scale the original decimal exactly before rounding once.
+    units = round(Fraction(value) * Fraction(10) ** (exp - timescale_exp))
     if units > _FST_TIME_MAX:
         raise ValueError(
             f"time {text!r} exceeds the representable FST time range")
