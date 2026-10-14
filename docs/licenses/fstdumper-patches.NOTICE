@@ -1,44 +1,61 @@
-fstdumper patch files: attribution and license notice
+fstdumper patch: attribution and license notice
 
 Upstream project: fstdumper, https://github.com/semify-eda/fstdumper
 Upstream revision: 3c7506333d2c9ad098d4526209621ea401a077ba
 
-Patches in this repository (third_party/fstdumper/):
+Patch in this repository (third_party/fstdumper/):
 
-1. fstdumper-xcelium-fixes.patch
-   Fixes Xcelium VPI compatibility and final-time value changes. Key
-   changes: skip no-op transitions, handle vpiNamedEvent without calling
-   vpi_get_value (Xcelium aborts otherwise), fix a one byte buffer
-   overrun when dumping X values, traverse vpiInterface scopes, guard
-   unsupported VPI iterators on Xcelium, flush pending value changes
-   before $finish, add a regression testbench.
+fstdumper-xcelium.patch
+   Makes fstdumper work on Cadence Xcelium. Builds for Icarus Verilog keep
+   the upstream behaviour. Key changes:
+   - scopes: traverse interfaces; reach generate blocks, instance arrays,
+     named begin/fork, static task/function variables and clocking blocks
+     through vpiInternalScope;
+   - types: dump enum, packed struct/union, packed arrays, bit and integer
+     nets and clocking-block signals; count objects FST cannot hold and
+     report them in one line per $dumpvars;
+   - data: declare each signal once; write port-collapsed nets as FST
+     aliases; skip no-op value changes; flush pending value changes before
+     $finish;
+   - names: write escaped identifiers and names containing '$' as in the
+     RTL; write declared ranges, port directions and interface definition
+     names;
+   - robustness: skip protected (encrypted) objects and objects without
+     read access; guard NULL names, unusable sizes and over-long names;
+     handle vpiNamedEvent without vpi_get_value; fix a one byte buffer
+     overrun when dumping X values.
 
-2. fstdumper-perf-opt.patch (optional)
-   Caches vpiType and vpiSize at registration time and reuses a
-   per-signal buffer in the hot path, removing per value change
-   vpi_get calls and malloc/free.
+   Files: src/sys_fst.c and src/vcd_priv.c (modified), src/fst_sv_vpi.h
+   (new).
 
 Original copyright of the patched files:
 
-src/sys_fst.c carries its own header:
-
-  Copyright (c) 1999-2021 Stephen Williams (steve@icarus.com)
-  Licensed under GPL-2.0-or-later.
+src/sys_fst.c: Copyright (c) 1999-2021 Stephen Williams (steve@icarus.com)
+src/vcd_priv.c: Copyright (c) 2003-2021 Stephen Williams (steve@icarus.com)
+Both are licensed under GPL-2.0-or-later (verbatim headers in
+fstdumper-sys_fst.NOTICE and fstdumper-vcd_priv.NOTICE).
 
 Modifications:
 
   Copyright (c) 2026 The wave-mcp project contributors (Tencent).
-  Modified 2026-08-31 for Xcelium compatibility and dump performance.
+  Modified 2026-08-31, 2026-10-09 and 2026-10-12 for Xcelium
+  compatibility; consolidated into one patch on 2026-10-13.
+  src/fst_sv_vpi.h is new and carries its own GPL-3.0 header.
 
-License of these patches:
+License of the patch:
 
-The patched file header permits GPL-2.0 or any later version. These
-patch files exercise that option and are distributed under GPL-3.0,
-consistent with the upstream repository top level license. They are not
-covered by the MIT license of wave-mcp.
+The patched file headers permit GPL-2.0 or any later version. The patch
+exercises that option and is distributed under GPL-3.0, consistent with
+the upstream repository top level license. It is not covered by the
+Apache-2.0 license of wave-mcp.
 
 License texts shipped alongside:
 
 - fstdumper-GPL-3.0.txt: GPL-3.0 full text (upstream top level).
 - GPL-2.0.txt: GPL-2.0 full text (the file header option).
 - fstdumper-sys_fst.NOTICE: verbatim header of src/sys_fst.c.
+- fstdumper-vcd_priv.NOTICE: verbatim header of src/vcd_priv.c.
+
+Not part of the patch: deploy/build_fstdumper.sh, deploy/verify_fstdumper.sh,
+deploy/fstdumper_verify/ and examples/xcelium_fst/fst_dump_cfg.sv are
+original wave-mcp files under its Apache-2.0 license.

@@ -83,9 +83,10 @@ prepare_session(wave_path="dump.fsdb", scopes=["u_core"], filelist_path="rtl.f")
 ### ④ Xcelium 直出 FST（fstdumper）
 
 Cadence 环境的推荐路径：挂一个 GPL-3.0 的开源 VPI 插件让 xrun 在仿真时直接写
-FST，零转换、免商用波形 license。代价是
-Xcelium 的 VPI 不支持 generate / task 子 scope 遍历，层次覆盖取决于设计构成。
-完整流程、补丁说明与适用范围见 [XCELIUM_FST_GUIDE.md](XCELIUM_FST_GUIDE.md)。
+FST，零转换、免商用波形 license。打上仓库里的 Xcelium 补丁后，generate 块、
+clocking block、静态 task 局部变量和常用 SV 类型都能 dump；parameter、automatic
+变量、unpacked 数组等仍然拿不到。完整流程、验证方法与适用范围见
+[XCELIUM_FST_GUIDE.md](XCELIUM_FST_GUIDE.md)。
 
 ## trace / 驱动的命门是"路径对齐"
 
@@ -125,9 +126,10 @@ FST 路径：top_tb.U_DECODE.u_decode_unit   （根在仿真顶层）
 
 **已知限制**：
 
-- Xcelium 直出受 VPI 限制，不支持 generate / task 子 scope 遍历，层次覆盖取决于
-  设计构成，详见 [XCELIUM_FST_GUIDE.md](XCELIUM_FST_GUIDE.md)。作为补偿，直出的
-  FST 携带 RTL 模块定义名，`trace_value` 对 DUT 内部信号的解析优于 VCD 转换路径。
+- Xcelium 直出拿不到 parameter、automatic 变量、unpacked 数组、加密 IP 内部和
+  VHDL 部分，同一时刻内的零宽毛刺只保留最终值，详见
+  [XCELIUM_FST_GUIDE.md](XCELIUM_FST_GUIDE.md)。直出的 FST 携带 module 与 interface
+  定义名，路径写法与 RTL 网表一致，`trace_value` 对 DUT 内部信号的解析优于 VCD 转换路径。
 - VCD 超过 10 GB 后 `vcd2fst` 可能长时间转换直至超时，这个量级建议从源头直出 FST。
 - FSDB 在千万信号量级的门级设计上受 FsdbReader 限制，详见
   [FSDB_GUIDE.md](FSDB_GUIDE.md) 的「超大文件的处理」。

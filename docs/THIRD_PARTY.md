@@ -161,7 +161,7 @@ scope stated in later commits was narrower than what had actually been
 consulted. Both are corrected above and in the source file headers, and our
 thanks go to the TraceWeave author for the work we could read and build on.
 
-`third_party/fstdumper/` carries patch files for the upstream
+`third_party/fstdumper/` carries a patch for the upstream
 [fstdumper](https://github.com/semify-eda/fstdumper) project (GPL-3.0), a VPI
 plugin that lets Xcelium (xrun) dump FST directly during simulation. See
 [docs/XCELIUM_FST_GUIDE.md](XCELIUM_FST_GUIDE.md) for the integration flow.
@@ -169,8 +169,7 @@ plugin that lets Xcelium (xrun) dump FST directly during simulation. See
 | Component | License | Source |
 | --- | --- | --- |
 | fstdumper (upstream plugin) | GPL-3.0 | https://github.com/semify-eda/fstdumper |
-| `fstdumper-xcelium-fixes.patch` | GPL-3.0 (inherits upstream license) | this repo |
-| `fstdumper-perf-opt.patch` (optional) | GPL-3.0 (inherits upstream license) | this repo |
+| `fstdumper-xcelium.patch` | GPL-3.0 (inherits upstream license) | this repo |
 
 Licensing notes:
 
@@ -179,25 +178,32 @@ Licensing notes:
   both offline bundles contain neither; this is not an assertion about
   every historical image. `deploy/build_fstdumper.sh` performs no clone/fetch:
   users obtain the upstream source themselves, then the script applies the
-  patches with `patch -p1` and builds the `.so` in that directory. The plugin
+  patch with `patch -p1` and builds the `.so` in that directory. The plugin
   is loaded by the simulator, not linked into the wave-mcp process. This
   technical boundary does not determine the license consequences of using
   the plugin with a simulator.
-- The patch files are derived work of the patched files and are NOT covered
-  by wave-mcp's MIT license. `src/sys_fst.c` carries a GPL-2.0-or-later
-  header, Copyright (c) 1999-2021 Stephen Williams (steve@icarus.com); its
-  later version option is exercised here, so the patches are distributed
-  under GPL-3.0, consistent with the upstream top level license. The
-  patches were modified 2026-08-31 by the wave-mcp project contributors
-  (Tencent). Attribution, modification dates and change summaries are
-  recorded in [licenses/fstdumper-patches.NOTICE](licenses/fstdumper-patches.NOTICE).
+- The patch file is derived work of the patched files and is NOT covered
+  by wave-mcp's Apache-2.0 license. `src/sys_fst.c` and `src/vcd_priv.c` carry
+  GPL-2.0-or-later headers, Copyright (c) 1999-2021 and 2003-2021 Stephen
+  Williams (steve@icarus.com); the later version option is exercised here,
+  so the patch is distributed under GPL-3.0, consistent with the upstream
+  top level license. The new file `src/fst_sv_vpi.h` carries its own
+  GPL-3.0 header. The patch was modified 2026-08-31, 2026-10-09 and
+  2026-10-12 and consolidated 2026-10-13 by the wave-mcp project
+  contributors (Tencent). Attribution, modification dates and the change
+  summary are recorded in
+  [licenses/fstdumper-patches.NOTICE](licenses/fstdumper-patches.NOTICE).
+- `deploy/build_fstdumper.sh`, `deploy/verify_fstdumper.sh`,
+  `deploy/fstdumper_verify/` and `examples/xcelium_fst/fst_dump_cfg.sv`
+  are original wave-mcp files under its Apache-2.0 license; they contain no
+  fstdumper code.
 - Compiled `.so` artifacts must never be committed or shipped with wave-mcp,
   its PyPI package, or its release assets.
-- The fixes were also contributed upstream (semify-eda/fstdumper#6, fork
-  xxin0816/fstdumper). Upstream has been inactive since 2023-09, so the
-  local patches are maintained here on a long-term basis and are NOT gated
-  on upstream acceptance; if upstream ever merges them, the local patches
-  can be dropped at that point.
+- The first round of fixes was also contributed upstream
+  (semify-eda/fstdumper#6, fork xxin0816/fstdumper). Upstream has been
+  inactive since 2023-09, so the local patch is maintained here on a
+  long-term basis and is NOT gated on upstream acceptance; if upstream ever
+  merges equivalent changes, the local patch can shrink accordingly.
 
 ## Standalone Python runtime (offline bundle only)
 

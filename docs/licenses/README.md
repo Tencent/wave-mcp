@@ -42,9 +42,10 @@ hashes. These text files alone do not replace binary-specific source and
 relink materials. See [packaging materials](../PACKAGING_MATERIALS.md).
 
 `fstdumper-patches.NOTICE` records patch attribution, modification dates,
-change summaries and the GPL-3.0 choice for the two fstdumper patch files.
-`fstdumper.SOURCES.json` records the upstream commit and hashes of the
-shipped fstdumper notices.
+the change summary and the GPL-3.0 choice for the fstdumper patch file.
+`fstdumper-sys_fst.NOTICE` and `fstdumper-vcd_priv.NOTICE` are verbatim
+headers of the two patched upstream files. `fstdumper.SOURCES.json`
+records the upstream commit and hashes of the shipped fstdumper notices.
 
 Optional Python, viewer and converter inputs require a corresponding verified
 material directory. The packaging gate checks identity and completeness, not

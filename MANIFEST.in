@@ -13,6 +13,11 @@ include docs/DEPLOY_AIRGAP.md
 include docs/VIEWER_SCREENSHOTS.md
 recursive-include docs/images *
 recursive-include examples *
+# run outputs of the example scripts; sdist must not pick them up from a dirty tree
+prune examples/regression_demo/runs
+prune examples/regression_demo/report
+prune examples/verilator_quickstart/build
+prune examples/static_analysis/session
 recursive-include wave_mcp/viewer/web *.html *.js
 recursive-include docs/licenses *
 # fsdb2fst is built on demand on the user's machine (the Verdi FsdbReader

@@ -68,13 +68,15 @@ The `fsdb2fst` binary lands in `~/.wave-mcp/cache/fsdb2fst/` and is a local arti
 
 ## 3. fstdumper (Xcelium VPI plugin)
 
-The GPL-3.0 upstream plugin that lets Xcelium (xrun) dump FST directly during simulation. wave-mcp distributes neither its source nor binaries; only two fix patches ship with the repo (GPL-3.0, `third_party/fstdumper/`).
+The GPL-3.0 upstream plugin that lets Xcelium (xrun) dump FST directly during simulation. wave-mcp distributes neither its source nor binaries; only one Xcelium patch ships with the repo (GPL-3.0, `third_party/fstdumper/`).
 
 Prerequisites: clone upstream `https://github.com/semify-eda/fstdumper` yourself (pinned commit in `docs/licenses/fstdumper.SOURCES.json`), gcc, make, patch, zlib headers; build in the same environment that runs xrun.
 
 ```bash
 git clone https://github.com/semify-eda/fstdumper /path/to/fstdumper
-bash deploy/build_fstdumper.sh /path/to/fstdumper          # optionally --perf-opt
+git -C /path/to/fstdumper checkout 3c75063
+bash deploy/build_fstdumper.sh /path/to/fstdumper
+bash deploy/verify_fstdumper.sh --so /path/to/fstdumper/fstdumper.so   # needs xrun and fst2vcd
 ```
 
 The `fstdumper.so` stays in your checkout, is loaded by xrun at simulation time, and never links into the wave-mcp process. Integration flow: [XCELIUM_FST_GUIDE.md](XCELIUM_FST_GUIDE.md).

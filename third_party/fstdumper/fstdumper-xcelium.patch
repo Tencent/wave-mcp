@@ -1,0 +1,1294 @@
+fstdumper Xcelium patch (wave-mcp)
+
+Upstream : https://github.com/semify-eda/fstdumper
+Base     : commit 3c7506333d2c9ad098d4526209621ea401a077ba
+License  : GPL-3.0 (see docs/licenses/fstdumper-patches.NOTICE)
+Apply    : bash deploy/build_fstdumper.sh <pristine checkout of the base>
+           or: cd <checkout> && patch -p1 < fstdumper-xcelium.patch
+
+Changes, all for Cadence Xcelium (Icarus builds keep upstream behaviour):
+ * Scopes: interfaces; generate blocks, instance arrays, named begin/fork,
+   static task/function locals and clocking blocks via vpiInternalScope.
+ * Types: enum, packed struct/union, packed arrays, bit and integer nets,
+   clocking-block signals.  Objects FST cannot hold (memories, strings,
+   class handles, automatic variables, unpacked structs) are counted in one
+   "FST info" line per $dumpvars instead of one warning per object.
+ * Data: one declaration per signal; port-collapsed nets written as FST
+   aliases (one callback per simulated net, FST_NO_ALIAS=1 disables);
+   no-op value changes dropped; last changes before $finish flushed.
+ * Names: RTL spelling for escaped identifiers and names containing '$',
+   declared ranges such as [0:3] or [8:1], port directions, interface
+   definition names.
+ * Robustness: protected (encrypted) objects and objects without read
+   access are skipped; NULL names, unusable sizes and over-long names no
+   longer crash; named events no longer trigger VPI NOVALOB; one byte
+   buffer overrun in show_this_item_x() fixed.
+
+Files: src/sys_fst.c, src/vcd_priv.c (modified), src/fst_sv_vpi.h (new).
+
+diff --git a/src/fst_sv_vpi.h b/src/fst_sv_vpi.h
+new file mode 100644
+index 0000000..456cbc1
+--- /dev/null
++++ b/src/fst_sv_vpi.h
+@@ -0,0 +1,75 @@
++#ifndef FST_SV_VPI_H
++#define FST_SV_VPI_H
++/*
++ * SystemVerilog VPI object types / properties used by fstdumper on Xcelium.
++ *
++ * Copyright (c) 2026 The wave-mcp project contributors (Tencent).
++ *
++ * This file is part of a modified version of fstdumper and is licensed
++ * under the GNU General Public License version 3 (see LICENSE), the same
++ * terms as the fstdumper sources it extends.
++ *
++ * The bundled vpi_user.h / sv_vpi_user.h come from Icarus Verilog and lack
++ * these.  The values follow IEEE 1800 / IEEE 1364; the ones marked CDS are
++ * Cadence-specific.  Each value was checked to match the headers shipped
++ * with Xcelium 25.09, 26.05 and 26.08.  Every other VPI constant fstdumper
++ * uses has the same value in the bundled headers and in Xcelium's.
++ */
++#include "sv_vpi_user.h"
++
++#ifndef vpiEnumVar
++# define vpiEnumVar            617
++#endif
++#ifndef vpiStructVar
++# define vpiStructVar          618
++#endif
++#ifndef vpiUnionVar
++# define vpiUnionVar           619
++#endif
++#ifndef vpiPackedArrayVar
++# define vpiPackedArrayVar     623
++#endif
++#ifndef vpiEnumNet
++# define vpiEnumNet            680
++#endif
++#ifndef vpiIntegerNet
++# define vpiIntegerNet         681
++#endif
++#ifndef vpiStructNet
++# define vpiStructNet          683
++#endif
++#ifndef vpiPackedArrayNet
++# define vpiPackedArrayNet     693
++#endif
++#ifndef vpiUnionNet
++# define vpiUnionNet           525   /* CDS */
++#endif
++#ifndef vpiBitNet
++# define vpiBitNet             532   /* CDS: e.g. interface `input bit clk` */
++#endif
++#ifndef vpiClockingBlock
++# define vpiClockingBlock      650
++#endif
++#ifndef vpiClockingIODecl
++# define vpiClockingIODecl     651
++#endif
++#ifndef vpiPacked
++# define vpiPacked             630   /* property */
++#endif
++#ifndef vpiSimNet
++# define vpiSimNet             126   /* net after port collapsing (vpi_user.h) */
++#endif
++#ifndef vpiOperation
++# define vpiOperation           39   /* IEEE 1364 vpi_user.h */
++#endif
++#ifndef vpiOperand
++# define vpiOperand             97
++#endif
++#ifndef vpiReadAccess
++# define vpiReadAccess         509   /* CDS property (vpi_user_cds.h) */
++#endif
++#ifndef vpiIsProtected
++# define vpiIsProtected        74    /* property (vpi_user.h, IEEE 1364-2005) */
++#endif
++
++#endif /* FST_SV_VPI_H */
+diff --git a/src/sys_fst.c b/src/sys_fst.c
+index 889479e..aff46ef 100644
+--- a/src/sys_fst.c
++++ b/src/sys_fst.c
+@@ -32,6 +32,413 @@
+ # include  <assert.h>
+ # include  <time.h>
+ # include  "ivl_alloc.h"
++# include  "fst_sv_vpi.h"   /* SV object types and properties for Xcelium */
++
++/* Objects with no FST representation (memories, strings, class handles,
++ * unpacked structs, automatic variables, ...).  They are counted and
++ * reported in ONE "FST info" line per $dumpvars call instead of one
++ * "FST warning" line per object, which used to turn every regression log
++ * into "PASS with warning". */
++#define FST_NOTE_MAX 32
++static struct { char what[48]; unsigned count; } fst_notes[FST_NOTE_MAX];
++static int fst_nnotes;
++
++static void fst_note_skipped(const char *what)
++{
++      int i;
++      if (!what) what = "unknown";
++      for (i = 0; i < fst_nnotes; i++) {
++	    if (strcmp(fst_notes[i].what, what) == 0) {
++		  fst_notes[i].count++;
++		  return;
++	    }
++      }
++      if (fst_nnotes < FST_NOTE_MAX) {
++	    strncpy(fst_notes[fst_nnotes].what, what,
++	            sizeof(fst_notes[0].what) - 1);
++	    fst_notes[fst_nnotes].what[sizeof(fst_notes[0].what) - 1] = '\0';
++	    fst_notes[fst_nnotes].count = 1;
++	    fst_nnotes++;
++      }
++}
++
++static void fst_report_skipped(void)
++{
++      int i;
++      if (!fst_nnotes) return;
++      vpi_printf("FST info: $dumpvars: not dumped (no FST representation):");
++      for (i = 0; i < fst_nnotes; i++)
++	    vpi_printf("%s %s x%u", i ? "," : "", fst_notes[i].what,
++	               fst_notes[i].count);
++      vpi_printf(".\n");
++      fst_nnotes = 0;
++}
++
++/* Type of the scope whose children scan_item() is currently visiting
++ * (0 for the $dumpvars arguments themselves).  Variables declared in
++ * task / function / begin / fork scopes may be automatic: Xcelium has no
++ * value for them outside an activation ("VPI NOVALOB") and refuses
++ * value-change callbacks on them ("VPI NOAUTOCB"). */
++static PLI_INT32 scan_parent_type = 0;
++
++static int is_procedural_scope(PLI_INT32 type)
++{
++      return type == vpiTask || type == vpiFunction ||
++             type == vpiNamedBegin || type == vpiNamedFork;
++}
++
++/* Name to write into the FST for a vpiName (malloc'd).
++ * Xcelium returns an escaped identifier in source form, backslash and
++ * terminating blank included ("\a+b ").  Upstream (written for Icarus)
++ * prefixed one more backslash, giving "\\a+b ".  Write it the way
++ * Xcelium's own VCD dumper does and the way RTL tools (wave-mcp's netlist,
++ * pyslang) name it: "a+b", no backslash, no blank.  With a backslash the
++ * FST path and the netlist path of the same signal differ, so value and
++ * driver queries need two different spellings.  Any other vpiName is
++ * written as is (upstream also escaped names containing '$', which is
++ * legal in a simple identifier). */
++static char *fst_ident(const char *name)
++{
++      char *s;
++      size_t n;
++      # ifdef ICARUS_VERILOG
++      if (is_escaped_id(name)) {
++	    s = malloc(strlen(name) + 2);
++	    sprintf(s, "\\%s", name);
++	    return s;
++      }
++      return strdup(name);
++      # else
++      s = strdup(name[0] == '\\' && name[1] ? name + 1 : name);
++      n = strlen(s);
++      while (n > 1 && (s[n-1] == ' ' || s[n-1] == '\t')) s[--n] = 0;
++      return s;
++      # endif
++}
++
++/* Scope names: upstream wrote vpiName verbatim, which on Xcelium kept the
++ * backslash and the blank of an escaped instance name. */
++static char *fst_scope_ident(const char *name)
++{
++      # ifdef ICARUS_VERILOG
++      return strdup(name);
++      # else
++      return fst_ident(name);
++      # endif
++}
++
++/* Port directions of the module / interface being scanned: vpiName of the
++ * port -> FST_VD_INPUT / OUTPUT / INOUT.  Upstream declared every signal
++ * FST_VD_IMPLICIT, so FST readers (GTKWave's port icons, wave-mcp's
++ * list_signals signal_type=Port/Input/Output) could not tell ports apart.
++ * Open addressing, one table per scope; see scan_item(). */
++struct port_map {
++      char **key;
++      unsigned char *dir;
++      unsigned cap, used;   /* cap: power of two, 0 = empty */
++};
++
++static struct port_map *scan_ports = NULL;
++
++static unsigned name_hash(const char *s);
++
++static void port_map_put(struct port_map *pm, const char *name, int dir)
++{
++      unsigned i, mask;
++      if (2 * (pm->used + 1) > pm->cap) {
++	    unsigned ncap = pm->cap ? 2 * pm->cap : 32, k;
++	    char **nk = calloc(ncap, sizeof(char *));
++	    unsigned char *nd = calloc(ncap, 1);
++	    for (k = 0; k < pm->cap; k++) {
++		  if (!pm->key[k]) continue;
++		  i = name_hash(pm->key[k]) & (ncap - 1);
++		  while (nk[i]) i = (i + 1) & (ncap - 1);
++		  nk[i] = pm->key[k];
++		  nd[i] = pm->dir[k];
++	    }
++	    free(pm->key);
++	    free(pm->dir);
++	    pm->key = nk;
++	    pm->dir = nd;
++	    pm->cap = ncap;
++      }
++      mask = pm->cap - 1;
++      for (i = name_hash(name) & mask; pm->key[i]; i = (i + 1) & mask)
++	    if (strcmp(pm->key[i], name) == 0) return;
++      pm->key[i] = strdup(name);
++      pm->dir[i] = (unsigned char)dir;
++      pm->used++;
++}
++
++static int port_map_get(const struct port_map *pm, const char *name)
++{
++      unsigned i, mask;
++      if (!pm || !pm->cap) return FST_VD_IMPLICIT;
++      mask = pm->cap - 1;
++      for (i = name_hash(name) & mask; pm->key[i]; i = (i + 1) & mask)
++	    if (strcmp(pm->key[i], name) == 0) return pm->dir[i];
++      return FST_VD_IMPLICIT;
++}
++
++static void port_map_free(struct port_map *pm)
++{
++      unsigned k;
++      for (k = 0; k < pm->cap; k++) free(pm->key[k]);
++      free(pm->key);
++      free(pm->dir);
++}
++
++/* Fill `pm` from vpiPort of a module / interface instance. */
++static void collect_ports(vpiHandle scope, struct port_map *pm)
++{
++      vpiHandle it = vpi_iterate(vpiPort, scope), p;
++      while (it && (p = vpi_scan(it))) {
++	    const char *pn;
++	    int d;
++	      /* A plain wrapper can expose ports that belong to an encrypted
++	       * model; reading their name prints "ERROR: VPI AGSOPRO" once per
++	       * port, which makes a passing test fail its log check. */
++	    if (vpi_get(vpiIsProtected, p) == 1) continue;
++	    pn = vpi_get_str(vpiName, p);
++	    if (!pn) continue;
++	    switch (vpi_get(vpiDirection, p)) {
++		case vpiInput:  d = FST_VD_INPUT;  break;
++		case vpiOutput: d = FST_VD_OUTPUT; break;
++		case vpiInout:  d = FST_VD_INOUT;  break;
++		default: continue;
++	    }
++	    port_map_put(pm, pn, d);
++      }
++}
++
++/* Local names of the signals already declared in the scope being scanned.
++ * One small open-addressing hash set per scope; see scan_item(). */
++struct name_set {
++      char **slot;
++      unsigned cap;   /* power of two, 0 = not allocated yet */
++      unsigned used;
++};
++
++static struct name_set *scan_names = NULL;
++
++static unsigned name_hash(const char *s)
++{
++      unsigned h = 2166136261u;            /* FNV-1a */
++      while (*s) h = (h ^ (unsigned char)*s++) * 16777619u;
++      return h;
++}
++
++/* Returns 1 if `name` was already in the set, else adds it and returns 0. */
++static int name_set_add(struct name_set *ns, const char *name)
++{
++      unsigned i, mask;
++
++      if (!ns) return 0;
++      if (2 * (ns->used + 1) > ns->cap) {
++	    unsigned ncap = ns->cap ? 2 * ns->cap : 64, k;
++	    char **nslot = calloc(ncap, sizeof(char *));
++	    for (k = 0; k < ns->cap; k++) {
++		  char *s = ns->slot[k];
++		  if (!s) continue;
++		  i = name_hash(s) & (ncap - 1);
++		  while (nslot[i]) i = (i + 1) & (ncap - 1);
++		  nslot[i] = s;
++	    }
++	    free(ns->slot);
++	    ns->slot = nslot;
++	    ns->cap = ncap;
++      }
++      mask = ns->cap - 1;
++      for (i = name_hash(name) & mask; ns->slot[i]; i = (i + 1) & mask)
++	    if (strcmp(ns->slot[i], name) == 0) return 1;
++      ns->slot[i] = strdup(name);
++      ns->used++;
++      return 0;
++}
++
++static void name_set_free(struct name_set *ns)
++{
++      unsigned k;
++      for (k = 0; k < ns->cap; k++) free(ns->slot[k]);
++      free(ns->slot);
++      ns->slot = NULL;
++      ns->cap = ns->used = 0;
++}
++
++# ifndef ICARUS_VERILOG
++/* Port-collapsed nets.
++ *
++ * A clock or reset routed through N module ports is ONE simulated net:
++ * Xcelium's own VCD writes it once under one identifier for all N names.
++ * fstdumper used to register N value-change callbacks and write N
++ * identical value changes per edge (one measured design: 21.6M FST value
++ * changes against 1.2M in the native VCD).
++ *
++ * vpi_handle(vpiSimNet, net) gives the net after port collapsing.  The
++ * first signal of a simulated net is declared normally (one callback);
++ * every further one is declared as an FST alias of it, which costs no
++ * callback and no value data -- the same thing Icarus does with
++ * _vpiNexusId.  A variable is keyed by its own full name, so nets
++ * collapsed onto it alias it too.  Width must match.
++ * FST_NO_ALIAS=1 turns this off. */
++struct alias_ent { char *key; fstHandle h; };
++static struct alias_ent *alias_tab = NULL;
++static unsigned alias_cap = 0, alias_used = 0;
++static unsigned long fst_n_vars = 0, fst_n_alias = 0;
++static int fst_alias_on = -1;
++
++static fstHandle alias_find(const char *key)
++{
++      unsigned i, mask;
++      if (!alias_cap) return 0;
++      mask = alias_cap - 1;
++      for (i = name_hash(key) & mask; alias_tab[i].key; i = (i + 1) & mask)
++	    if (strcmp(alias_tab[i].key, key) == 0) return alias_tab[i].h;
++      return 0;
++}
++
++static void alias_put(char *key, fstHandle h)
++{
++      unsigned i, mask;
++      if (2 * (alias_used + 1) > alias_cap) {
++	    unsigned ncap = alias_cap ? 2 * alias_cap : 4096, k;
++	    struct alias_ent *nt = calloc(ncap, sizeof(*nt));
++	    for (k = 0; k < alias_cap; k++) {
++		  if (!alias_tab[k].key) continue;
++		  i = name_hash(alias_tab[k].key) & (ncap - 1);
++		  while (nt[i].key) i = (i + 1) & (ncap - 1);
++		  nt[i] = alias_tab[k];
++	    }
++	    free(alias_tab);
++	    alias_tab = nt;
++	    alias_cap = ncap;
++      }
++      mask = alias_cap - 1;
++      for (i = name_hash(key) & mask; alias_tab[i].key; i = (i + 1) & mask)
++	    if (strcmp(alias_tab[i].key, key) == 0) {
++		  free(key);
++		  return;
++	    }
++      alias_tab[i].key = key;
++      alias_tab[i].h = h;
++      alias_used++;
++}
++
++static void alias_free(void)
++{
++      unsigned k;
++      for (k = 0; k < alias_cap; k++) free(alias_tab[k].key);
++      free(alias_tab);
++      alias_tab = NULL;
++      alias_cap = alias_used = 0;
++}
++
++/* Key of the simulated object behind `item`, or NULL (no aliasing). */
++static char *alias_key(vpiHandle item, PLI_INT32 type, unsigned size)
++{
++      const char *k = NULL;
++      char *key;
++      if (fst_alias_on < 0) {
++	    const char *e = getenv("FST_NO_ALIAS");
++	    fst_alias_on = !(e && *e && strcmp(e, "0") != 0);
++      }
++      if (!fst_alias_on) return NULL;
++      switch (type) {
++	  case vpiNet:
++	  case vpiBitNet:          /* e.g. interface `input bit clk` */
++	  case vpiEnumNet:
++	  case vpiIntegerNet:
++	  case vpiPackedArrayNet:
++	  case vpiStructNet:
++	  case vpiUnionNet: {
++	    vpiHandle sn = vpi_handle(vpiSimNet, item);
++	    if (!sn) return NULL;
++	      /* the collapsed net may live inside an encrypted model: no
++	       * name (and an AGSOPRO error) there, so no alias */
++	    if ((unsigned)vpi_get(vpiSize, sn) == size &&
++	        vpi_get(vpiIsProtected, sn) != 1)
++		  k = vpi_get_str(vpiFullName, sn);
++	    key = k ? malloc(strlen(k) + 16) : NULL;
++	    if (key) sprintf(key, "%s#%u", k, size);
++	      /* one handle per dumped net: do not leak them on big designs */
++	    vpi_free_object(sn);
++	    return key;
++	  }
++	  case vpiReg:        /* == vpiLogicVar */
++	  case vpiIntegerVar:
++	  case vpiBitVar:
++	    k = vpi_get_str(vpiFullName, item);
++	    break;
++	  default:
++	    return NULL;
++      }
++      if (!k) return NULL;
++      key = malloc(strlen(k) + 16);
++      sprintf(key, "%s#%u", k, size);
++      return key;
++}
++
++/* Declared range of a plain vector net / reg, e.g. [0:7] or [8:1].
++ * IEEE 1364 makes vpiLeftRange / vpiRightRange a RELATION to an expression;
++ * Xcelium rejects them as vpi_get() properties (VPI BADPROP, printed for
++ * every object), which is why an earlier revision wrote [size-1:0]
++ * everywhere and labelled an ascending [0:7] bus as [7:0] (bit [0] then
++ * pointed at the wrong end).  Anything else (packed arrays, structs, enums, ...) keeps
++ * [size-1:0]. */
++/* 1 if a range bound can be evaluated with vpi_get_value(): constants,
++ * parameters and operations over them.  A bound containing a function
++ * call ([$clog2(N)-1:0], [f(W):0]) makes Xcelium print "ERROR: VPI
++ * EXPRWFC: Value of an expression containing a function call ... is
++ * unavailable" for every such signal, which fails the test. */
++static int range_expr_ok(vpiHandle h, int depth)
++{
++      PLI_INT32 t = vpi_get(vpiType, h);
++      vpiHandle it, o;
++      int ok = 1;
++      if (t == vpiConstant || t == vpiParameter) return 1;
++      if (t != vpiOperation || depth > 16) return 0;
++	/* bound written inside encrypted code: iterating its operands
++	 * prints "ERROR: VPI ITERPRO" */
++      if (vpi_get(vpiIsProtected, h) == 1) return 0;
++      it = vpi_iterate(vpiOperand, h);
++      while (it && (o = vpi_scan(it))) {
++	    if (!range_expr_ok(o, depth + 1)) {
++		  ok = 0;
++		  vpi_free_object(it);
++		  break;
++	    }
++      }
++      return ok;
++}
++
++static int decl_range(vpiHandle item, PLI_INT32 type, unsigned size,
++                      int *left, int *right)
++{
++      vpiHandle lh, rh;
++      s_vpi_value v;
++      int ok = 0;
++      if ((type != vpiNet && type != vpiReg) || size < 2) return 0;
++      lh = vpi_handle(vpiLeftRange, item);
++      if (!lh) return 0;
++      rh = vpi_handle(vpiRightRange, item);
++      if (rh && (!range_expr_ok(lh, 0) || !range_expr_ok(rh, 0))) {
++	    vpi_free_object(rh);
++	    rh = NULL;
++      }
++      if (rh) {
++	    v.format = vpiIntVal;
++	    vpi_get_value(lh, &v);
++	    *left = v.value.integer;
++	    v.format = vpiIntVal;
++	    vpi_get_value(rh, &v);
++	    *right = v.value.integer;
++	    ok = (unsigned)abs(*left - *right) + 1 == size;
++	    vpi_free_object(rh);
++      }
++      vpi_free_object(lh);
++      return ok;
++}
++# endif
+ 
+ static char *dump_path = NULL;
+ static struct fstContext *dump_file = NULL;
+@@ -46,6 +453,15 @@ struct vcd_info {
+       struct vcd_info *dmp_next;
+       fstHandle handle;
+       int scheduled;
++	/* Last value actually written to the FST.  Some simulators (Xcelium
++	 * among them) fire cbValueChange even when the value did not change,
++	 * which would pad the dump with redundant transitions; keeping the
++	 * last emitted value lets show_this_item() skip those no-ops.
++	 * `last_real` is used for vpiRealVar, `last_str` for everything else;
++	 * `last_valid` is 0 until the first value has been dumped. */
++      int last_valid;
++      double last_real;
++      char *last_str;
+ };
+ 
+ 
+@@ -84,13 +500,35 @@ static void show_this_item(struct vcd_info*info)
+       if (type == vpiRealVar) {
+ 	    value.format = vpiRealVal;
+ 	    vpi_get_value(info->item, &value);
++	      /* Skip no-op transitions (value unchanged since the last dump). */
++	    if (info->last_valid && info->last_real == value.value.real) {
++		  debug_print("show_this_item skipped (unchanged real)\n");
++		  return;
++	    }
++	    info->last_real  = value.value.real;
++	    info->last_valid = 1;
+ 	    fstWriterEmitValueChange(dump_file, info->handle, &value.value.real);
++      } else if (type == vpiNamedEvent) {
++	      /* A named event carries no value: every trigger is meaningful,
++	       * so it is never suppressed.  Do NOT call vpi_get_value() here --
++	       * Xcelium aborts with "VPI NOVALOB: Object of type vpiNamedEvent
++	       * does not have a value". */
++	    fstWriterEmitValueChange(dump_file, info->handle, "1");
+       } else {
+ 	    value.format = vpiBinStrVal;
+ 	    vpi_get_value(info->item, &value);
+-	    fstWriterEmitValueChange(dump_file, info->handle, (type != vpiNamedEvent) ? value.value.str : "1");
++	      /* Skip no-op transitions (value unchanged since the last dump). */
++	    if (info->last_valid && info->last_str &&
++	        strcmp(info->last_str, value.value.str) == 0) {
++		  debug_print("show_this_item skipped (unchanged str)\n");
++		  return;
++	    }
++	    free(info->last_str);
++	    info->last_str   = strdup(value.value.str);
++	    info->last_valid = 1;
++	    fstWriterEmitValueChange(dump_file, info->handle, value.value.str);
+       }
+-      
++
+       debug_print("show_this_item done\n");
+ }
+ 
+@@ -105,13 +543,23 @@ static void show_this_item_x(struct vcd_info*info)
+ 	      /* Some tools dump nothing here...? */
+             double mynan = strtod("NaN", NULL);
+ 	    fstWriterEmitValueChange(dump_file, info->handle, &mynan);
++	      /* NaN compares unequal to everything, so just forget the cached
++	       * value: the next real dump must go through unconditionally. */
++	    info->last_valid = 0;
+       } else if (type == vpiNamedEvent) {
+ 	    /* Do nothing for named events. */
+       } else {
+ 	    int siz = vpi_get(vpiSize, info->item);
+-	    char *xmem = malloc(siz);
++	      /* NOTE: +1 for the NUL terminator -- fstWriterEmitValueChange()
++	       * treats the buffer as a C string.  The original code allocated
++	       * only `siz` bytes and wrote one past the end. */
++	    char *xmem = malloc(siz + 1);
+ 	    memset(xmem, 'x', siz);
++	    xmem[siz] = '\0';
+ 	    fstWriterEmitValueChange(dump_file, info->handle, xmem);
++	    free(info->last_str);
++	    info->last_str   = strdup(xmem);
++	    info->last_valid = 1;
+ 	    free(xmem);
+       }
+       
+@@ -163,15 +611,17 @@ static void vcd_checkpoint_x(void)
+       debug_print("vcd_checkpoint_x done\n");
+ }
+ 
+-static PLI_INT32 variable_cb_2(p_cb_data cause)
++/* Write out every variable that variable_cb_1() queued into vcd_dmp_list.
++ * Factored out of variable_cb_2() so that finish_cb() can reuse it: $finish
++ * can pre-empt the ReadOnlySynch callback that normally does this, and without
++ * an explicit flush the value changes of the final simulation time are lost. */
++static void flush_pending(PLI_UINT64 now)
+ {
+-      debug_print("variable_cb_2\n");
+-
+       struct vcd_info* info = vcd_dmp_list;
+-      PLI_UINT64 now = timerec_to_time64(cause->time);
+ 
+-      debug_print("now %ld\n", now);
+-      debug_print("vcd_cur_time %ld\n", vcd_cur_time);
++      debug_print("flush_pending %ld\n", now);
++
++      if (!info) return;
+ 
+       if (now != vcd_cur_time) {
+ 	    fstWriterEmitTimeChange(dump_file, now);
+@@ -185,6 +635,15 @@ static PLI_INT32 variable_cb_2(p_cb_data cause)
+ 
+       vcd_dmp_list = 0;
+ 
++      debug_print("flush_pending done\n");
++}
++
++static PLI_INT32 variable_cb_2(p_cb_data cause)
++{
++      debug_print("variable_cb_2\n");
++
++      flush_pending(timerec_to_time64(cause->time));
++
+       debug_print("variable_cb_2 done\n");
+ 
+       return 0;
+@@ -280,14 +739,18 @@ static PLI_INT32 finish_cb(p_cb_data cause)
+       
+       debug_print("dumpvars_time %ld\n", dumpvars_time);
+ 
+-      if (!dump_is_off && !dump_is_full && dumpvars_time != vcd_cur_time) {
+-	    fstWriterEmitTimeChange(dump_file, dumpvars_time);
++      /* $finish can run before the ReadOnlySynch callback that normally
++       * drains vcd_dmp_list, which used to silently drop every value change
++       * that happened at the final simulation time.  Flush them explicitly. */
++      if (!dump_is_off && !dump_is_full) {
++	    flush_pending(dumpvars_time);
+       }
+ 
+       fstWriterClose(dump_file);
+ 
+       for (cur = vcd_list ;  cur ;  cur = next) {
+ 	    next = cur->next;
++	    free(cur->last_str);
+ 	    free(cur);
+       }
+       vcd_list = 0;
+@@ -295,6 +758,8 @@ static PLI_INT32 finish_cb(p_cb_data cause)
+       vcd_names_delete(&fst_var);
+       # ifdef ICARUS_VERILOG
+       nexus_ident_delete();
++      # else
++      alias_free();
+       # endif
+       free(dump_path);
+       dump_path = 0;
+@@ -585,12 +1050,27 @@ static void scan_item(unsigned depth, vpiHandle item, int skip)
+       fstHandle new_ident;
+       int nexus_id;
+       unsigned size;
++      char range[64];
++      int add_range = 0;
++      char *akey = NULL;
+       PLI_INT32 item_type;
+ 
+ 	/* Get the displayed type for the various $var and $scope types. */
+ 	/* Not all of these are supported now, but they should be in a
+ 	 * future development version. */
+       item_type = vpi_get(vpiType, item);
++      # ifndef ICARUS_VERILOG
++	/* Encrypted IP (`pragma protect / *_enc_ncsim.v models, e.g. a
++	 * vendor PLL model): Xcelium refuses every string property
++	 * ("VPI AGSOPRO: Cannot get string properties from objects within a
++	 * protected region") and returns NULL, which crashed $fstDumpvars
++	 * (SIGSEGV + heap corruption).  The simulator's own VCD does not dump
++	 * them either. */
++      if (vpi_get(vpiIsProtected, item) == 1) {
++	    fst_note_skipped("protected (encrypted) object");
++	    return;
++      }
++      # endif
+       switch (item_type) {
+ 	  case vpiNamedEvent: type = FST_VT_VCD_EVENT; break;
+ 	  case vpiIntVar:
+@@ -622,17 +1102,57 @@ static void scan_item(unsigned depth, vpiHandle item, int skip)
+ 	    }
+ 	    break;
+ 
++	    /* --- SystemVerilog packed types ---------------------------------
++	     * All are plain bit vectors of vpiSize bits: the value is read
++	     * with vpiBinStrVal and cbValueChange works on the whole object
++	     * (verified on Xcelium 26.05).  They are declared as reg / wire,
++	     * the same as Xcelium's own VCD dumper does.  enum values show as
++	     * numbers (no enum-name table is written). */
++	  case vpiEnumVar:
++	  case vpiPackedArrayVar: type = FST_VT_VCD_REG; break;
++	  case vpiEnumNet:
++	  case vpiIntegerNet:
++	  case vpiPackedArrayNet:
++	  case vpiBitNet:     type = FST_VT_VCD_WIRE; break;
++	  case vpiStructVar:
++	  case vpiUnionVar:
++	  case vpiStructNet:
++	  case vpiUnionNet:
++	      /* Only packed ones: Xcelium rejects vpi_get_value() and
++	       * cbValueChange on an unpacked struct/union. */
++	    if (vpi_get(vpiPacked, item) != 1) {
++		  fst_note_skipped("unpacked struct/union");
++		  return;
++	    }
++	    type = (item_type == vpiStructVar || item_type == vpiUnionVar)
++	         ? FST_VT_VCD_REG : FST_VT_VCD_WIRE;
++	    break;
++	    /* A clocking-block signal (clockvar), e.g. `drv_cb.data`. */
++	  case vpiClockingIODecl: type = FST_VT_VCD_REG; break;
++
+ 	  case vpiNamedBegin: stype = FST_ST_VCD_BEGIN; break;
+ 	  case vpiNamedFork:  stype = FST_ST_VCD_FORK; break;
+ 	  case vpiFunction:   stype = FST_ST_VCD_FUNCTION; break;
+ 	  case vpiGenScope:   stype = FST_ST_VCD_GENERATE; break;
+ 	  case vpiModule:     stype = FST_ST_VCD_MODULE; break;
++	  case vpiInterface:  stype = FST_ST_VCD_INTERFACE; break;
+ 	  case vpiPackage:    stype = FST_ST_VCD_PACKAGE; break;
+ 	  case vpiTask:       stype = FST_ST_VCD_TASK; break;
++	    /* FST has no "clocking" scope kind.  A clocking block is not a
++	     * design instance, so it is written as a begin block (viewers and
++	     * wave-mcp treat those as procedural sub-scopes, not instances). */
++	  case vpiClockingBlock: stype = FST_ST_VCD_BEGIN; break;
++
++	    /* Returned by vpiInternalScope next to the real scopes; they
++	     * hold no signals. */
++	  case vpiClassDefn:
++	  case vpiClassTypespec:
++	    return;
+ 
+ 	  default:
+-	    vpi_printf("FST warning: $dumpvars: Unsupported argument "
+-	               "type (%s).\n", vpi_get_str(vpiType, item));
++	      /* memories, strings, class handles, chandles, ...: no FST
++	       * representation.  Counted and reported once per $dumpvars. */
++	    fst_note_skipped(vpi_get_str(vpiType, item));
+ 	    return;
+       }
+ 
+@@ -659,6 +1179,13 @@ static void scan_item(unsigned depth, vpiHandle item, int skip)
+             }
+       }
+ 
++      fullname = vpi_get_str(vpiFullName, item);
++	/* Any object whose name cannot be read (protected, or a simulator
++	 * refusing the property) cannot be declared: skip, never crash. */
++      if (!fullname || !vpi_get_str(vpiName, item)) {
++	    fst_note_skipped("object without a readable name");
++	    return;
++      }
+       fullname = vpi_get_str(vpiFullName, item);
+ 
+ 	/* Generate the $var or $scope commands. */
+@@ -679,6 +1206,17 @@ static void scan_item(unsigned depth, vpiHandle item, int skip)
+ 	  case vpiReg:
+ 	  case vpiTimeVar:
+ 	  case vpiNet:
++	  case vpiEnumVar:
++	  case vpiPackedArrayVar:
++	  case vpiEnumNet:
++	  case vpiIntegerNet:
++	  case vpiPackedArrayNet:
++	  case vpiBitNet:
++	  case vpiStructVar:
++	  case vpiUnionVar:
++	  case vpiStructNet:
++	  case vpiUnionNet:
++	  case vpiClockingIODecl:
+ 
+ 	      /* If we are skipping all signal or this is in an automatic
+ 	       * scope then just return. */
+@@ -686,6 +1224,15 @@ static void scan_item(unsigned depth, vpiHandle item, int skip)
+             if (skip || vpi_get(vpiAutomatic, item)) return;
+             # else
+             if (skip) return;
++	      /* Only variables of a task / function / begin / fork can be
++	       * automatic, and vpiAutomatic is only a valid property there
++	       * (Xcelium reports VPI INVPINT when asked for it on a net). */
++	    if (is_procedural_scope(scan_parent_type) &&
++	        item_type != vpiNamedEvent &&
++	        vpi_get(vpiAutomatic, item) == 1) {
++		  fst_note_skipped("automatic variable");
++		  return;
++	    }
+             # endif
+ 
+ 	      /* Skip this signal if it has already been included.
+@@ -694,10 +1241,24 @@ static void scan_item(unsigned depth, vpiHandle item, int skip)
+ 
+ 	      /* Declare the variable in the FST file. */
+ 	    name = vpi_get_str(vpiName, item);
+-	    if (is_escaped_id(name)) {
+-		  escname = malloc(strlen(name) + 2);
+-		  sprintf(escname, "\\%s", name);
+-	    } else escname = strdup(name);
++
++	    # ifndef ICARUS_VERILOG
++	      /* Xcelium returns every vpiReg once more through vpiVariables
++	       * (checked: vpiReg is a subset of vpiVariables in all 60 scopes
++	       * of the probe design).  Without this check each reg was
++	       * declared twice in the FST and got two value-change callbacks
++	       * (one small design: 142 $var for 92 distinct signals). */
++	    if (name_set_add(scan_names, name)) return;
++	      /* No read access (e.g. a precompiled Cadence VIP interface, not
++	       * covered by -access +r): every vpi_get_value() on it prints
++	       * "ERROR: VPI VISNOR" (hundreds of lines for one VIP), which
++	       * turns a passing test into a failing one.  It cannot be dumped. */
++	    if (vpi_get(vpiReadAccess, item) == 0) {
++		  fst_note_skipped("no read access");
++		  return;
++	    }
++	    # endif
++	    escname = fst_ident(name);
+ 
+ 	      /* Some signals can have an alias so handle that. */
+ 	    # ifdef ICARUS_VERILOG
+@@ -708,18 +1269,62 @@ static void scan_item(unsigned depth, vpiHandle item, int skip)
+ 	    # ifdef ICARUS_VERILOG
+ 	    if (nexus_id) ident = find_nexus_ident(nexus_id);
+ 	    # endif
++	    akey = NULL;
+ 
+ 	      /* Named events do not have a size, but other tools use
+ 	       * a size of 1 and some viewers do not accept a width of
+ 	       * zero so we will also use a width of one for events. */
+ 	    if (item_type == vpiNamedEvent) size = 1;
+ 	    else size = vpi_get(vpiSize, item);
++	      /* A negative / absurd vpiSize would be taken as a huge unsigned
++	       * width later (fstWriterCreateVar) and as a near-SIZE_MAX memset
++	       * length in show_this_item_x(), which corrupts the heap -- seen
++	       * on large designs.  Such an object cannot be dumped. */
++	    if ((int)size <= 0 || size > (1u << 24)) {
++		  fst_note_skipped("object with an unusable vpiSize");
++		  free(escname);
++		  return;
++	    }
+ 	      /* The FST format supports a port direction so if the net
+ 	       * is a port set the direction to one of the following:
+ 	       *   FST_VD_INPUT, FST_VD_OUTPUT or FST_VD_INOUT */
+ 	    dir = FST_VD_IMPLICIT;
+-
+-	    # ifdef ICARUS_VERILOG
++	    # ifndef ICARUS_VERILOG
++	    dir = port_map_get(scan_ports, name);
++	    akey = alias_key(item, item_type, size);
++	    if (akey) ident = (const char *)(intptr_t)alias_find(akey);
++	    fst_n_vars++;
++	    if (ident) {
++		  fst_n_alias++;
++		  free(akey);
++		  akey = NULL;
++	    }
++	      /* [size-1:0] annotation (Xcelium reports vpiLeftRange as
++	       * BADPROP for most objects).  Exactly ONE fstWriterCreateVar
++	       * per signal: an earlier version fell through into the
++	       * generic declaration below as well, so every signal was
++	       * declared twice and the ranged copy never got a value. */
++	    add_range = 0;
++	    if (size > 1) {
++		  int lr, rr;
++		  add_range = 1;
++		  if (decl_range(item, item_type, size, &lr, &rr))
++			snprintf(range, sizeof(range), " [%i:%i]", lr, rr);
++		  else
++			snprintf(range, sizeof(range), " [%i:%i]", (int)size - 1, 0);
++	    }
++	    if (add_range) {
++		  size_t nb = strlen(escname) + strlen(range) + 1;
++		  char *buf = (char *)malloc(nb);
++		  snprintf(buf, nb, "%s%s", escname, range);
++		  new_ident = fstWriterCreateVar(dump_file, type, dir, size, buf,
++		                                 (fstHandle)(intptr_t)ident);
++		  free(buf);
++	    } else {
++		  new_ident = fstWriterCreateVar(dump_file, type, dir, size, escname,
++		                                 (fstHandle)(intptr_t)ident);
++	    }
++	    # else
+ 	    if (size > 1 || vpi_get(vpiLeftRange, item) != 0) {
+ 		  char *buf = malloc(strlen(escname) + 65);
+ 		  sprintf(buf, "%s [%i:%i]", escname,
+@@ -731,11 +1336,9 @@ static void scan_item(unsigned depth, vpiHandle item, int skip)
+ 		                                 (fstHandle)(intptr_t)ident);
+ 		  free(buf);
+ 	    } else {
+-		# endif
+ 		  new_ident = fstWriterCreateVar(dump_file, type,
+ 		                                 dir, size, escname,
+ 		                                 (fstHandle)(intptr_t)ident);
+-	    # ifdef ICARUS_VERILOG
+ 	    }
+ 	    # endif
+ 	    free(escname);
+@@ -744,6 +1347,9 @@ static void scan_item(unsigned depth, vpiHandle item, int skip)
+ 		  # ifdef ICARUS_VERILOG
+ 		  if (nexus_id) set_nexus_ident(nexus_id,
+ 		                                (const char *)(intptr_t)new_ident);
++		  # else
++		  if (akey) alias_put(akey, new_ident);
++		  akey = NULL;
+ 		  # endif
+ 
+ 		    /* Add a callback for the signal. */
+@@ -753,6 +1359,11 @@ static void scan_item(unsigned depth, vpiHandle item, int skip)
+ 		  info->item  = item;
+ 		  info->handle = new_ident;
+ 		  info->scheduled = 0;
++		    /* no last value yet: must be initialised, malloc() does
++		     * not zero the block and show_this_item() reads them. */
++		  info->last_valid = 0;
++		  info->last_real  = 0.0;
++		  info->last_str   = NULL;
+ 
+ 		  cb.time      = &info->time;
+ 		  cb.user_data = (char*)info;
+@@ -773,17 +1384,20 @@ static void scan_item(unsigned depth, vpiHandle item, int skip)
+ 	    break;
+ 
+ 	  case vpiModule:
++	  case vpiInterface:
+ 	  case vpiPackage:
+ 	  case vpiGenScope:
+ 	  case vpiFunction:
+ 	  case vpiTask:
+ 	  case vpiNamedBegin:
+ 	  case vpiNamedFork:
++	  case vpiClockingBlock:
+ 
+ 	    if (depth > 0) {
+ 		  char *instname;
+ 		  char *defname = NULL;
+ 		  /* list of types to iterate upon */
++		  # ifdef ICARUS_VERILOG
+ 		  static int types[] = {
+ 			/* Value */
+ 			vpiNamedEvent,
+@@ -794,12 +1408,14 @@ static void scan_item(unsigned depth, vpiHandle item, int skip)
+ 			/* Scope */
+ 			vpiFunction,
+ 			vpiGenScope,
++			vpiInterface,
+ 			vpiModule,
+ 			vpiNamedBegin,
+ 			vpiNamedFork,
+ 			vpiTask,
+ 			-1
+ 		  };
++		  # endif
+ 		  int i;
+ 		  int nskip = (vcd_names_search(&fst_tab, fullname) != 0);
+ 
+@@ -815,53 +1431,119 @@ static void scan_item(unsigned depth, vpiHandle item, int skip)
+ 		    /* Set the file and line information for this scope.
+ 		     * Everything has instance information. Only a module
+ 		     * has separate definition information. */
+-		  instname = vpi_get_str(vpiFile, item);
+-		  fstWriterSetSourceInstantiationStem(dump_file, instname,
+-		      (int)vpi_get(vpiLineNo, item), 0);
+-		  if (item_type == vpiModule) {
+-			fstWriterSetSourceStem(dump_file,
+-			    vpi_get_str(vpiDefFile, item),
+-			    (int)vpi_get(vpiDefLineNo, item), 0);
++		  instname = (item_type == vpiClockingBlock)
++		           ? NULL : vpi_get_str(vpiFile, item);
++		  if (instname)
++			fstWriterSetSourceInstantiationStem(dump_file, instname,
++			    (int)vpi_get(vpiLineNo, item), 0);
++		  if (!instname) {
++			/* no source info for a clocking block */
++		  } else if (item_type == vpiModule) {
++			const char *df = vpi_get_str(vpiDefFile, item);
++			if (df)
++			      fstWriterSetSourceStem(dump_file, df,
++			          (int)vpi_get(vpiDefLineNo, item), 0);
+ 		  } else {
+ 			fstWriterSetSourceStem(dump_file, instname,
+ 			    (int)vpi_get(vpiLineNo, item), 0);
+ 		  }
+ 
+ 		    /* This must be done before the other name is fetched
+-		     * and the string must always be freed */
+-		  if (item_type == vpiModule) {
+-			defname = strdup(vpi_get_str(vpiDefName, item));
++		     * and the string must always be freed.  Interfaces too:
++		     * without it readers show every interface instance as
++		     * type "interface" instead of e.g. "axi_if". */
++		  if (item_type == vpiModule || item_type == vpiInterface) {
++			const char *dn = vpi_get_str(vpiDefName, item);
++			defname = dn ? strdup(dn) : NULL;
+ 		  }
+ 		  name = vpi_get_str(vpiName, item);
++		  if (!name) name = "unnamed";
+ 		    /* If the two names match only use the vpiName. */
+ 		  if (defname && (strcmp(defname, name) == 0)) {
+ 			free(defname);
+ 			defname = NULL;
+ 		  }
+-		  fstWriterSetScope(dump_file, stype, name, defname);
++		  {
++			char *sn = fst_scope_ident(name);
++			fstWriterSetScope(dump_file, stype, sn, defname);
++			free(sn);
++		  }
+ 		  free(defname);
+ 
++		  # ifndef ICARUS_VERILOG
++		  /* --- Xcelium child-scope walk -------------------------------
++		   * Child scopes come from ONE vpi_iterate(vpiInternalScope):
++		   * module / interface instances (incl. instance arrays),
++		   * generate blocks (named, genblkN, for / if, nested), named
++		   * begin / fork, tasks, functions and clocking blocks.
++		   * Verified on Xcelium 26.05-a081 and 25.09-a081 from the very
++		   * handle $dumpvars receives; -access +r is enough.
++		   *
++		   * The per-type iterators upstream uses do not work there and
++		   * print a VPI error per scope, which is why an earlier revision
++		   * skipped them and lost every generate-block signal:
++		   *   vpiGenScope / vpiTask / vpiFunction -> "not supported for
++		   *                                          a reference handle"
++		   *   vpiNamedBegin / vpiNamedFork        -> VPI CANTIT
++		   *   vpiModule from an interface         -> not supported
++		   * (IEEE 1800 reaches generate blocks via vpiGenScopeArray,
++		   * which Xcelium does support, but vpiInternalScope covers it
++		   * and everything else in one call.)
++		   *
++		   * Signals: vpiNet is not supported from task / function /
++		   * begin / fork handles (VPI NOTOTI); a clocking block only has
++		   * vpiClockingIODecl.  vpiReg is a subset of vpiVariables on
++		   * Xcelium; both are kept for safety, `names` drops the
++		   * duplicates.
++		   * --------------------------------------------------------- */
++		  {
++			static const int sig_types[] = {
++			      vpiNamedEvent, vpiNet, vpiReg, vpiVariables, -1
++			};
++			struct name_set names = { NULL, 0, 0 };
++			struct name_set *saved_names = scan_names;
++			struct port_map ports = { NULL, NULL, 0, 0 };
++			struct port_map *saved_ports = scan_ports;
++			PLI_INT32 saved_parent = scan_parent_type;
++			vpiHandle argv, hand;
++
++			scan_names = &names;
++			scan_parent_type = item_type;
++			if (item_type == vpiModule || item_type == vpiInterface)
++			      collect_ports(item, &ports);
++			scan_ports = &ports;
++			if (item_type == vpiClockingBlock) {
++			      argv = vpi_iterate(vpiClockingIODecl, item);
++			      while (argv && (hand = vpi_scan(argv)))
++				    scan_item(depth-1, hand, nskip);
++			} else {
++			      for (i = 0; sig_types[i] > 0; i++) {
++				    if (sig_types[i] == vpiNet &&
++				        is_procedural_scope(item_type))
++					  continue;
++				    argv = vpi_iterate(sig_types[i], item);
++				    while (argv && (hand = vpi_scan(argv)))
++					  scan_item(depth-1, hand, nskip);
++			      }
++			      argv = vpi_iterate(vpiInternalScope, item);
++			      while (argv && (hand = vpi_scan(argv)))
++				    scan_item(depth-1, hand, nskip);
++			}
++			scan_names = saved_names;
++			scan_parent_type = saved_parent;
++			name_set_free(&names);
++			scan_ports = saved_ports;
++			port_map_free(&ports);
++		  }
++		  # else
+ 		  for (i=0; types[i]>0; i++) {
+ 			vpiHandle hand;
+-			
+-			# ifndef ICARUS_VERILOG
+-			// Workaround for Xcelium
+-			if (item_type == vpiModule) {
+-			  if (types[i] == vpiFunction || 
+-			      types[i] == vpiGenScope || 
+-			      types[i] == vpiNamedBegin || 
+-			      types[i] == vpiNamedFork || 
+-			      types[i] == vpiTask) {
+-			    continue;
+-			  }
+-			}
+-			# endif
+-			
+ 			vpiHandle argv = vpi_iterate(types[i], item);
+ 			while (argv && (hand = vpi_scan(argv))) {
+ 			      scan_item(depth-1, hand, nskip);
+ 			}
+ 		  }
++		  # endif
+ 
+ 		    /* Sort any signals that we added above. */
+ 		  fstWriterSetUpscope(dump_file);
+@@ -889,10 +1571,12 @@ static int draw_scope(vpiHandle item, vpiHandle callh)
+       scope_type = vpi_get(vpiType, scope);
+ 	/* This must be done before the other name is fetched
+ 	 * and the string must always be freed */
+-      if (scope_type == vpiModule) {
+-	    defname = strdup(vpi_get_str(vpiDefName, scope));
++      if (scope_type == vpiModule || scope_type == vpiInterface) {
++	    const char *dn = vpi_get_str(vpiDefName, scope);
++	    defname = dn ? strdup(dn) : NULL;
+       }
+       name = vpi_get_str(vpiName, scope);
++      if (!name) name = "unnamed";
+ 	/* If the two names match only use the vpiName. */
+       if (defname && (strcmp(defname, name) == 0)) {
+ 	    free(defname);
+@@ -906,6 +1590,8 @@ static int draw_scope(vpiHandle item, vpiHandle callh)
+ 	  case vpiGenScope:    type = FST_ST_VCD_GENERATE;   break;
+ 	  case vpiModule:      type = FST_ST_VCD_MODULE;     break;
+ 	  case vpiTask:        type = FST_ST_VCD_TASK;       break;
++	  case vpiInterface:   type = FST_ST_VCD_INTERFACE;  break;
++	  case vpiClockingBlock: type = FST_ST_VCD_BEGIN;    break;
+ 	  default:
+ 	    type = FST_ST_VCD_MODULE;
+ 	    vpi_printf("FST Error: %s:%d: $dumpvars: Unsupported scope "
+@@ -915,7 +1601,11 @@ static int draw_scope(vpiHandle item, vpiHandle callh)
+             assert(0);
+       }
+ 
+-      fstWriterSetScope(dump_file, type, name, defname);
++      {
++	    char *sn = fst_scope_ident(name);
++	    fstWriterSetScope(dump_file, type, sn, defname);
++	    free(sn);
++      }
+       free(defname);
+ 
+       debug_print("draw_scope %s %s done\n", vpi_get_str(vpiName, item), vpi_get_str(vpiName, callh));
+@@ -990,13 +1680,30 @@ static PLI_INT32 sys_dumpvars_calltf(ICARUS_VPI_CONST PLI_BYTE8*name)
+ 	        case vpiRealVar:
+ 	        case vpiReg:
+ 	        case vpiTimeVar:
++	        case vpiEnumVar:
++	        case vpiPackedArrayVar:
++	        case vpiEnumNet:
++	        case vpiIntegerNet:
++	        case vpiPackedArrayNet:
++	        case vpiBitNet:
++	        case vpiStructVar:
++	        case vpiUnionVar:
++	        case vpiStructNet:
++	        case vpiUnionNet:
+ 		    /* Warn if the variables scope (which includes the
+ 		     * variable) or the variable itself was already
+ 		     * included. A scope does not automatically include
+ 		     * memory words so do not check the scope for them.  */
+-		  scname = strdup(vpi_get_str(vpiFullName,
+-		                              vpi_handle(vpiScope, item)));
++		  {
++			const char *sn = vpi_get_str(vpiFullName,
++			                             vpi_handle(vpiScope, item));
++			scname = strdup(sn ? sn : "");
++		  }
+ 		  fullname = vpi_get_str(vpiFullName, item);
++		  if (!fullname) {
++			free(scname);
++			continue;
++		  }
+ 		  if (((item_type != vpiMemoryWord) &&
+ 		       vcd_names_search(&fst_tab, scname)) ||
+ 		      vcd_names_search(&fst_var, fullname)) {
+@@ -1029,6 +1736,15 @@ static PLI_INT32 sys_dumpvars_calltf(ICARUS_VPI_CONST PLI_BYTE8*name)
+ 	    }
+       }
+ 
++      fst_report_skipped();
++      # ifndef ICARUS_VERILOG
++      if (fst_n_vars)
++	    vpi_printf("FST info: $dumpvars: %lu signals, %lu of them share the "
++	               "value of a port-collapsed net (FST alias).\n",
++	               fst_n_vars, fst_n_alias);
++      fst_n_vars = fst_n_alias = 0;
++      # endif
++
+       debug_print("sys_dumpvars_calltf %s done\n", name);
+ 
+       return 0;
+diff --git a/src/vcd_priv.c b/src/vcd_priv.c
+index 006b2fd..29cd267 100644
+--- a/src/vcd_priv.c
++++ b/src/vcd_priv.c
+@@ -19,6 +19,7 @@
+ 
+ #include  "sys_priv.h"
+ #include  "vcd_priv.h"
++#include  "fst_sv_vpi.h"
+ #include  "ivl_alloc.h"
+ #include  <stdio.h>
+ #include  <stdlib.h>
+@@ -34,10 +35,14 @@ int is_escaped_id(const char *name)
+       if (isalpha((int)name[0]) || name[0] == '_') {
+ 	    int lp;
+ 	    for (lp=1; name[lp] != '\0'; lp++) {
+-		    /* If this digit is not alpha-numeric or '_' we have
+-		     * an escaped identifier. */
++		    /* If this digit is not alpha-numeric, '_' or '$' we have
++		     * an escaped identifier.  '$' is legal in a simple
++		     * identifier (IEEE 1800 5.6, not as the first character);
++		     * escaping it wrote generated RTL names such as
++		     * impliReg$$dotret as "\impliReg$$dotret", which neither
++		     * the native VCD nor a lookup by the RTL name matches. */
+ 		  if (!(isalnum((int)name[lp]) ||
+-		        name[lp] == '_') || name[lp] == '$') {
++		        name[lp] == '_' || name[lp] == '$')) {
+ 		        return 1;
+ 		  }
+ 	    }
+@@ -54,10 +59,24 @@ struct vcd_names_s {
+       struct vcd_names_s *next;
+ };
+ 
++/* strdup_sh() keeps names in 8 KiB pages and only has an assert() (compiled
++ * out with -DNDEBUG) to keep them inside one page, so a name longer than
++ * STRINGHEAP_SIZE writes past the page and corrupts the heap.  Seen with
++ * deep generate hierarchies.  Such names are skipped here
++ * instead; they cannot be dumped anyway. */
++#define FST_NAME_MAX 8000
++
+ void vcd_names_add(struct vcd_names_list_s*tab, const char *name)
+ {
+-      struct vcd_names_s *nl = (struct vcd_names_s *)
+-	    malloc(sizeof(struct vcd_names_s));
++      struct vcd_names_s *nl;
++
++      if (strlen(name) > FST_NAME_MAX) {
++	    vpi_printf("FST info: name longer than %d characters, skipped: %.60s...\n",
++	               FST_NAME_MAX, name);
++	    return;
++      }
++
++      nl = (struct vcd_names_s *) malloc(sizeof(struct vcd_names_s));
+       nl->name = strdup_sh(&name_heap, name);
+       nl->next = tab->vcd_names_list;
+       tab->vcd_names_list = nl;
+@@ -189,6 +208,11 @@ PLI_INT32 sys_dumpvars_compiletf(ICARUS_VPI_CONST PLI_BYTE8 *name)
+           case vpiTask:
+           case vpiNamedBegin:
+           case vpiNamedFork:
++          /* SV scopes that scan_item() handles:
++           * e.g. FST_DUMP_TOP pointing at an interface instance used to
++           * stop the run with "cannot dump a vpiInterface". */
++          case vpiInterface:
++          case vpiClockingBlock:
+           /* The variable types. */
+ #if 0
+           case vpiParameter: /* A constant! */
+@@ -204,6 +228,17 @@ PLI_INT32 sys_dumpvars_compiletf(ICARUS_VPI_CONST PLI_BYTE8 *name)
+           case vpiTimeVar:
+           case vpiRealVar:
+           case vpiNamedEvent:
++          /* SV packed types */
++          case vpiEnumVar:
++          case vpiEnumNet:
++          case vpiIntegerNet:
++          case vpiBitNet:
++          case vpiStructVar:
++          case vpiStructNet:
++          case vpiUnionVar:
++          case vpiUnionNet:
++          case vpiPackedArrayVar:
++          case vpiPackedArrayNet:
+             break;
+ 
+           case vpiParameter: /* A constant! */

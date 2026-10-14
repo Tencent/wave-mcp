@@ -68,13 +68,15 @@ deploy/build_fsdb2fst.sh
 
 ## 3. fstdumper（Xcelium VPI 插件）
 
-让 Xcelium（xrun）在仿真时直接 dump FST 的 GPL-3.0 上游插件。wave-mcp 不分发其源码或二进制，只随包携带两份修复补丁（GPL-3.0，见 `third_party/fstdumper/`）。
+让 Xcelium（xrun）在仿真时直接 dump FST 的 GPL-3.0 上游插件。wave-mcp 不分发其源码或二进制，只随包携带一份 Xcelium 补丁（GPL-3.0，见 `third_party/fstdumper/`）。
 
 前置条件：自行 clone 上游 `https://github.com/semify-eda/fstdumper`（版本见 `docs/licenses/fstdumper.SOURCES.json` 的 pin commit）、gcc、make、patch、zlib 头文件；在跑 xrun 的同一环境构建。
 
 ```bash
 git clone https://github.com/semify-eda/fstdumper /path/to/fstdumper
-bash deploy/build_fstdumper.sh /path/to/fstdumper          # 可加 --perf-opt
+git -C /path/to/fstdumper checkout 3c75063
+bash deploy/build_fstdumper.sh /path/to/fstdumper
+bash deploy/verify_fstdumper.sh --so /path/to/fstdumper/fstdumper.so   # 需要 xrun 与 fst2vcd
 ```
 
 产物 `fstdumper.so` 留在你的 checkout 目录，由 xrun 在仿真时加载，与 wave-mcp 进程无链接关系。集成流程见 [XCELIUM_FST_GUIDE.md](XCELIUM_FST_GUIDE.md)。

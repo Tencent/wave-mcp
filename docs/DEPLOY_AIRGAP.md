@@ -195,18 +195,20 @@ bundle 里的 Python 依赖都是 wheel，glibc 兼容性由打包时的 `--targ
 
 fstdumper 让 Xcelium (xrun) 在仿真时直接产出 FST，跳过 VCD 中间文件。
 它是 GPL-3.0 开源项目，**上游源码不随 wave-mcp 分发，构建脚本也不代为下载**，
-但离线 bundle 已自带配套材料：构建脚本 `deploy/build_fstdumper.sh`、
-Xcelium 修复补丁 `third_party/fstdumper/*.patch` 和 dump 控制模块
-`examples/xcelium_fst/fst_dump_cfg.sv`。用户只需自行准备一份上游源码目录：
+但离线 bundle 已自带配套材料：构建脚本 `deploy/build_fstdumper.sh`、验证脚本
+`deploy/verify_fstdumper.sh`、Xcelium 补丁 `third_party/fstdumper/fstdumper-xcelium.patch`
+和 dump 控制模块 `examples/xcelium_fst/fst_dump_cfg.sv`。用户只需自行准备一份上游源码目录：
 
 ```bash
-# ① 有网机器（一次性，自行获取）
-git clone --depth 1 https://github.com/semify-eda/fstdumper.git /tmp/fstdumper
+# ① 有网机器（一次性，自行获取，钉在补丁对应的提交）
+git clone https://github.com/semify-eda/fstdumper.git /tmp/fstdumper
+git -C /tmp/fstdumper checkout 3c75063
 
 # ② 把源码目录整体拷到隔离网（U 盘 / scp / 共享目录）
 
-# ③ 隔离网机器上构建（打补丁 + make）
+# ③ 隔离网机器上构建（打补丁 + make），再验证
 bash deploy/build_fstdumper.sh /path/to/fstdumper
+bash deploy/verify_fstdumper.sh --so /path/to/fstdumper/fstdumper.so
 ```
 
 产出的 `fstdumper.so` 可拷给同环境所有人复用。完整使用指南见

@@ -4,6 +4,34 @@ All notable changes to wave-mcp are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### 中文
+
+#### 新增
+
+- `deploy/verify_fstdumper.sh`：在同一次 Xcelium 仿真里对比 fstdumper 直出的 FST 与原生 VCD，逐信号逐跳变比对，并检查 VPI 报错、重复声明与端口合并别名。
+
+#### 变更
+
+- fstdumper 补丁合并为一个 `third_party/fstdumper/fstdumper-xcelium.patch`，替换 `fstdumper-xcelium-fixes.patch`，移除可选的 `fstdumper-perf-opt.patch`（`--perf-opt` 不再接受）。新补丁在 Xcelium 上补齐 generate 块、clocking block、named begin / fork、静态 task 局部变量，以及 enum、packed struct / union、`bit` 型 net 等类型；每个信号只声明一次；端口合并的网线写成 FST 别名（约 1 万信号的设计仿真开销从 +112% 降到 +12%）；跳过加密 IP 与无读权限对象，不再崩溃或刷 VPI 报错；名字、范围、端口方向与 RTL 一致。
+- `build_fstdumper.sh` 默认不带上游的 `-DDEBUG`；补丁只打在干净的上游 3c75063 上，旧版补丁打过的源码树需换一份干净源码。
+- `examples/xcelium_fst/fst_dump_cfg.sv`：输出文件先取运行时 `+fst_wave_file=`，再取编译时 `FST_DUMP_FILE`，都没有则不 dump（此前默认写 `waves.fst`）。
+- Xcelium 直出指南写明 `-top fst_dump` 必须排在 tb 顶层的 `-top` 之后：排在前面时快照以 `fst_dump` 命名，同一快照换 SimVision 跑，不带 scope 的 `probe -create -all` 报 `*SE,PRNONE`。
+
+### English
+
+#### Added
+
+- `deploy/verify_fstdumper.sh`: compares fstdumper's FST with Xcelium's native VCD from the same simulation, signal by signal and transition by transition, and checks for VPI errors, duplicate declarations and port-collapsed aliases.
+
+#### Changed
+
+- The fstdumper patches are consolidated into `third_party/fstdumper/fstdumper-xcelium.patch`, replacing `fstdumper-xcelium-fixes.patch`; the optional `fstdumper-perf-opt.patch` is removed (`--perf-opt` is rejected). On Xcelium the patch now dumps generate blocks, clocking blocks, named begin / fork, static task variables, enum, packed struct / union and `bit` nets; declares each signal once; writes port-collapsed nets as FST aliases (simulation overhead on a 10k-signal design: +112% to +12%); skips protected and unreadable objects instead of crashing or flooding VPI errors; and writes names, ranges and port directions as in the RTL.
+- `build_fstdumper.sh` builds without upstream's `-DDEBUG` and only patches a pristine upstream 3c75063; trees patched by an older release need a fresh checkout.
+- `examples/xcelium_fst/fst_dump_cfg.sv` takes the output file from `+fst_wave_file=` at run time, then `FST_DUMP_FILE` at compile time, and dumps nothing if neither is given (previously it always wrote `waves.fst`).
+- The Xcelium FST guide now states that `-top fst_dump` must follow the testbench's `-top`: placed first, it names the snapshot, and a scope-less `probe -create -all` in a SimVision script run on that snapshot fails with `*SE,PRNONE`.
+
 ## [1.1.0] - 2026-09-24
 
 ### 中文

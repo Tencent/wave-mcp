@@ -347,14 +347,16 @@ cp "$REPO_ROOT"/third_party/fsdb2fst/fst/*.c "$REPO_ROOT"/third_party/fsdb2fst/f
 cp "$REPO_ROOT/deploy/build_fsdb2fst.sh" "$OUT/fsdb2fst-src/deploy/"
 
 # 5b-4) fstdumper build inputs. The upstream plugin is GPL-3.0 and must NOT be
-# bundled; the user brings a checkout. The patch set, the one-shot build script
-# and the dump control module are all shipable, and without them an air-gapped
-# host has no way to apply the Xcelium fixes or drive the plugin. Keep the
-# deploy/ + third_party/fstdumper/ + examples/xcelium_fst/ layout so
-# build_fstdumper.sh resolves its PATCH_DIR relative to the bundle root.
-mkdir -p "$OUT/deploy" "$OUT/third_party/fstdumper" "$OUT/examples/xcelium_fst"
+# bundled; the user brings a checkout. The patch, the build and verify
+# scripts and the dump control module are all shipable, and without them an
+# air-gapped host has no way to apply the Xcelium patch, check the result or
+# drive the plugin. Keep the deploy/ + third_party/fstdumper/ +
+# examples/xcelium_fst/ layout so the scripts resolve their inputs relative
+# to the bundle root.
+mkdir -p "$OUT/deploy/fstdumper_verify" "$OUT/third_party/fstdumper" "$OUT/examples/xcelium_fst"
 cp "$REPO_ROOT"/third_party/fstdumper/*.patch "$OUT/third_party/fstdumper/"
-cp "$REPO_ROOT/deploy/build_fstdumper.sh" "$OUT/deploy/"
+cp "$REPO_ROOT/deploy/build_fstdumper.sh" "$REPO_ROOT/deploy/verify_fstdumper.sh" "$OUT/deploy/"
+cp "$REPO_ROOT"/deploy/fstdumper_verify/* "$OUT/deploy/fstdumper_verify/"
 cp "$REPO_ROOT/deploy/VCD2FST_BUILD.md" "$OUT/deploy/"
 cp "$REPO_ROOT/examples/xcelium_fst/fst_dump_cfg.sv" "$OUT/examples/xcelium_fst/"
 
