@@ -115,7 +115,11 @@ rm -rf "$OUT"; mkdir -p "$OUT"/{wheels,src,bin}
 # 1) offline wheelhouse: project wheel + all dependency wheels --------------
 echo "[*] building project wheel + downloading dependency wheels (target glibc >= $TARGET_GLIBC) ..."
 python3 -m pip wheel --no-deps -w "$OUT/wheels" "$REPO_ROOT" >/dev/null
-python3 -m pip download -r "$REPO_ROOT/requirements.txt" -d "$OUT/wheels" >/dev/null
+# With --pyslang-wheel, resolve against that wheel. Resolving against PyPI and
+# swapping pyslang afterwards keeps the newer release's dependencies: pyslang
+# 12 pulls nanobind_backend, a manylinux_2_27 wheel that fails the 2.17 audit.
+python3 -m pip download -r "$REPO_ROOT/requirements.txt" \
+    ${PYSLANG_WHEEL:+"$PYSLANG_WHEEL"} -d "$OUT/wheels" >/dev/null
 
 # mcp SDK v2 imports cryptography at module load, so it must be present.
 # Ensure the bundled wheel matches the target glibc baseline.

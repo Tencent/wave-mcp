@@ -26,6 +26,7 @@ All notable changes to wave-mcp are documented here. Format follows
 
 - 位选择与部分选择（`cnt[3]`、`cnt[7:4]`、`cnt[4+:2]`、`cnt[5-:2]`）在 `signal_values`、`signal_info`、`signal_drivers`、`signal_loads`、`signal_fanin`、`signal_connectivity`、`active_drivers`、`trace_value`、`trace_x` 中查不到或被误判为常量。现在按 FST 中的声明范围取对应的位，驱动与连接按所在向量查询，结果带 `select_of` / `select_note` 说明（#4）。逐位存储的总线查 `bus[3:0]` 只返回这 4 位，不再返回整条总线。
 - 查询时间换算到 FST 时间单位时按原始十进制精确换算后只舍入一次：半个时间单位按就近偶数舍入，接近 uint64 上限的大时间值不再因浮点丢精度（#2，感谢 @Linxiushen）。
+- `deploy/build_offline_bundle.sh` 指定 `--pyslang-wheel` 时按该 wheel 解析依赖。此前先按 PyPI 最新版解析再替换 pyslang，pyslang 12 带入的 `nanobind_backend`（需 glibc 2.27）使 glibc 2.17 离线包构建失败。
 
 ### English
 
@@ -47,6 +48,7 @@ All notable changes to wave-mcp are documented here. Format follows
 
 - Bit and part selects (`cnt[3]`, `cnt[7:4]`, `cnt[4+:2]`, `cnt[5-:2]`) were not found, or were reported as constants, by `signal_values`, `signal_info`, `signal_drivers`, `signal_loads`, `signal_fanin`, `signal_connectivity`, `active_drivers`, `trace_value` and `trace_x`. Bits now follow the range declared in the FST, connectivity is that of the enclosing vector, and replies carry `select_of` / `select_note` (#4). `bus[3:0]` on a bus stored one VAR per bit returns those 4 bits instead of the whole bus.
 - Query times convert to FST units from the exact decimal and round once: half ticks round to even, and large times near the uint64 limit no longer lose precision through floating point (#2, thanks @Linxiushen).
+- `deploy/build_offline_bundle.sh` resolves dependencies against `--pyslang-wheel` when given. It used to resolve against the latest PyPI release and swap pyslang afterwards, so pyslang 12's `nanobind_backend` (glibc 2.27) broke the glibc 2.17 bundle.
 
 ## [1.1.0] - 2026-09-24
 
