@@ -89,7 +89,7 @@ def fold_transactions(fst, start_cond: Dict[str, Any],
     watched = list(dict.fromkeys(
         names + ([id_field] if id_field else []) + fields))
 
-    missing = [n for n in watched if n not in fst.signals]
+    missing = [n for n in watched if fst.backing(n) is None]
     if missing:
         return {"status": "error", "error_type": "signal_not_found",
                 "error": "signals not in the waveform: " + ", ".join(missing[:5]),
@@ -97,10 +97,7 @@ def fold_transactions(fst, start_cond: Dict[str, Any],
                 "hint": "use list_signals for exact full paths"}
 
     # One pass covering every watched signal, then replay the merged timeline.
-    multi = fst._iter_values_multi([fst.signals[n] for n in watched],
-                                   start, stop, _MAX_CHANGES)
-    timelines = {n: sorted(multi.get(fst.signals[n].handle, []))
-                 for n in watched}
+    timelines, _trunc = fst.timelines(watched, start, stop, _MAX_CHANGES)
     exp = fst.timescale_exp
 
     cur: Dict[str, Optional[str]] = {}

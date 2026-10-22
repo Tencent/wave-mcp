@@ -11,26 +11,42 @@ All notable changes to wave-mcp are documented here. Format follows
 #### 新增
 
 - `deploy/verify_fstdumper.sh`：在同一次 Xcelium 仿真里对比 fstdumper 直出的 FST 与原生 VCD，逐信号逐跳变比对，并检查 VPI 报错、重复声明与端口合并别名。
+- `signal_activity`、`find_time_windows`、`sample_at_clock`、`fsm_transitions`、`fold_transactions` 和 `diff_waveforms`（显式 `signals`）接受位选择与部分选择路径；`sample_at_clock` 的时钟也可以是向量的某一位。
+- 项目级验证 `tests/functional_verify.py` 加入位选择检查：按 FST 声明范围独立截位作对照，覆盖取值、区间、各分析工具和网表工具；任一检查失败时退出码非零。
 
 #### 变更
 
+- 查询不存在的信号名不再逐个扫描全部信号（60 万信号的设计上每次从 1.6 秒降到微秒级）；`signal_values` 一次查多个位选择时只读一遍文件。
 - fstdumper 补丁合并为一个 `third_party/fstdumper/fstdumper-xcelium.patch`，替换 `fstdumper-xcelium-fixes.patch`，移除可选的 `fstdumper-perf-opt.patch`（`--perf-opt` 不再接受）。新补丁在 Xcelium 上补齐 generate 块、clocking block、named begin / fork、静态 task 局部变量，以及 enum、packed struct / union、`bit` 型 net 等类型；每个信号只声明一次；端口合并的网线写成 FST 别名（约 1 万信号的设计仿真开销从 +112% 降到 +12%）；跳过加密 IP 与无读权限对象，不再崩溃或刷 VPI 报错；名字、范围、端口方向与 RTL 一致。
 - `build_fstdumper.sh` 默认不带上游的 `-DDEBUG`；补丁只打在干净的上游 3c75063 上，旧版补丁打过的源码树需换一份干净源码。
 - `examples/xcelium_fst/fst_dump_cfg.sv`：输出文件先取运行时 `+fst_wave_file=`，再取编译时 `FST_DUMP_FILE`，都没有则不 dump（此前默认写 `waves.fst`）。
 - Xcelium 直出指南写明 `-top fst_dump` 必须排在 tb 顶层的 `-top` 之后：排在前面时快照以 `fst_dump` 命名，同一快照换 SimVision 跑，不带 scope 的 `probe -create -all` 报 `*SE,PRNONE`。
+
+#### 修复
+
+- 位选择与部分选择（`cnt[3]`、`cnt[7:4]`、`cnt[4+:2]`、`cnt[5-:2]`）在 `signal_values`、`signal_info`、`signal_drivers`、`signal_loads`、`signal_fanin`、`signal_connectivity`、`active_drivers`、`trace_value`、`trace_x` 中查不到或被误判为常量。现在按 FST 中的声明范围取对应的位，驱动与连接按所在向量查询，结果带 `select_of` / `select_note` 说明（#4）。逐位存储的总线查 `bus[3:0]` 只返回这 4 位，不再返回整条总线。
+- 查询时间换算到 FST 时间单位时按原始十进制精确换算后只舍入一次：半个时间单位按就近偶数舍入，接近 uint64 上限的大时间值不再因浮点丢精度（#2，感谢 @Linxiushen）。
 
 ### English
 
 #### Added
 
 - `deploy/verify_fstdumper.sh`: compares fstdumper's FST with Xcelium's native VCD from the same simulation, signal by signal and transition by transition, and checks for VPI errors, duplicate declarations and port-collapsed aliases.
+- `signal_activity`, `find_time_windows`, `sample_at_clock`, `fsm_transitions`, `fold_transactions` and `diff_waveforms` (explicit `signals`) accept bit and part selects; the `sample_at_clock` clock may be one bit of a vector.
+- `tests/functional_verify.py` checks selects against an oracle that slices the FST's declared ranges independently, across value reads, the analysis tools and the netlist tools; any failure makes it exit non-zero.
 
 #### Changed
 
+- Looking up a name the waveform lacks no longer scans every signal (from 1.6 s to microseconds per lookup on a 600k-signal design); `signal_values` reads several selects in one file pass.
 - The fstdumper patches are consolidated into `third_party/fstdumper/fstdumper-xcelium.patch`, replacing `fstdumper-xcelium-fixes.patch`; the optional `fstdumper-perf-opt.patch` is removed (`--perf-opt` is rejected). On Xcelium the patch now dumps generate blocks, clocking blocks, named begin / fork, static task variables, enum, packed struct / union and `bit` nets; declares each signal once; writes port-collapsed nets as FST aliases (simulation overhead on a 10k-signal design: +112% to +12%); skips protected and unreadable objects instead of crashing or flooding VPI errors; and writes names, ranges and port directions as in the RTL.
 - `build_fstdumper.sh` builds without upstream's `-DDEBUG` and only patches a pristine upstream 3c75063; trees patched by an older release need a fresh checkout.
 - `examples/xcelium_fst/fst_dump_cfg.sv` takes the output file from `+fst_wave_file=` at run time, then `FST_DUMP_FILE` at compile time, and dumps nothing if neither is given (previously it always wrote `waves.fst`).
 - The Xcelium FST guide now states that `-top fst_dump` must follow the testbench's `-top`: placed first, it names the snapshot, and a scope-less `probe -create -all` in a SimVision script run on that snapshot fails with `*SE,PRNONE`.
+
+#### Fixed
+
+- Bit and part selects (`cnt[3]`, `cnt[7:4]`, `cnt[4+:2]`, `cnt[5-:2]`) were not found, or were reported as constants, by `signal_values`, `signal_info`, `signal_drivers`, `signal_loads`, `signal_fanin`, `signal_connectivity`, `active_drivers`, `trace_value` and `trace_x`. Bits now follow the range declared in the FST, connectivity is that of the enclosing vector, and replies carry `select_of` / `select_note` (#4). `bus[3:0]` on a bus stored one VAR per bit returns those 4 bits instead of the whole bus.
+- Query times convert to FST units from the exact decimal and round once: half ticks round to even, and large times near the uint64 limit no longer lose precision through floating point (#2, thanks @Linxiushen).
 
 ## [1.1.0] - 2026-09-24
 

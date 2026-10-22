@@ -446,6 +446,23 @@ class RtlSource:
         mod, inst, leaf, _recs = self.engine.resolve_path(full_path)
         return inst, leaf, mod
 
+    def _with_select(self, res: dict, full_path: str,
+                     leaf: Optional[str] = None,
+                     mod: Optional[str] = None) -> dict:
+        """Mark a bit/part-select answer as coming from the whole vector.
+
+        Only a path ending in ``]`` can be a select, so everything else
+        returns at once. Callers that already resolved the path pass its
+        ``leaf``/``mod`` so the select is not resolved a second time.
+        """
+        if not full_path.endswith("]"):
+            return res
+        if leaf is None:
+            _inst, leaf, mod = self._resolve(full_path)
+        if mod:
+            res.update(self.engine.select_note(full_path, leaf) or {})
+        return res
+
     # -- cross-hierarchy helpers -----------------------------------------
 
     #: how many hops to follow when a net has no local driver or fan-in
@@ -512,7 +529,8 @@ class RtlSource:
             # reporting a misleading "undriven".
             cross = self._drivers_via_peers(full_path, _depth, _seen)
             if cross:
-                return cross
+                return (self._with_select(cross, full_path, _leaf, mod)
+                        if _depth == 0 else cross)
             inst, leaf = self.engine.split(full_path)
             reason, hint = self.engine.classify_empty(inst, leaf, mod, "drivers")
             return {"available": True, "signal": full_path, "module": mod,
@@ -540,7 +558,8 @@ class RtlSource:
             if r.get("guard"):
                 d["guard"] = r["guard"]
             out.append(d)
-        return {"available": True, "signal": full_path, "module": mod, "drivers": out}
+        res = {"available": True, "signal": full_path, "module": mod, "drivers": out}
+        return self._with_select(res, full_path, _leaf, mod) if _depth == 0 else res
 
     def _drivers_via_peers(self, full_path: str, depth: int,
                            seen: Optional[set]) -> Optional[dict]:
@@ -592,22 +611,26 @@ class RtlSource:
                     cross_lds = pm.get("loads", {}).get(inst_leaf, [])
                     if cross_lds:
                         lds = [self._full(parent_inst, s) for s in cross_lds]
-                        return {"available": True, "signal": full_path,
-                                "loads": lds}
+                        return self._with_select(
+                            {"available": True, "signal": full_path,
+                             "loads": lds}, full_path, leaf, mod)
         if not lds:
             # Downstream across the hierarchy: this signal feeds sub-module
             # input ports (top.rst_n -> top.u_counter.rst_n). Those peers *are*
             # the loads, so no recursion is needed here.
             peers = self._peer_paths(full_path, "loads")
             if peers:
-                return {"available": True, "signal": full_path,
-                        "loads": peers}
+                return self._with_select(
+                    {"available": True, "signal": full_path,
+                     "loads": peers}, full_path, leaf, mod)
         if not lds:
             reason, hint = self.engine.classify_empty(inst, leaf, mod, "loads")
             return {"available": True, "signal": full_path,
                     "loads": [], "reason": reason, "hint": hint}
-        return {"available": True, "signal": full_path,
-                "loads": [self._full(inst, s) for s in lds]}
+        return self._with_select(
+            {"available": True, "signal": full_path,
+             "loads": [self._full(inst, s) for s in lds]}, full_path,
+            leaf, mod)
 
     #: Upper bound on ``max_depth`` for fan-in / fan-out walks.
     MAX_DEPTH = 8
@@ -626,8 +649,9 @@ class RtlSource:
         res = self._fanin_paths(signal_path, transitive, limit, 0, None,
                                 self._hops(max_depth))
         if res:
-            return {"available": True, "signal": signal_path,
-                    "fan_in": res}
+            return self._with_select(
+                {"available": True, "signal": signal_path,
+                 "fan_in": res}, signal_path)
         inst, leaf, mod = self._resolve(signal_path)
         reason, hint = self.engine.classify_empty(inst, leaf, mod, "fanin")
         return {"available": True, "signal": signal_path,
@@ -708,7 +732,9 @@ class RtlSource:
         res = self._fanout_paths(signal_path, transitive, limit, 0, None,
                                  self._hops(max_depth))
         if res:
-            return {"available": True, "signal": signal_path, "fan_out": res}
+            return self._with_select(
+                {"available": True, "signal": signal_path, "fan_out": res},
+                signal_path)
         inst, leaf, mod = self._resolve(signal_path)
         reason, hint = self.engine.classify_empty(inst, leaf, mod, "loads")
         return {"available": True, "signal": signal_path,
@@ -793,8 +819,9 @@ class RtlSource:
             reason, hint = self.engine.classify_empty(inst, leaf, mod, "loads")
             return {"available": True, "signal": full_path,
                     "connected": [], "reason": reason, "hint": hint}
-        return {"available": True, "signal": full_path,
-                "connected": result}
+        return self._with_select(
+            {"available": True, "signal": full_path,
+             "connected": result}, full_path, leaf, mod)
 
     # -- category 5.5 / 6: active drivers + trace --------------------------
     def active_drivers(self, signal_full_path: str, time: str) -> dict:

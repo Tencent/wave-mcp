@@ -18,6 +18,9 @@ cross-consistent?"  Each tool gets targeted checks:
   - trace_x returns "no-x" for non-X signals (correct) or a tree for X signals
   - list_signals widths > 0, types are valid enum values
   - scope_info module_type is non-empty for module-kind scopes
+  - bit/part selects (v[i], v[m:l], v[a+:w], v[a-:w]) in every tool equal
+    the selected bits of the vector's own answer, using declared ranges
+    read independently from the FST; these checks gate the exit code
 """
 import glob, json, sys, os, time, traceback
 from collections import Counter, defaultdict
@@ -136,6 +139,337 @@ def _make_src_resolver(maps_path):
         return hit if hit and os.path.exists(hit) else None
 
     return resolve
+
+
+def _declared_ranges(fst_path):
+    """``full_path -> (msb, lsb, width)`` read straight from the FST.
+
+    The oracle for the select checks. It walks the hierarchy with pylibfst
+    itself instead of trusting FstSource's parse, so a wrong range there
+    shows up as a mismatch here rather than agreeing with itself.
+    """
+    import re
+    import pylibfst
+    from pylibfst import ffi, lib
+    rng = re.compile(r"^(.*?)\s*\[(\d+):(\d+)\]\s*$")
+    out, stack, cur = {}, [], ""
+    ctx = lib.fstReaderOpen(fst_path.encode())
+    try:
+        lib.fstReaderIterateHierRewind(ctx)
+        while True:
+            h = lib.fstReaderIterateHier(ctx)
+            if h == ffi.NULL:
+                break
+            if h.htyp == lib.FST_HT_SCOPE:
+                stack.append(cur)
+                name = pylibfst.string(h.u.scope.name)
+                cur = f"{cur}.{name}" if cur else name
+            elif h.htyp == lib.FST_HT_UPSCOPE:
+                cur = stack.pop() if stack else ""
+            elif h.htyp == lib.FST_HT_VAR:
+                raw = pylibfst.string(h.u.var.name)
+                w = int(h.u.var.length)
+                m = rng.match(raw)
+                name = m.group(1) if m else raw
+                full = f"{cur}.{name}" if cur else name
+                if m:
+                    out[full] = (int(m.group(2)), int(m.group(3)), w)
+                else:
+                    out[full] = (w - 1, 0, w)
+    finally:
+        lib.fstReaderClose(ctx)
+    return out
+
+
+def _oracle_slice(value, msb, width, a, b):
+    """Bits ``a..b`` (declared indices) of an MSB-first value string."""
+    if value is None:
+        return None
+    if value and len(value) < width:
+        fill = value[0] if value[0] in "xXzZ" else "0"
+        value = fill * (width - len(value)) + value
+    pa, pb = sorted((abs(msb - a), abs(msb - b)))
+    return value[pa:pb + 1]
+
+
+def _oracle_changes(rows, cut, prev):
+    """Change list of a select: base rows cut down, unchanged ones dropped."""
+    out = []
+    for t, v in rows:
+        s = cut(v)
+        if s == prev:
+            continue
+        out.append((t, s))
+        prev = s
+    return out
+
+
+#: base signals sampled per project for the select checks
+SELECT_SAMPLE = 200
+
+
+def verify_bit_selects(fst, rtl, fst_path, init, check, mid_time):
+    """Selects (``v[i]``, ``v[m:l]``, ``v[a+:w]``, ``v[a-:w]``) on real data.
+
+    Each answer is compared with what the select must be by definition: the
+    same bits cut out of the whole vector's own answer, using the declared
+    range read independently from the FST. Exact-path answers are checked by
+    the sections above, so they are a trusted base here. Netlist answers for
+    a select must equal the base signal's, because the netlist records
+    connectivity per signal.
+    """
+    from wave_mcp import diff as _diff, timeutil as _tu
+    from wave_mcp.analysis import (activity as _act, clocking as _clk,
+                                   fsm as _fsm, predicate as _pred)
+    for tool in ('bitsel_value_at', 'bitsel_values_between', 'bitsel_signal_info',
+                 'bitsel_activity', 'bitsel_sample_at_clock',
+                 'bitsel_find_time_windows', 'bitsel_fsm', 'bitsel_diff',
+                 'bitsel_netlist', 'bitsel_trace'):
+        init(tool)
+
+    decl = _declared_ranges(fst_path)
+    s, e = fst.start_time, fst.end_time
+    q1 = s + (e - s) // 4
+    exp = fst.timescale_exp
+    vec = []
+    for p, sig in fst.signals.items():
+        d = decl.get(p)
+        if (d is None or sig.length < 2 or sig.var_type in
+                ('real', 'real_parameter', 'realtime', 'shortreal', 'string', 'event')):
+            continue
+        msb, lsb, w = d
+        if abs(msb - lsb) + 1 != w or w != sig.length:
+            continue    # range disagrees with width: the tool falls back, skip
+        vec.append((p, msb, lsb, w))
+    vec.sort()
+    picked = _sample(vec, SELECT_SAMPLE)
+
+    def selects(msb, lsb, w):
+        lo, hi = min(msb, lsb), max(msb, lsb)
+        mid_i = (lo + hi) // 2
+        k = min(3, w)
+        out = [(f"[{hi}]", hi, hi), (f"[{lo}]", lo, lo), (f"[{mid_i}]", mid_i, mid_i),
+               (f"[{msb}:{lsb}]", msb, lsb), (f"[{hi}:{mid_i}]", hi, mid_i),
+               (f"[{lo}+:{k}]", lo, lo + k - 1), (f"[{hi}-:{k}]", hi, hi - k + 1)]
+        return out
+
+    cap = 20000
+    oob_full = 0
+    one_bit, all_sel = [], []
+    for p, msb, lsb, w in picked:
+        base_full = fst.values_between(p, s, e, cap) or []
+        if len(base_full) >= cap:
+            continue
+        base_q1 = [(r['time_units'], r['value'])
+                   for r in fst.values_between(p, q1, e, cap) or []]
+        base_full = [(r['time_units'], r['value']) for r in base_full]
+        times = sorted({s, q1, (s + e) // 2, e} | {t for t, _ in base_full[:5]})
+        for text, a, b in selects(msb, lsb, w):
+            sp = p + text
+            all_sel.append(sp)
+            cut = (lambda v, a=a, b=b, msb=msb, w=w: _oracle_slice(v, msb, w, a, b))
+            width = abs(a - b) + 1
+            if width == 1:
+                one_bit.append((sp, p, cut))
+            for t in times:
+                got = fst.value_at(sp, t)
+                want = cut((fst.value_at(p, t) or {}).get('value'))
+                check('bitsel_value_at', got is not None and got.get('value') == want,
+                      'select value equals the bits of the vector',
+                      f'path={sp} t={t} got={(got or {}).get("value")} want={want}')
+                if got and got.get('value') and all(c in '01' for c in got['value']):
+                    check('bitsel_value_at', got.get('hex') == f"{int(got['value'], 2):x}",
+                          'select hex matches its bits', f'path={sp}')
+            info = fst.signal_info(sp)
+            check('bitsel_signal_info', bool(info) and info.get('width') == width,
+                  'select width', f'path={sp} info={info and info.get("width")} want={width}')
+            got = [(r['time_units'], r['value'])
+                   for r in fst.values_between(sp, s, e, cap) or []]
+            want = _oracle_changes(base_full, cut, None)
+            check('bitsel_values_between', got == want,
+                  'select changes over the dump = vector changes cut to the bits',
+                  f'path={sp} got={got[:4]} want={want[:4]} n={len(got)}/{len(want)}')
+            prev = cut((fst.value_at(p, q1 - 1) or {}).get('value')) if q1 > s else None
+            got = [(r['time_units'], r['value'])
+                   for r in fst.values_between(sp, q1, e, cap) or []]
+            want = _oracle_changes(base_q1, cut, prev)
+            check('bitsel_values_between', got == want,
+                  'select changes in a mid window start from a real change',
+                  f'path={sp} got={got[:4]} want={want[:4]}')
+        hi = max(msb, lsb) + 1
+        check('bitsel_value_at', not fst.has_signal(f"{p}[{hi}]"),
+              'out-of-range bit is not a signal', f'path={p}[{hi}]')
+        if oob_full < 5:
+            # value_at on an unknown path falls back to the aggregated-bus
+            # scan over every signal, which costs seconds on very wide dumps,
+            # so the full lookup runs on a few signals only
+            oob_full += 1
+            check('bitsel_value_at', fst.value_at(f"{p}[{hi}]", s) is None,
+                  'out-of-range bit is not found', f'path={p}[{hi}]')
+
+    # activity: one batched call, each row against the oracle timeline
+    by_sel = {}
+    for p, msb, lsb, w in picked:
+        for text, a, b in selects(msb, lsb, w):
+            by_sel[p + text] = (p, msb, w, a, b)
+    if by_sel:
+        rows = {r['path']: r for r in _act.signal_activity(fst, list(by_sel), s, e)}
+        for sp, (p, msb, w, a, b) in by_sel.items():
+            row = rows.get(sp, {})
+            if 'error' in row:
+                check('bitsel_activity', False, 'activity answers a select', f'path={sp}')
+                continue
+            cut = (lambda v, a=a, b=b, msb=msb, w=w: _oracle_slice(v, msb, w, a, b))
+            base = [(r['time_units'], r['value'])
+                    for r in fst.values_between(p, s, e, 1_000_000) or []]
+            cur = cut((fst.value_at(p, s) or {}).get('value'))
+            first_v = cur
+            toggles, first_t, last_t = 0, None, None
+            for t, v in base:
+                sv = cut(v)
+                if sv != cur:
+                    toggles += 1
+                    first_t = t if first_t is None else first_t
+                    last_t = t
+                cur = sv
+            ok = (row.get('toggles') == toggles
+                  and row.get('value_first') == (first_v or '')
+                  and row.get('value_last') == (cur or '')
+                  and row.get('first_change') == (_tu.format_fst_time(first_t, exp)
+                                                   if first_t is not None else None)
+                  and row.get('last_change') == (_tu.format_fst_time(last_t, exp)
+                                                  if last_t is not None else None))
+            check('bitsel_activity', ok, 'select activity counts only its bits',
+                  f'path={sp} got={row.get("toggles")} want={toggles}')
+
+    # sample_at_clock: a select column equals the vector column cut down
+    clock = next((p for p in sorted(fst.signals)
+                  if p.rsplit('.', 1)[-1] in ('clk_i', 'clk', 'clock')
+                  and fst.signals[p].length == 1
+                  and len(_clk.clock_edges(fst, p, s, e, max_values=50)) > 2), None)
+    if clock and picked:
+        cols = []
+        for p, msb, lsb, w in picked[:40]:
+            text, a, b = selects(msb, lsb, w)[2]
+            cols.append((p, p + text, (lambda v, a=a, b=b, msb=msb, w=w:
+                                       _oracle_slice(v, msb, w, a, b))))
+        table = _clk.sample_table(fst, [c[0] for c in cols] + [c[1] for c in cols],
+                                  clock, s, e, 'rising', 100000)
+        check('bitsel_sample_at_clock', 'unknown_paths' not in table,
+              'select columns are known', f'unknown={table.get("unknown_paths")}')
+        for cyc in table.get('cycles', []):
+            vals = cyc['values']
+            for p, sp, cut in cols:
+                check('bitsel_sample_at_clock', vals.get(sp) == cut(vals.get(p)),
+                      'select sample equals the vector sample cut down',
+                      f'path={sp} t={cyc["time"]} got={vals.get(sp)} want={cut(vals.get(p))}')
+
+    # find_time_windows: windows of a 1-bit select against the oracle
+    for sp, p, cut in _sample(one_bit, 60):
+        base = [(r['time_units'], r['value'])
+                for r in fst.values_between(p, s, e, 1_000_000) or []]
+        cur = cut((fst.value_at(p, s) or {}).get('value'))
+        windows, open_at = [], (s if cur == '1' else None)
+        for t, v in base:
+            if t <= s:
+                continue
+            nv = cut(v)
+            if nv == cur:
+                continue
+            if cur == '1' and open_at is not None and t > open_at:
+                windows.append((open_at, t))
+            open_at = t if nv == '1' else None
+            cur = nv
+        if cur == '1' and open_at is not None and e > open_at:
+            windows.append((open_at, e))
+        res = _pred.find_time_windows(fst, {"k": "sig", "name": sp}, s, e)
+        got = [(w_['start'], w_['end']) for w_ in res.get('windows', [])]
+        want = [(_tu.format_fst_time(a, exp), _tu.format_fst_time(b, exp))
+                for a, b in windows]
+        check('bitsel_find_time_windows',
+              res.get('total_hits') == len(want) and got == want[:len(got)],
+              'select windows match the bit timeline',
+              f'path={sp} got={got[:3]} want={want[:3]} n={res.get("total_hits")}/{len(want)}')
+
+    # fsm_transitions on a select
+    for p, msb, lsb, w in picked[:50]:
+        text, a, b = selects(msb, lsb, w)[4]
+        sp = p + text
+        cut = (lambda v, a=a, b=b, msb=msb, w=w: _oracle_slice(v, msb, w, a, b))
+        prev = cut((fst.value_at(p, s) or {}).get('value'))
+        trans = {}
+        for t, v in fst._iter_values(fst.signals[p], s, e, 1_000_000):
+            nv = cut(v)
+            if nv == prev:
+                continue
+            if prev is not None:
+                k = (prev, nv)
+                trans.setdefault(k, [0, t])[0] += 1
+            prev = nv
+        res = _fsm.fsm_transitions(fst, None, sp, s, e)
+        got = {(x['from'], x['to']): [x['count'], x['first_time_units']]
+               for x in res.get('transitions', [])}
+        check('bitsel_fsm', res.get('status') == 'ok' and got == trans,
+              'select transitions match the bit timeline',
+              f'path={sp} got={len(got)} want={len(trans)}')
+
+    # diff: a waveform against itself agrees on every select
+    if all_sel:
+        some = _sample(all_sel, 300)
+        res = _diff.diff_waveforms([fst_path, fst_path], signals=some)
+        cmp_ = res.get('compared', {})
+        check('bitsel_diff', cmp_.get('signals') == len(some)
+              and cmp_.get('identical') == len(some)
+              and res.get('first_divergence') is None,
+              'selects compare and agree with themselves', f'compared={cmp_}')
+
+    # netlist: a select answers exactly what its vector answers
+    if not rtl.has_netlist:
+        return
+    nl_vec = []
+    for inst, mod in rtl.engine.instance_tree.items():
+        m = rtl.engine.modules.get(mod, {})
+        for tab in ('ports', 'signals'):
+            for name, info in (m.get(tab) or {}).items():
+                if (info or {}).get('width', 1) > 1:
+                    nl_vec.append(f'{inst}.{name}')
+    nl_vec = _sample(sorted(set(nl_vec)), SELECT_SAMPLE)
+
+    def strip(res):
+        # the select names itself in signal / select_*; free-text hints and
+        # an unresolvable path's reason quote the name as given
+        drop = {'signal', 'select_of', 'select_note', 'hint'}
+        if res.get('available') is False:
+            drop.add('reason')
+        return {k: v for k, v in res.items() if k not in drop}
+
+    for base in nl_vec:
+        sp = base + '[0]'
+        for name, fn in (('drivers', rtl.drivers), ('loads', rtl.loads),
+                         ('fan_in', rtl.fan_in), ('connectivity', rtl.connectivity)):
+            a, b = fn(base), fn(sp)
+            check('bitsel_netlist', strip(a) == strip(b),
+                  f'{name} of a select equals {name} of the vector',
+                  f'sig={sp}')
+            has = any(b.get(k) for k in ('drivers', 'loads', 'fan_in', 'connected'))
+            if has:
+                check('bitsel_netlist', b.get('select_of') == base,
+                      f'{name} of a select names its vector', f'sig={sp} got={b.get("select_of")}')
+        a, b = rtl.active_drivers(base, mid_time), rtl.active_drivers(sp, mid_time)
+        check('bitsel_netlist', strip(a) == strip(b),
+              'active_drivers of a select equals the vector', f'sig={sp}')
+    for base in _sample(nl_vec, 50):
+        sp = base + '[0]'
+        ta = rtl.trace_value(base, mid_time, max_depth=4).get('tree') or {}
+        tb = rtl.trace_value(sp, mid_time, max_depth=4).get('tree') or {}
+        check('bitsel_trace', ta.get('driver') == tb.get('driver')
+              and ta.get('boundary') == tb.get('boundary'),
+              'trace of a select starts at the vector driver', f'sig={sp}')
+        d = decl.get(base)
+        if d and base in fst.signals and min(d[0], d[1]) == 0:
+            want = _oracle_slice(ta.get('value'), d[0], d[2], 0, 0)
+            check('bitsel_trace', tb.get('value') == want,
+                  'trace root value is the selected bit', f'sig={sp} got={tb.get("value")} want={want}')
 
 
 def verify_project(project_name, fst_path, maps_path, output_path):
@@ -757,6 +1091,12 @@ def verify_project(project_name, fst_path, maps_path, output_path):
                     pass
 
     # ══════════════════════════════════════════════════════════════════════
+    # Bit / part selects (GitHub #4): every tool, against an oracle
+    # ══════════════════════════════════════════════════════════════════════
+    print(f"  Bit/part selects across tools (sampled)...")
+    verify_bit_selects(fst, rtl, fst_path, init, check, mid_time)
+
+    # ══════════════════════════════════════════════════════════════════════
     # Assemble report
     # ══════════════════════════════════════════════════════════════════════
     total_time = time.time() - t0
@@ -844,6 +1184,19 @@ def main():
         json.dump(agg_rpt, f, indent=2, default=str)
     print(f"\n  Reports saved to: {output_dir}/")
 
+    # The select checks gate the run: they compare against an oracle and have
+    # no known environmental failures, so any miss is a real regression.
+    sel_fail = sum(r['checks'] - r['passed'] for t, r in agg.items()
+                   if t.startswith('bitsel_'))
+    sel_checks = sum(r['checks'] for t, r in agg.items() if t.startswith('bitsel_'))
+    if all_reports and sel_checks == 0:
+        print("  FAIL: bit-select checks did not run")
+        return 1
+    if sel_fail:
+        print(f"  FAIL: {sel_fail} bit-select check(s) failed")
+        return 1
+    return 0
+
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

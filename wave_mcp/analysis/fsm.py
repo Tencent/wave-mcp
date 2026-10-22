@@ -85,14 +85,16 @@ def fsm_transitions(fst, rtl, path: str, start: int, end: int,
     (when a netlist is available) one entry per assigning branch saying whether
     its guard ever held at a transition instant.
     """
-    sig = fst.signals.get(path)
-    if sig is None:
+    b = fst.backing(path)
+    if b is None:
         return {"status": "error", "error_type": "signal_not_found",
                 "error": f"signal not found: {path}", "parameter": "path",
                 "hint": "use list_signals for exact full paths"}
+    sig, sel = b
 
     exp = fst.timescale_exp
-    rows = sorted(fst._iter_values(sig, start, end, _MAX_CHANGES))
+    rows = fst.cut(sorted(fst._iter_values(sig, start, end, _MAX_CHANGES)),
+                   sig, sel)
     held = fst.value_at(path, start)
     prev = (held or {}).get("value")
 
@@ -131,6 +133,12 @@ def fsm_transitions(fst, rtl, path: str, start: int, end: int,
                  "exercised by this stimulus, or a real gap, and one waveform "
                  "cannot distinguish those."),
     }
+
+    if sel is not None:
+        out["select_of"] = sig.full_path
+        out["select_note"] = (
+            "states are the selected bits only; the branches below assign "
+            "the whole vector, because the netlist records drivers per signal")
 
     branches = _branches(fst, rtl, path, change_times)
     if branches is not None:

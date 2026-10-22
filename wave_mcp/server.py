@@ -2103,7 +2103,7 @@ def sample_at_clock(paths: Union[str, List[str], None] = None,
         return {"status": "error", "error_type": "invalid_argument",
                 "error": "clock is required", "parameter": "clock",
                 "hint": "pass the clock's full path, e.g. clock='top.clk'"}
-    if clock not in s.fst.signals:
+    if not s.fst.has_signal(clock):
         return {"status": "error", "error_type": "invalid_argument",
                 "error": f"clock signal not in the waveform: {clock}",
                 "parameter": "clock",

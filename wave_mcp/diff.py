@@ -80,7 +80,8 @@ def _common_signals(srcs: Sequence[FstSource],
         wanted = list(first.signals.keys())
     comparable, missing = [], []
     for path in wanted:
-        if all(path in s.signals for s in srcs):
+        # explicit lists may name bit/part selects ("cnt[3]")
+        if all(s.has_signal(path) for s in srcs):
             comparable.append(path)
         else:
             missing.append(path)
@@ -208,7 +209,7 @@ def diff_waveforms(fst_paths: List[str],
         edges: Optional[List[int]] = None
         if clock:
             absent = [paths[i] for i, s in enumerate(srcs)
-                      if clock not in s.signals]
+                      if not s.has_signal(clock)]
             if absent:
                 return {"status": "error", "error_type": "invalid_argument",
                         "error": f"clock signal not in every waveform: {clock}",
@@ -224,16 +225,12 @@ def diff_waveforms(fst_paths: List[str],
         # than one per signal per run.
         for start in range(0, len(comparable), _DIFF_BATCH):
             batch = comparable[start:start + _DIFF_BATCH]
-            per_run = []
-            for src in srcs:
-                per_run.append(src._iter_values_multi(
-                    [src.signals[p] for p in batch], after_units,
-                    src.end_time, _MAX_VALUES_PER_SIGNAL))
+            per_run = [src.timelines(batch, after_units, src.end_time,
+                                     _MAX_VALUES_PER_SIGNAL)
+                       for src in srcs]
             for path in batch:
-                rows_per_run = [
-                    data.get(src.signals[path].handle, [])
-                    for src, data in zip(srcs, per_run)]
-                if any(len(r) >= _MAX_VALUES_PER_SIGNAL for r in rows_per_run):
+                rows_per_run = [rows[path] for rows, _t in per_run]
+                if any(trunc[path] for _r, trunc in per_run):
                     truncated = True
 
                 if edges is not None:

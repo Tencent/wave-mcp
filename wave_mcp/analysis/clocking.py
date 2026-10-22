@@ -43,11 +43,14 @@ def clock_edges(src, clock: str, start_units: int, end_units: Optional[int] = No
     not an edge here, because the point of edge sampling is to ask what the
     logic captured, and an unknown clock captured nothing definite.
     """
-    sig = src.signals.get(clock)
-    if sig is None:
+    b = src.backing(clock)
+    if b is None:
         return []
+    sig, sel = b
     stop = src.end_time if end_units is None else end_units
-    pairs = src._iter_values(sig, start_units, stop, max_values)
+    # a clock may be one bit of a vector ("clk_bus[0]")
+    pairs = src.cut(src._iter_values(sig, start_units, stop, max_values),
+                    sig, sel)
     want_rise = edge in ("rising", "both")
     want_fall = edge in ("falling", "both")
     edges: List[int] = []
@@ -99,17 +102,15 @@ def sample_table(fst, paths: Sequence[str], clock: str,
     from . import sampling
 
     edges = clock_edges(fst, clock, start_units, end_units, edge)
-    known = [p for p in paths if p in fst.signals]
-    unknown = [p for p in paths if p not in fst.signals]
+    known = [p for p in paths if fst.has_signal(p)]
+    unknown = [p for p in paths if not fst.has_signal(p)]
 
     cols: dict = {}
     if edges and known:
-        data = fst._iter_values_multi(
-            [fst.signals[p] for p in known], fst.start_time, end_units,
-            _DEFAULT_MAX_VALUES)
+        data, _trunc = fst.timelines(known, fst.start_time, end_units,
+                                     _DEFAULT_MAX_VALUES)
         for p in known:
-            rows = sorted(data.get(fst.signals[p].handle, []))
-            cols[p] = sample_at(rows, edges)
+            cols[p] = sample_at(data[p], edges)
 
     cycles = []
     for i, t in enumerate(edges):

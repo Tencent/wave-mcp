@@ -26,8 +26,19 @@ from .. import timeutil
 
 # Some writers (e.g. vcd2fst) embed the vector range in the variable name, like
 # "count [7:0]". Strip a trailing bit-range (with colon) to get the canonical
-# leaf name; keep single-index "[n]" array elements intact.
-_RANGE_SUFFIX = re.compile(r"^(.*?)\s*\[\d+:\d+\]\s*$")
+# leaf name; keep single-index "[n]" array elements intact. The range itself is
+# kept on the Signal (msb/lsb) so bit selects can be mapped onto the value.
+_RANGE_SUFFIX = re.compile(r"^(.*?)\s*\[(\d+):(\d+)\]\s*$")
+
+# A select on a vector as a caller writes it: "cnt[3]", "cnt[7:4]",
+# "cnt[4+:2]", "cnt[5-:2]". Only the last bracket is the select, so
+# "mem[2][3]" is bit 3 of the element "mem[2]".
+_SELECT_SUFFIX = re.compile(
+    r"^(.*?\S)\s*\[\s*(\d+)\s*(?:(:|\+:|-:)\s*(\d+)\s*)?\]$")
+
+# Variable types whose value is not a bit vector, so a select means nothing.
+_NON_VECTOR_TYPES = {"real", "real_parameter", "realtime", "shortreal",
+                     "string", "event"}
 
 # A single unpacked-array element / split bit, e.g. "bus [31]" or "arr[0]".
 # FST/VCD writers emit each element as its own VAR; we aggregate these back into
@@ -70,7 +81,19 @@ class Signal:
     handle: int
     var_type: str       # e.g. wire / reg / logic
     direction: str      # input / output / inout / implicit
+    msb: Optional[int] = None   # declared range from the VAR name, if any
+    lsb: Optional[int] = None
 
+    def declared_range(self) -> Tuple[int, int]:
+        """``(msb, lsb)`` as declared, else ``(length - 1, 0)``.
+
+        A range that disagrees with the bit width (a writer quirk) is not
+        trusted, because mapping indices through it would pick wrong bits.
+        """
+        if (self.msb is not None and self.lsb is not None
+                and abs(self.msb - self.lsb) + 1 == self.length):
+            return self.msb, self.lsb
+        return max(self.length - 1, 0), 0
     @property
     def category(self) -> str:
         if self.var_type in _PARAM_TYPES:
@@ -140,6 +163,7 @@ class FstSource:
         self.signals: Dict[str, Signal] = {}
         self._by_handle: Dict[int, Signal] = {}
         self._modules: Dict[str, List[str]] = {}  # module name -> instance paths
+        self._elem_idx: Optional[Dict[str, List[Tuple[int, Signal]]]] = None
         self._parse_hierarchy()
 
     # -- lifecycle ----------------------------------------------------------
@@ -190,6 +214,8 @@ class FstSource:
                     name=name, full_path=full, scope=cur,
                     length=int(h.u.var.length), handle=int(h.u.var.handle),
                     var_type=vtype, direction=vdir,
+                    msb=int(m.group(2)) if m else None,
+                    lsb=int(m.group(3)) if m else None,
                 )
                 self.signals[full] = sig
                 self._by_handle.setdefault(sig.handle, sig)
@@ -545,6 +571,14 @@ class FstSource:
     def signal_info(self, full_path: str) -> Optional[dict]:
         sig = self.signals.get(full_path)
         if not sig:
+            sel = self._select(full_path)
+            if sel is not None:
+                base, start, stop = sel
+                d = base.to_dict()
+                d.update({"name": full_path.rsplit(".", 1)[-1],
+                          "full_path": full_path, "width": stop - start,
+                          "select_of": base.full_path})
+                return d
             # aggregated bus name (e.g. "...bus[15:0]"): resolve to the base
             # signal and report its aggregated width from element signals.
             elems = self._element_signals(full_path)
@@ -591,9 +625,171 @@ class FstSource:
             return None
         return f"{int(binval, 2):x}"
 
+    # -- bit / part selects ---------------------------------------------------
+    def _select(self, full_path: str) -> Optional[Tuple["Signal", int, int]]:
+        """Resolve ``vec[i]`` / ``vec[m:l]`` / ``vec[a+:w]`` / ``vec[a-:w]``.
+
+        Returns ``(base_signal, start, stop)``: the character slice of the
+        base value string (MSB first) holding the selected bits, or None when
+        ``full_path`` is not a select on a vector the waveform carries, or the
+        indices fall outside the declared range. Indices follow the declared
+        range from the VAR name (``cnt [8:1]``), so ``cnt[1]`` is its LSB.
+        A path the waveform carries verbatim (an array element ``mem[3]``) is
+        never treated as a select.
+        """
+        if not full_path.endswith("]") or full_path in self.signals:
+            return None
+        m = _SELECT_SUFFIX.match(full_path)
+        if not m:
+            return None
+        base = self.signals.get(m.group(1))
+        if base is None or base.var_type in _NON_VECTOR_TYPES:
+            return None
+        a, op = int(m.group(2)), m.group(3)
+        if op is None:
+            idx = (a, a)
+        elif op == ":":
+            idx = (a, int(m.group(4)))
+        else:
+            w = int(m.group(4))
+            if w < 1:
+                return None
+            idx = (a, a + w - 1) if op == "+:" else (a, a - w + 1)
+        msb, lsb = base.declared_range()
+        lo, hi = min(msb, lsb), max(msb, lsb)
+        if any(i < lo or i > hi for i in idx):
+            return None
+        pos = sorted(abs(msb - i) for i in idx)
+        return base, pos[0], pos[1] + 1
+
+    def has_signal(self, full_path: str) -> bool:
+        """True for a signal the waveform carries or a select on one.
+
+        Cheap (no scan over all signals), unlike value_at's aggregated-bus
+        fallback, so per-node callers such as the trace walk can use it.
+        """
+        return full_path in self.signals or self._select(full_path) is not None
+
+    def backing(self, full_path: str
+                ) -> Optional[Tuple["Signal", Optional[Tuple[int, int]]]]:
+        """``(signal, select)`` holding ``full_path``'s value, else None.
+
+        ``select`` is None for a signal the waveform carries verbatim, or the
+        ``(start, stop)`` slice of that signal's value for a bit/part select.
+        Analysis tools read timelines through this, so every tool accepts the
+        same path spellings as ``signal_values``.
+        """
+        sig = self.signals.get(full_path)
+        if sig is not None:
+            return sig, None
+        sel = self._select(full_path)
+        if sel is None:
+            return None
+        return sel[0], (sel[1], sel[2])
+
+    def cut(self, rows: List[Tuple[int, str]], sig: "Signal",
+            select: Optional[Tuple[int, int]],
+            prev: Optional[str] = None) -> List[Tuple[int, str]]:
+        """Reduce a base signal's change list to a select's bits.
+
+        Rows whose selected bits did not change are dropped. Without ``prev``
+        the first row is always kept, so callers may use it to seed the value
+        at the window start; with ``prev`` (the selected value just before the
+        window) every row kept is a real change of those bits.
+        """
+        if select is None:
+            return rows
+        out: List[Tuple[int, str]] = []
+        last = prev
+        for t, v in rows:
+            s = self._slice(v, sig.length, select[0], select[1])
+            if (out or prev is not None) and s == last:
+                continue
+            out.append((t, s))
+            last = s
+        return out
+
+    def timelines(self, paths: List[str], start: int, end: int,
+                  max_values: int, seed: bool = False
+                  ) -> Tuple[Dict[str, List[Tuple[int, str]]], Dict[str, bool]]:
+        """Change lists for several paths in ONE file pass.
+
+        Paths may be signals or selects on them; several selects of one vector
+        share its single read. Returns ``(rows, truncated)`` keyed by path,
+        rows ascending in time. Paths the waveform cannot resolve are absent
+        from both, so callers report them however suits the tool.
+        ``truncated`` is judged on the base signal's raw change count, so a
+        select whose own changes are few still says the read was cut short.
+
+        ``seed=True`` reads each selected vector's value just before ``start``
+        (once per vector), so a select's rows are only real changes of its
+        bits, matching ``values_between``. It costs one point read per vector,
+        which is why callers that seed from ``value_at(start)`` leave it off.
+        """
+        plan = {p: self.backing(p) for p in dict.fromkeys(paths)}
+        uniq: Dict[int, "Signal"] = {}
+        for b in plan.values():
+            if b is not None:
+                uniq.setdefault(b[0].handle, b[0])
+        multi = (self._iter_values_multi(list(uniq.values()), start, end,
+                                         max_values) if uniq else {})
+        before: Dict[int, str] = {}
+        rows: Dict[str, List[Tuple[int, str]]] = {}
+        truncated: Dict[str, bool] = {}
+        for p, b in plan.items():
+            if b is None:
+                continue
+            sig, sel = b
+            raw = sorted(multi.get(sig.handle, []), key=lambda r: r[0])
+            prev = None
+            if seed and sel is not None and start > self.start_time:
+                if sig.handle not in before:
+                    row = self.value_at(sig.full_path, start - 1)
+                    before[sig.handle] = (row or {}).get("value", "")
+                prev = self._slice(before[sig.handle], sig.length,
+                                   sel[0], sel[1])
+            rows[p] = self.cut(raw, sig, sel, prev)
+            truncated[p] = len(raw) >= max_values
+        return rows, truncated
+
+    @staticmethod
+    def _slice(value: str, width: int, start: int, stop: int) -> str:
+        """Selected bits of a base value; a short value is extended first.
+
+        fstapi returns full-width strings, but extend a short one the Verilog
+        way (X/Z replicate, otherwise zero fill) rather than mis-slice it.
+        """
+        if not value:
+            return ""
+        if len(value) < width:
+            fill = value[0] if value[0] in "xXzZ" else "0"
+            value = fill * (width - len(value)) + value
+        return value[start:stop]
+
+    def _value_at_select(self, full_path: str,
+                         time_units: int) -> Optional[dict]:
+        sel = self._select(full_path)
+        if sel is None:
+            return None
+        base, start, stop = sel
+        row = self.value_at(base.full_path, time_units)
+        val = self._slice((row or {}).get("value", ""), base.length,
+                          start, stop)
+        return {
+            "time": timeutil.format_fst_time(time_units, self.timescale_exp),
+            "time_units": time_units,
+            "value": val,
+            "hex": self._to_hex(val),
+            "select_of": base.full_path,
+        }
+
     def value_at(self, full_path: str, time_units: int) -> Optional[dict]:
         sig = self.signals.get(full_path)
         if sig is None:
+            # bit / part select on a vector ("...cnt[3]", "...cnt[7:4]")
+            sel = self._value_at_select(full_path, time_units)
+            if sel is not None:
+                return sel
             # aggregated bus name (e.g. "...bus[15:0]") or unpacked-array root
             # ("...bus") returned by signals_of_instance: reconstruct by
             # concatenating the per-element values (MSB index first).
@@ -615,22 +811,41 @@ class FstSource:
 
         Accepts either ``scope.base[hi:lo]`` (aggregated form) or ``scope.base``
         (array root); returns the element signals sorted MSB-index-first, or []
-        if the path does not correspond to a split array.
+        if the path does not correspond to a split array. With a range, only
+        the elements inside it are returned, so ``bus[3:0]`` is four bits of a
+        16-bit split bus rather than all of it.
         """
         base = full_path
+        lo, hi = None, None
         m = _RANGE_SUFFIX.match(full_path)  # strip trailing [hi:lo] if present
         if m:
             base = m.group(1)
-        elems: List[Tuple[int, "Signal"]] = []
-        for fp, s in self.signals.items():
-            mm = _ELEM_INDEX.match(fp)
-            if not mm:
-                continue
-            eb = mm.group(1)
-            if eb == base:
-                elems.append((int(mm.group(2)), s))
-        elems.sort(key=lambda e: e[0], reverse=True)  # MSB first
-        return [s for _, s in elems]
+            lo, hi = sorted((int(m.group(2)), int(m.group(3))))
+        elems = self._element_index().get(base)
+        if not elems:
+            return []
+        return [s for i, s in elems if lo is None or lo <= i <= hi]
+
+    def _element_index(self) -> Dict[str, List[Tuple[int, "Signal"]]]:
+        """``base path -> [(index, Signal)]`` (MSB first) of split buses.
+
+        Built on first use and kept: ``signals`` does not change after the
+        hierarchy is parsed. Scanning every signal name per lookup made each
+        miss cost a full pass, 1.6 s per name on a 600k-signal design, and a
+        miss is what every unknown or mistyped path hits.
+        """
+        idx = self._elem_idx
+        if idx is None:
+            idx = {}
+            for fp, s in self.signals.items():
+                mm = _ELEM_INDEX.match(fp)
+                if mm:
+                    idx.setdefault(mm.group(1), []).append(
+                        (int(mm.group(2)), s))
+            for lst in idx.values():
+                lst.sort(key=lambda e: e[0], reverse=True)
+            self._elem_idx = idx
+        return idx
 
     def _value_at_aggregated(self, full_path: str,
                              time_units: int) -> Optional[dict]:
@@ -706,15 +921,32 @@ class FstSource:
         return out
 
     def _iter_values(self, sig: Signal, start: int, end: int,
-                     max_values: int) -> List[Tuple[int, str]]:
+                     max_values: int,
+                     select: Optional[Tuple[int, int]] = None,
+                     prev: Optional[str] = None) -> List[Tuple[int, str]]:
+        """Value changes of ``sig`` in ``[start, end]``.
+
+        With ``select=(start, stop)`` each value is cut to those bits and a
+        change of the base that leaves them untouched is dropped; ``prev`` is
+        the selected value just before ``start``, so the first row is a real
+        change too.
+        """
         collected: List[Tuple[int, str]] = []
+        last = [prev]
 
         def cb(_data, time, facidx, value):
             t = int(time)
             if t < start or t > end:
                 return  # precise filter (SetLimitTimeRange is only block-coarse)
-            if len(collected) < max_values:
-                collected.append((t, self._decode(value)))
+            if len(collected) >= max_values:
+                return
+            v = self._decode(value)
+            if select is not None:
+                v = self._slice(v, sig.length, select[0], select[1])
+                if v == last[0]:
+                    return
+                last[0] = v
+            collected.append((t, v))
 
         with self._lock:
             lib.fstReaderClrFacProcessMaskAll(self._ctx)
@@ -767,6 +999,10 @@ class FstSource:
                        max_values: int = 5000) -> Optional[List[dict]]:
         sig = self.signals.get(full_path)
         if not sig:
+            sel = self._select(full_path)
+            if sel is not None:
+                return self._values_between_select(sel, start_units,
+                                                   end_units, max_values)
             # aggregated bus name (e.g. "...bus[15:0]"): iterate all element
             # signals and merge their value timelines (MSB-first concatenation
             # at each timestamp). This mirrors value_at's aggregation approach.
@@ -779,6 +1015,29 @@ class FstSource:
                 "time_units": t,
                 "value": v,
                 "hex": self._to_hex(v),
+            }
+            for t, v in rows
+        ]
+
+    def _values_between_select(self, sel: Tuple["Signal", int, int],
+                               start_units: int, end_units: int,
+                               max_values: int) -> List[dict]:
+        """Changes of the selected bits only, in ``[start_units, end_units]``."""
+        base, start, stop = sel
+        prev = None
+        if start_units > self.start_time:
+            row = self.value_at(base.full_path, start_units - 1)
+            prev = self._slice((row or {}).get("value", ""), base.length,
+                               start, stop)
+        rows = self._iter_values(base, start_units, end_units, max_values,
+                                 select=(start, stop), prev=prev)
+        return [
+            {
+                "time": timeutil.format_fst_time(t, self.timescale_exp),
+                "time_units": t,
+                "value": v,
+                "hex": self._to_hex(v),
+                "select_of": base.full_path,
             }
             for t, v in rows
         ]

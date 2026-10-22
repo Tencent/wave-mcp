@@ -113,22 +113,23 @@ def signal_activity(fst, paths, start: int, end: int) -> List[Dict[str, Any]]:
     if isinstance(paths, str):
         paths = [paths]
 
-    # (path, backing Signals or None, aggregated?)
+    # (path, backing Signals or None, aggregated?, bit select or None)
     plan: List[Any] = []
     for p in paths:
-        sig = fst.signals.get(p)
-        if sig is not None:
-            plan.append((p, [sig], False))
+        b = fst.backing(p)
+        if b is not None:
+            # a signal, or a bit/part select on one ("cnt[3]")
+            plan.append((p, [b[0]], False, b[1]))
             continue
         elems = fst._element_signals(p)
         if elems:
             # an aggregated bus / unpacked-array root as listed by list_signals
-            plan.append((p, elems, True))
+            plan.append((p, elems, True, None))
             continue
-        plan.append((p, None, False))
+        plan.append((p, None, False, None))
 
     uniq: Dict[int, Any] = {}
-    for _p, sigs, _agg in plan:
+    for _p, sigs, _agg, _sel in plan:
         for s in (sigs or []):
             uniq.setdefault(s.handle, s)
     multi = (fst._iter_values_multi(list(uniq.values()), start, end,
@@ -136,7 +137,7 @@ def signal_activity(fst, paths, start: int, end: int) -> List[Dict[str, Any]]:
 
     exp = fst.timescale_exp
     rows: List[Dict[str, Any]] = []
-    for p, sigs, is_agg in plan:
+    for p, sigs, is_agg, sel in plan:
         if sigs is None:
             rows.append({
                 "path": p,
@@ -158,7 +159,7 @@ def signal_activity(fst, paths, start: int, end: int) -> List[Dict[str, Any]]:
         else:
             v = fst.value_at(p, start)
             init = (v or {}).get("value", "")
-            timeline = buckets[0]
+            timeline = fst.cut(buckets[0], sigs[0], sel)
         row: Dict[str, Any] = {"path": p}
         row.update(_stats(init, timeline, start, end, exp, truncated))
         rows.append(row)

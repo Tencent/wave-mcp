@@ -60,7 +60,7 @@ def find_time_windows(fst, predicate: Dict[str, Any], start: int, end: int,
                 "error": "predicate references no signals",
                 "hint": 'a signal leaf looks like {"k":"sig","name":"<full path>"}'}
 
-    missing = [n for n in names if n not in fst.signals]
+    missing = [n for n in names if fst.backing(n) is None]
     if missing:
         return {"status": "error", "error_type": "signal_not_found",
                 "error": "predicate references signals not in the waveform: "
@@ -68,10 +68,7 @@ def find_time_windows(fst, predicate: Dict[str, Any], start: int, end: int,
                 "missing": missing,
                 "hint": "use list_signals for exact full paths"}
 
-    multi = fst._iter_values_multi([fst.signals[n] for n in names],
-                                   start, end, _MAX_CHANGES)
-    timelines = {n: sorted(multi.get(fst.signals[n].handle, []))
-                 for n in names}
+    timelines, _trunc = fst.timelines(names, start, end, _MAX_CHANGES)
     exp = fst.timescale_exp
 
     cur: Dict[str, Optional[str]] = {}

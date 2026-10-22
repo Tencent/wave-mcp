@@ -19,6 +19,21 @@ from .. import timeutil
 from . import expr_eval
 
 
+def strip_selects(name: str) -> str:
+    """``cnt[3]`` / ``cnt[7:4]`` / ``mem[2][3]`` -> ``cnt`` / ``cnt`` / ``mem``.
+
+    The netlist records drivers, loads and fan-in per signal (and per struct
+    field), never per bit: slang_netlist drops the select from every l-value.
+    A select therefore resolves to its base signal on the netlist side.
+    """
+    base = name
+    while base.endswith("]"):
+        i = base.rfind("[")
+        if i <= 0:
+            break
+        base = base[:i].rstrip()
+    return base or name
+
 class _TraceWalk:
     """One trace_value / trace_x walk: shared state for the recursive builder.
 
@@ -38,7 +53,7 @@ class _TraceWalk:
     def _value_at(self, full_path: str):
         fst = self.engine.fst
         return fst.value_at(full_path, self.units) \
-            if full_path in fst.signals else None
+            if fst.has_signal(full_path) else None
 
     def _conflict(self, entry: dict, inst: str, recs: List[dict],
                   actives: List[int], depth: int) -> None:
@@ -109,6 +124,9 @@ class _TraceWalk:
         if mod is None:
             entry["boundary"] = "unresolved-module"
             return entry
+        select_note = engine.select_note(full_path, _leaf)
+        if select_note:
+            entry.update(select_note)
         if not recs:
             entry["boundary"] = "primary-input/port/constant"
             if self.x_only and engine._is_x(val):
@@ -308,8 +326,10 @@ class TraceEngine:
         inst, leaf = self.split(full_path)
         mod = self.resolve_module(inst)
         if mod and mod in self.modules:
+            m = self.modules[mod]
+            leaf = self._netlist_leaf(m, leaf)
             return (mod, inst, leaf,
-                    self._lookup_drivers(self.modules[mod]["drivers"], leaf))
+                    self._lookup_drivers(m["drivers"], leaf))
         # walk back to deepest instance prefix that resolves to a module
         parts = full_path.split(".")
         orig_leaf = parts[-1]
@@ -321,14 +341,54 @@ class TraceEngine:
                 # generate-scope recovery: if the original trailing token is a
                 # real port/signal in the resolved parent module, use it as the
                 # leaf instead of the joined field-level name.
-                if orig_leaf in m.get("ports", {}) or orig_leaf in m.get("signals", {}):
-                    return (cand_mod, cand_inst, orig_leaf,
-                            self._lookup_drivers(m["drivers"], orig_leaf))
+                gen_leaf = self._netlist_leaf(m, orig_leaf)
+                if gen_leaf in m.get("ports", {}) or gen_leaf in m.get("signals", {}):
+                    return (cand_mod, cand_inst, gen_leaf,
+                            self._lookup_drivers(m["drivers"], gen_leaf))
                 # field-level path (struct/bit-select): use joined leaf
-                cand_leaf = ".".join(parts[cut:])
+                cand_leaf = self._netlist_leaf(m, ".".join(parts[cut:]))
                 return (cand_mod, cand_inst, cand_leaf,
                         self._lookup_drivers(m["drivers"], cand_leaf))
         return None, inst, leaf, []
+
+    @staticmethod
+    def _netlist_leaf(m: dict, leaf: str) -> str:
+        """``leaf`` as the netlist keys it: a bit/part select maps to its base.
+
+        A name the module knows verbatim is kept, so only selects the netlist
+        cannot represent are stripped.
+        """
+        if not leaf.endswith("]"):
+            return leaf     # not a select: nothing to strip, skip the lookups
+        drivers = m.get("drivers", {})
+        if (leaf in drivers or leaf in m.get("ports", {})
+                or leaf in m.get("signals", {})):
+            return leaf
+        # an arrayed instance ("u_x[0]") is a scope, not a select
+        if any(ins.get("name") == leaf for ins in m.get("instances", []) or []):
+            return leaf
+        return strip_selects(leaf)
+
+    def select_note(self, full_path: str, leaf: str) -> Optional[dict]:
+        """Annotation for a bit/part-select path resolved to its base signal.
+
+        Drivers, loads and fan-in come from the whole vector, because the
+        netlist does not model them per bit; saying so keeps a caller from
+        reading a vector driver as one that drives only the selected bits.
+        """
+        if not full_path.endswith("]"):
+            return None
+        tail = full_path.rsplit(".", 1)[-1]
+        leaf_tail = (leaf or "").rsplit(".", 1)[-1]
+        if not leaf_tail or tail == leaf_tail or strip_selects(tail) != leaf_tail:
+            return None
+        base = full_path[:len(full_path) - len(tail)] + leaf_tail
+        return {"select_of": base,
+                "select_note": (f"'{tail}' is a select on '{base}'. The "
+                                "netlist records connectivity per signal, not "
+                                "per bit, so drivers, loads and fan-in shown "
+                                "are those of the whole vector; check which "
+                                "of them touch the selected bits.")}
 
     @staticmethod
     def _lookup_drivers(drivers: Dict[str, List[dict]], leaf: str) -> List[dict]:
@@ -379,6 +439,7 @@ class TraceEngine:
                     "elaborate.")
 
         m = self.modules[mod]
+        leaf = self._netlist_leaf(m, leaf)
         port_info = m.get("ports", {}).get(leaf)
         sig_info = m.get("signals", {}).get(leaf)
 
@@ -458,7 +519,7 @@ class TraceEngine:
 
     def _value(self, inst: str, relname: str, units: int) -> Optional[dict]:
         full = f"{inst}.{relname}" if inst else relname
-        if full not in self.fst.signals:
+        if not self.fst.has_signal(full):
             return None
         return self.fst.value_at(full, units)
 
@@ -506,6 +567,7 @@ class TraceEngine:
             annotated[i]["guard_active"] = self._guard_holds(r.get("guard", []), vf)
         return {"available": True, "signal": signal_full_path, "time": time,
                 "module": mod, "active_drivers": annotated,
+                **(self.select_note(signal_full_path, leaf) or {}),
                 "likely_active_index": likely, "selection_method": method,
                 "note": {"single": "single static driver",
                          "guard": "selected by branch-condition evaluation (precise)",
@@ -517,7 +579,7 @@ class TraceEngine:
     def _value_fn(self, inst: str, units: int):
         def vf(name: str) -> Optional[str]:
             full = f"{inst}.{name}" if inst else name
-            if full not in self.fst.signals:
+            if not self.fst.has_signal(full):
                 return None
             v = self.fst.value_at(full, units)
             return v.get("value") if v else None
@@ -562,7 +624,7 @@ class TraceEngine:
 
     def _last_change(self, inst: str, sig: str, units: int) -> int:
         full = f"{inst}.{sig}" if inst else sig
-        if full not in self.fst.signals:
+        if not self.fst.has_signal(full):
             return -1
         # Scan a bounded recent window instead of [start_time, units]: the
         # full-range scan made every trace node walk the whole file once per
@@ -646,7 +708,7 @@ class TraceEngine:
     def trace_x(self, signal_path: str, time_point: str,
                 max_depth: int = 12) -> dict:
         val = self.fst.value_at(signal_path, self._units(time_point)) \
-            if signal_path in self.fst.signals else None
+            if self.fst.has_signal(signal_path) else None
         if not self._is_x(val):
             return {"available": True, "signal": signal_path, "time": time_point,
                     "result": "no-x", "value": (val or {}).get("value"),

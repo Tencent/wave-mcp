@@ -13,14 +13,17 @@ from .. import timeutil
 from . import sampling
 
 
-def _rows_from(fst, handlemap, sig, start: int, end: int) -> List[dict]:
-    """Format one signal's collected changes, mirroring values_between()."""
+def _rows_from(fst, changes, select_of: Optional[str] = None) -> List[dict]:
+    """Format one path's collected changes, mirroring values_between()."""
     out = []
-    for t, v in sorted(handlemap.get(sig.handle, [])):
-        out.append({"time": timeutil.format_fst_time(t, fst.timescale_exp),
-                    "time_units": t,
-                    "value": v,
-                    "hex": fst._to_hex(v)})
+    for t, v in changes:
+        row = {"time": timeutil.format_fst_time(t, fst.timescale_exp),
+               "time_units": t,
+               "value": v,
+               "hex": fst._to_hex(v)}
+        if select_of:
+            row["select_of"] = select_of
+        out.append(row)
     return out
 
 
@@ -39,22 +42,18 @@ def read_values(fst, paths: List[str], start: int, end: int,
     n = sampling.resolve_limit(limit)
     scan = min(sampling.MAX_SCAN, max(n * 50, 100_000))
 
-    plain: List[Any] = []
-    plan: List[Any] = []
-    for p in paths:
-        sig = fst.signals.get(p)
-        if sig is not None:
-            plan.append((p, sig))
-            plain.append(sig)
-        else:
-            plan.append((p, None))
-
-    multi = fst._iter_values_multi(plain, start, end, scan) if plain else {}
+    # signals and bit/part selects on them ("cnt[3]") share one file pass;
+    # selects are seeded from just before the window, so their rows are real
+    # changes of the selected bits, as values_between reports them
+    direct = [p for p in paths if fst.backing(p) is not None]
+    batch, _trunc = (fst.timelines(direct, start, end, scan, seed=True)
+                     if direct else ({}, {}))
 
     out: List[Dict[str, Any]] = []
-    for p, sig in plan:
-        if sig is not None:
-            rows = _rows_from(fst, multi, sig, start, end)
+    for p in paths:
+        if p in batch:
+            sig, sel = fst.backing(p)
+            rows = _rows_from(fst, batch[p], sig.full_path if sel else None)
         else:
             # aggregated bus / array root: the engine merges its elements
             rows = fst.values_between(p, start, end, scan)
