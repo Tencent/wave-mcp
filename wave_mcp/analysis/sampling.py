@@ -12,7 +12,7 @@ in the world, so the behaviour is reported rather than implied.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 #: Fallback target when the caller does not pass one. Large enough for a real
 #: timeline, small enough to survive an LLM context window.
@@ -34,6 +34,17 @@ def resolve_limit(limit: Optional[int]) -> int:
     return max(1, n)
 
 
+def sample_indices(total: int, limit: int) -> Sequence[int]:
+    """Ordinals kept by uniform downsampling, without building all rows."""
+    if total <= limit:
+        return range(total)
+    if limit == 1:
+        return [0]
+    step = (total - 1) / (limit - 1)
+    return sorted({min(int(round(i * step)), total - 1)
+                   for i in range(limit)})
+
+
 def downsample(rows: List[Any], limit: int) -> Dict[str, Any]:
     """Reduce ``rows`` to at most ``limit`` entries, evenly spread.
 
@@ -53,30 +64,27 @@ def downsample(rows: List[Any], limit: int) -> Dict[str, Any]:
     resume point that overlaps the first kept interval, not a pagination cursor
     pointing past the returned rows.
     """
-    total = len(rows)
-    if total <= limit:
+    if len(rows) <= limit:
+        return {"values": rows, "count": len(rows)}
+    kept = [rows[i] for i in sample_indices(len(rows), limit)]
+    return sampled_result(kept, len(rows))
+
+
+def sampled_result(rows: List[Any], total: int) -> Dict[str, Any]:
+    """Attach the same bookkeeping to rows selected during a streaming scan."""
+    if total == len(rows):
         return {"values": rows, "count": total}
-
-    if limit == 1:
-        kept = [rows[0]]
-    else:
-        # even stride across the interior, endpoints pinned
-        step = (total - 1) / (limit - 1)
-        idx = sorted({int(round(i * step)) for i in range(limit)})
-        idx = [min(i, total - 1) for i in idx]
-        kept = [rows[i] for i in sorted(set(idx))]
-
     out = {
-        "values": kept,
-        "count": len(kept),
+        "values": rows,
+        "count": len(rows),
         "sampled": True,
-        "sample_rate": round(len(kept) / total, 6),
+        "sample_rate": round(len(rows) / total, 6),
         "total_available": total,
-        "note": (f"{total} changes matched; evenly downsampled to {len(kept)}. "
+        "note": (f"{total} changes matched; evenly downsampled to {len(rows)}. "
                  "Pass resume_from back as start to walk the skipped detail, "
                  "or narrow start/end for the full-resolution timeline."),
     }
-    nxt = _resume_from(kept)
+    nxt = _resume_from(rows)
     if nxt is not None:
         out["resume_from"] = nxt
     return out
