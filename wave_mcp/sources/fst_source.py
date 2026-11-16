@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import re
 
@@ -920,6 +920,54 @@ class FstSource:
                 break
         return out
 
+    def _scan_values(self, signals: Sequence[Signal], start: int, end: int,
+                     consume: Callable) -> None:
+        """Consume every change in ``[start, end]`` without retaining a list.
+
+        ``consume(time, handle, raw_value)`` runs under the reader lock; the
+        FFI value is valid only during that call. It must not reenter the
+        reader. Collectors can skip decoding values past their own row limit.
+
+        CFFI otherwise prints and swallows callback exceptions. Save the first
+        one, stop consuming, and re-raise after native iteration and cleanup.
+        fstapi cannot abort a running iteration, so this is not a CPU timeout.
+        """
+        if start > end or not signals:
+            return
+        error: Optional[BaseException] = None
+
+        def cb(_data, time, facidx, value, *_length):
+            nonlocal error
+            if error is not None:
+                return
+            try:
+                t = int(time)
+                # SetLimitTimeRange is block-coarse; enforce exact bounds.
+                if start <= t <= end:
+                    consume(t, int(facidx), value)
+            except BaseException as exc:
+                error = exc
+
+        with self._lock:
+            if self._ctx == ffi.NULL:
+                raise RuntimeError("FST reader is closed")
+            try:
+                lib.fstReaderClrFacProcessMaskAll(self._ctx)
+                for sig in signals:
+                    lib.fstReaderSetFacProcessMask(self._ctx, sig.handle)
+                lib.fstReaderSetLimitTimeRange(self._ctx, start, end)
+                ok = pylibfst.fstReaderIterBlocks2(
+                    self._ctx, cb, cb, None, ffi.NULL)
+                if error is not None:
+                    raise error
+                if not ok or lib.fstReaderGetFseekFailed(self._ctx):
+                    raise OSError(f"FST scan failed: {self.path}")
+            finally:
+                # The reader's neutral state, also on callback/native failure.
+                lib.fstReaderSetLimitTimeRange(
+                    self._ctx, self.start_time, self.end_time)
+                lib.fstReaderClrFacProcessMaskAll(self._ctx)
+
     def _iter_values(self, sig: Signal, start: int, end: int,
                      max_values: int,
                      select: Optional[Tuple[int, int]] = None,
@@ -934,10 +982,7 @@ class FstSource:
         collected: List[Tuple[int, str]] = []
         last = [prev]
 
-        def cb(_data, time, facidx, value):
-            t = int(time)
-            if t < start or t > end:
-                return  # precise filter (SetLimitTimeRange is only block-coarse)
+        def collect(t, _handle, value):
             if len(collected) >= max_values:
                 return
             v = self._decode(value)
@@ -948,14 +993,7 @@ class FstSource:
                 last[0] = v
             collected.append((t, v))
 
-        with self._lock:
-            lib.fstReaderClrFacProcessMaskAll(self._ctx)
-            lib.fstReaderSetFacProcessMask(self._ctx, sig.handle)
-            lib.fstReaderSetLimitTimeRange(self._ctx, start, end)
-            pylibfst.fstReaderIterBlocks2(self._ctx, cb, cb, None, ffi.NULL)
-            # reset time range to full for subsequent queries
-            lib.fstReaderSetLimitTimeRange(self._ctx, self.start_time, self.end_time)
-            lib.fstReaderClrFacProcessMaskAll(self._ctx)
+        self._scan_values([sig], start, end, collect)
         return collected
 
     def _iter_values_multi(self, signals: List[Signal], start: int, end: int,
@@ -976,23 +1014,12 @@ class FstSource:
         collected: Dict[int, List[Tuple[int, str]]] = {s.handle: []
                                                        for s in signals}
 
-        def cb(_data, time, facidx, value):
-            t = int(time)
-            if t < start or t > end:
-                return  # precise filter (SetLimitTimeRange is only block-coarse)
-            bucket = collected.get(int(facidx))
+        def collect(t, handle, value):
+            bucket = collected.get(handle)
             if bucket is not None and len(bucket) < max_values:
                 bucket.append((t, self._decode(value)))
 
-        with self._lock:
-            lib.fstReaderClrFacProcessMaskAll(self._ctx)
-            for s in signals:
-                lib.fstReaderSetFacProcessMask(self._ctx, s.handle)
-            lib.fstReaderSetLimitTimeRange(self._ctx, start, end)
-            pylibfst.fstReaderIterBlocks2(self._ctx, cb, cb, None, ffi.NULL)
-            # reset time range to full for subsequent queries
-            lib.fstReaderSetLimitTimeRange(self._ctx, self.start_time, self.end_time)
-            lib.fstReaderClrFacProcessMaskAll(self._ctx)
+        self._scan_values(signals, start, end, collect)
         return collected
 
     def values_between(self, full_path: str, start_units: int, end_units: int,

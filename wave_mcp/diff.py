@@ -26,6 +26,7 @@ Pure data tool: no viewer assets required.
 """
 from __future__ import annotations
 
+from bisect import bisect_right
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from .sources.fst_source import FstSource
@@ -215,8 +216,7 @@ def diff_waveforms(fst_paths: List[str],
                         "error": f"clock signal not in every waveform: {clock}",
                         "parameter": "clock",
                         "missing_in": absent}
-            edges = clock_edges(srcs[0], clock, after_units,
-                                max_values=_MAX_VALUES_PER_SIGNAL)
+            edges = clock_edges(srcs[0], clock, after_units)
 
         divergers: List[Dict[str, Any]] = []
         truncated = False
@@ -234,9 +234,15 @@ def diff_waveforms(fst_paths: List[str],
                     truncated = True
 
                 if edges is not None:
-                    sampled = [sample_at(rows, edges) for rows in rows_per_run]
+                    # A complete clock can extend beyond a budgeted data read.
+                    # Never extrapolate a truncated signal's last value there.
+                    safe_end = min((rows[path][-1][0] for rows, trunc in per_run
+                                    if trunc[path]), default=None)
+                    times = (edges[:bisect_right(edges, safe_end)]
+                             if safe_end is not None else edges)
+                    sampled = [sample_at(rows, times) for rows in rows_per_run]
                     hit = None
-                    for i, t in enumerate(edges):
+                    for i, t in enumerate(times):
                         groups = _groups_of([s[i] for s in sampled])
                         if groups:
                             hit = (t, groups)
