@@ -855,8 +855,12 @@ class FstSource:
         parts: List[str] = []
         with self._lock:
             for s in elems:
+                # Keep the buffer alive across the native call: a temp
+                # cffi object passed inline is freed on return from the
+                # wrapper, before ffi.string() reads it.
+                buf = ffi.new("char[]", s.length + 64)
                 res = lib.fstReaderGetValueFromHandleAtTime(
-                    self._ctx, time_units, s.handle, ffi.new("char[]", s.length + 64))
+                    self._ctx, time_units, s.handle, buf)
                 parts.append(self._decode(res) if res != ffi.NULL else "")
         val = "".join(parts)
         return {
